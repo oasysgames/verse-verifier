@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package message;
+
+option go_package = "./pb";
+
+message PubSub {
+  oneof body {
+    bytes misc = 1;
+    OptimismSignatureExchange optimism_signature_exchange = 2;
+  }
+}
+
+message Stream {
+  oneof body {
+    bytes misc = 1;
+    bytes eom = 2;
+    OptimismSignatureExchange optimism_signature_exchange = 3;
+  }
+}
+
+message OptimismSignature {
+  string id = 1;
+  string previous_id = 2;
+  bytes signer = 3;
+  bytes scc = 4;
+  uint64 batch_index = 5;
+  bytes batch_root = 6;
+  uint64 batch_size = 7;
+  uint64 prev_total_elements = 8;
+  bytes extra_data = 9;
+  bool approved = 10;
+  bytes signature = 11;
+}
+
+message OptimismSignatureExchange {
+  repeated OptimismSignature latests = 1;
+  repeated Request requests = 2;
+  repeated OptimismSignature responses = 3;
+
+  message Request {
+    bytes signer = 1;
+    string id_after = 2;
+  }
+}

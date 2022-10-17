@@ -1,9 +1,20 @@
 package main
 
 import (
-	"fmt"
+	"os"
+
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/oasysgames/oasys-optimism-verifier/cmd"
 )
 
 func main() {
-	fmt.Println("Hello world!")
+	setupLogger()
+	cmd.Execute()
+}
+
+func setupLogger() {
+	logHandler := log.StreamHandler(os.Stdout, log.TerminalFormat(true))
+	logHandler = log.LvlFilterHandler(log.LvlInfo, logHandler)
+	logHandler = log.CallerFileHandler(logHandler)
+	log.Root().SetHandler(logHandler)
 }

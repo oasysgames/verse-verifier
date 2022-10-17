@@ -3,3 +3,4 @@
 .go-version
 .env*
 /tmp
+node_modules/
