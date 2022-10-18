@@ -1,0 +1,21 @@
+Description=Verifier of Verse-Layer for the Oasys Blockchain..
+After=network.target
+
+[Service]
+User=geth
+Type=simple
+
+Environment=BIN=/usr/local/bin/oasvlfy
+Environment=CONFIG=$HOME_DIR/.oasvlfy/config.yml
+
+ExecStart=${BIN} start --config ${CONFIG}
+
+KillMode=process
+KillSignal=SIGINT
+TimeoutStopSec=90
+
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
