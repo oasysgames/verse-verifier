@@ -82,7 +82,7 @@ type Config struct {
 	KeyStore string `json:"keystore" validate:"dir"`
 
 	// Address used to create signatures and send transactions.
-	Wallets map[string]string `json:"wallets" validate:"dive,hexadecimal"`
+	Wallets map[string]Wallet `json:"wallets" validate:"dive"`
 
 	// Configuration of the Hub-Layer.
 	HubLayer hubLayer `json:"hub_layer" mapstructure:"hub_layer"`
@@ -113,6 +113,14 @@ func (c *Config) P2PKeyPath() string {
 
 func (c *Config) OpenKeyStore() *keystore.KeyStore {
 	return keystore.NewKeyStore(c.KeyStore, keystore.StandardScryptN, keystore.StandardScryptP)
+}
+
+type Wallet struct {
+	// Address of the wallet.
+	Address string `json:"address" validate:"hexadecimal"`
+
+	// Password file of the wallet.
+	Password string `json:"password" validate:"omitempty,file"`
 }
 
 type hubLayer struct {

@@ -1,3 +1,4 @@
+[Unit]
 Description=Verifier of Verse-Layer for the Oasys Blockchain..
 After=network.target
 
@@ -5,10 +6,7 @@ After=network.target
 User=geth
 Type=simple
 
-Environment=BIN=/usr/local/bin/oasvlfy
-Environment=CONFIG=$HOME_DIR/.oasvlfy/config.yml
-
-ExecStart=${BIN} start --config ${CONFIG}
+ExecStart=/usr/local/bin/oasvlfy start --config /home/geth/.oasvlfy/config.yml
 
 KillMode=process
 KillSignal=SIGINT

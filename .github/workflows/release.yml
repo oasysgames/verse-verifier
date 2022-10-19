@@ -10,17 +10,9 @@ jobs:
     name: Build
     strategy:
       matrix:
-        os: [linux, darwin]
+        os: [linux]
         arch: [amd64, arm64]
-        include:
-          - os: linux
-            runson: ubuntu-latest
-          - os: darwin
-            runson: macos-latest
-        exclude:
-          - os: darwin
-            arch: arm64
-    runs-on: ${{ matrix.runson }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
@@ -35,7 +27,8 @@ jobs:
         if: matrix.arch == 'amd64'
         run: |
           go get -v -t -d ./...
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -o oasvlfy 
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=1 \
+            go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"'
 
       - name: Build Binary - ${{ matrix.os }} ${{ matrix.arch }}
         if: matrix.arch == 'arm64'
@@ -44,10 +37,9 @@ jobs:
           docker run --rm -t \
             -v ${{ github.workspace }}:${{ github.workspace }} \
             -w ${{ github.workspace }} \
-            -e GOOS=${{ matrix.os }} \
-            -e GOARCH=${{ matrix.arch }} \
-            -e CGO_ENABLED=0 \
-            arm64v8/golang:1.18-buster go build -o oasvlfy 
+            -e GOOS=${{ matrix.os }} -e GOARCH=${{ matrix.arch }} -e CGO_ENABLED=1 \
+            arm64v8/golang:1.18-buster \
+              go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"'
 
       - name: Compress Binary
         run: zip oasvlfy-${{ matrix.os }}-${{ matrix.arch }}.zip ./oasvlfy
@@ -103,16 +95,6 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: artifacts/oasvlfy-linux-arm64.zip
           asset_name: oasvlfy-${{ github.ref_name }}-linux-arm64.zip
-          asset_content_type: application/zip
-
-      - name: Upload Asset - macos
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/oasvlfy-darwin-amd64.zip
-          asset_name: oasvlfy-${{ github.ref_name }}-macos.zip
           asset_content_type: application/zip
 
       - name: Upload Asset - sha256sums.txt

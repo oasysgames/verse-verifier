@@ -209,30 +209,38 @@ func waitForUnlockWallets(ctx context.Context, c *config.Config, ks *wallet.KeyS
 	wg := &sync.WaitGroup{}
 	wg.Add(len(c.Wallets))
 
-	for name, address := range c.Wallets {
-		go func(name, address string) {
+	for name, wallet := range c.Wallets {
+		go func(name string, wallet config.Wallet) {
 			defer wg.Done()
 
-			wallet, account, err := ks.FindWallet(common.HexToAddress(address))
+			_wallet, account, err := ks.FindWallet(common.HexToAddress(wallet.Address))
 			if err != nil {
 				log.Crit("Failed to find a wallet",
-					"name", name, "address", address, "err", err)
+					"name", name, "address", wallet.Address, "err", err)
 			}
 
-			// try empty password
-			if ks.Unlock(*account, "") == nil {
-				return
+			if wallet.Password != "" {
+				b, err := ioutil.ReadFile(wallet.Password)
+				if err != nil {
+					log.Crit(
+						"Failed to read password file",
+						"name", name, "address", wallet.Address, "err", err)
+				}
+
+				if err := ks.Unlock(*account, strings.Trim(string(b), "\r\n\t ")); err != nil {
+					log.Crit("Failed to unlock wallet using password file",
+						"name", name, "address", wallet.Address, "err", err)
+				}
+			} else if ks.Unlock(*account, "") != nil {
+				log.Info("Waiting for wallet unlock", "name", name, "address", wallet.Address)
+				if err := ks.WaitForUnlock(ctx, _wallet); err != nil {
+					log.Crit("Wallet was not unlocked",
+						"name", name, "address", wallet.Address, "err", err)
+				}
 			}
 
-			log.Info("Waiting for wallet unlock", "name", name, "address", address)
-			err = ks.WaitForUnlock(ctx, wallet)
-			if err != nil {
-				log.Crit("Wallet was not unlocked",
-					"name", name, "address", address, "err", err)
-			}
-
-			log.Info("Wallet unlocked", "name", name, "address", address)
-		}(name, address)
+			log.Info("Wallet unlocked", "name", name, "address", wallet.Address)
+		}(name, wallet)
 	}
 
 	wg.Wait()
@@ -303,7 +311,7 @@ func newEventCollector(
 	return hublayer.NewEventCollector(
 		db,
 		hub,
-		common.HexToAddress(c.Wallets[c.Verifier.Wallet]),
+		common.HexToAddress(c.Wallets[c.Verifier.Wallet].Address),
 		c.Verifier.Interval,
 		c.Verifier.BlockLimit,
 	)
@@ -462,7 +470,7 @@ func findWallet(
 	ks *wallet.KeyStore,
 	name string,
 ) (accounts.Wallet, *accounts.Account) {
-	wallet, account, err := ks.FindWallet(common.HexToAddress(c.Wallets[name]))
+	wallet, account, err := ks.FindWallet(common.HexToAddress(c.Wallets[name].Address))
 	if err != nil {
 		log.Crit("Wallet not found", "name", name)
 	}

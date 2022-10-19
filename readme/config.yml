@@ -5,11 +5,14 @@ datastore: /home/geth/.oasvlfy
 keystore: /home/geth/.ethereum/keystore
 
 wallets:
-  # Wallet address used by Verifier (Usually the same address as geth)
-  signer: '0x'
+  # Wallet used by Verifier (Usually the same address as geth)
+  signer:
+    address: '0x'
+    # password: /home/geth/.ethereum/password.txt
 
-  # Wallet address used by Submitter (gas is required)
-  # submitter: '0x'
+  # Wallet used by Submitter (gas is required)
+  # submitter:
+  #   address: '0x'
 
 # Hub-Layer settings
 hub_layer:

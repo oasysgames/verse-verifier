@@ -26,7 +26,9 @@ func (s *ConfigTestSuite) TestParseConfig() {
 	keystore: /tmp
 
 	wallets:
-	  wallet1: '0xBA3186c30Bb0d9e8c7924147238F82617C3fE729'
+		wallet1:
+			address: '0xBA3186c30Bb0d9e8c7924147238F82617C3fE729'
+			password: /etc/passwd
 	
 	hub_layer:
 		chain_id: 12345
@@ -75,8 +77,11 @@ func (s *ConfigTestSuite) TestParseConfig() {
 
 	s.Equal("/tmp", got.KeyStore)
 
-	s.Equal(map[string]string{
-		"wallet1": "0xBA3186c30Bb0d9e8c7924147238F82617C3fE729",
+	s.Equal(map[string]Wallet{
+		"wallet1": {
+			Address:  "0xBA3186c30Bb0d9e8c7924147238F82617C3fE729",
+			Password: "/etc/passwd",
+		},
 	}, got.Wallets)
 
 	s.Equal(hubLayer{
@@ -148,7 +153,9 @@ func (s *ConfigTestSuite) TestValidate() {
 			  l1_contracts:
 			    test: xxx
 	wallets:
-		wallet1: xxx
+		wallet1:
+			address: xxx
+			password: passw0rd
 	verifier:
 		enable: true
 	submitter:
@@ -159,7 +166,8 @@ func (s *ConfigTestSuite) TestValidate() {
 	wants := map[string]string{
 		"Config.datastore":                                 "dir",
 		"Config.keystore":                                  "dir",
-		"Config.wallets[wallet1]":                          "hexadecimal",
+		"Config.wallets[wallet1].address":                  "hexadecimal",
+		"Config.wallets[wallet1].password":                 "file",
 		"Config.hub_layer.chain_id":                        "required",
 		"Config.hub_layer.rpc":                             "url",
 		"Config.verse_layer.discovery.endpoint":            "url",

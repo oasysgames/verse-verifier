@@ -45,7 +45,7 @@ func runUnlockCmd(cmd *cobra.Command, args []string) {
 		util.Exit(1, "Failed to read '%s' argument: %s\n", nameFlag, err)
 	}
 
-	address, ok := conf.Wallets[name]
+	wallet, ok := conf.Wallets[name]
 	if !ok {
 		util.Exit(1, "unknown wallet\n")
 	}
@@ -66,5 +66,5 @@ func runUnlockCmd(cmd *cobra.Command, args []string) {
 		password = string(input)
 	}
 
-	ipccmd.WalletUnlockCmd.Run(commandName, address, password)
+	ipccmd.WalletUnlockCmd.Run(commandName, wallet.Address, password)
 }
