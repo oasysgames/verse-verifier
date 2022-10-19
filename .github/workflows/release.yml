@@ -35,7 +35,7 @@ jobs:
         if: matrix.arch == 'amd64'
         run: |
           go get -v -t -d ./...
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o oasvlfy 
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -o oasvlfy 
 
       - name: Build Binary - ${{ matrix.os }} ${{ matrix.arch }}
         if: matrix.arch == 'arm64'
@@ -46,6 +46,7 @@ jobs:
             -w ${{ github.workspace }} \
             -e GOOS=${{ matrix.os }} \
             -e GOARCH=${{ matrix.arch }} \
+            -e CGO_ENABLED=0 \
             arm64v8/golang:1.18-buster go build -o oasvlfy 
 
       - name: Compress Binary
