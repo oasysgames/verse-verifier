@@ -42,6 +42,8 @@ func (w *VerseDiscovery) Start(ctx context.Context) {
 	for {
 		if w.work(ctx) == nil {
 			break
+		} else if ctx.Err() != nil {
+			return
 		}
 		time.Sleep(5 * time.Second)
 	}
