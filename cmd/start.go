@@ -357,8 +357,15 @@ func newSccSubmitter(
 		log.Crit("Failed to create StakeManager", "err", err)
 	}
 
-	return hublayer.NewSccSubmitter(db, sm, common.HexToAddress(VerifySccAddress),
-		c.Submitter.Interval, c.Submitter.Concurrency, c.Submitter.Confirmations)
+	return hublayer.NewSccSubmitter(
+		db,
+		sm,
+		common.HexToAddress(VerifySccAddress),
+		c.Submitter.Interval,
+		c.Submitter.Concurrency,
+		c.Submitter.Confirmations,
+		c.Submitter.GasMultiplier,
+	)
 }
 
 func startVerseDiscovery(

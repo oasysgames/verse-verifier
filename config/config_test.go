@@ -66,6 +66,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		interval: 5s
 		concurrency: 10
 		confirmations: 4
+		gas_multiplier: 1.5
 		targets:
 			- chain_id: 12345
 			  wallet: wallet1
@@ -131,6 +132,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		Concurrency:   10,
 		Interval:      5 * time.Second,
 		Confirmations: 4,
+		GasMultiplier: 1.5,
 		Targets: []struct {
 			ChainID uint64 "json:\"chain_id\"     mapstructure:\"chain_id\"     validate:\"required\""
 			Wallet  string "json:\"wallet\" validate:\"required\""
@@ -230,4 +232,5 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(15*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)
 	s.Equal(6, got.Submitter.Confirmations)
+	s.Equal(1.0, got.Submitter.GasMultiplier)
 }

@@ -24,6 +24,7 @@ var (
 		"submitter.interval":                     15 * time.Second,
 		"submitter.concurrency":                  50,
 		"submitter.confirmations":                6,
+		"submitter.gas_multiplier":               1.0,
 	}
 )
 
@@ -198,6 +199,9 @@ type submitter struct {
 
 	// Number of confirmation blocks for transaction receipt.
 	Confirmations int `json:"confirmations"`
+
+	// How much to increase the estimated gas limit.
+	GasMultiplier float64 `json:"gas_multiplier" mapstructure:"gas_multiplier"`
 
 	Targets []struct {
 		// Chain ID of the Verse-Layer.
