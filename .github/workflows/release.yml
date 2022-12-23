@@ -28,7 +28,7 @@ jobs:
         run: |
           go get -v -t -d ./...
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=1 \
-            go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"'
+            go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"' -buildvcs=false
 
       - name: Build Binary - ${{ matrix.os }} ${{ matrix.arch }}
         if: matrix.arch == 'arm64'
@@ -39,7 +39,7 @@ jobs:
             -w ${{ github.workspace }} \
             -e GOOS=${{ matrix.os }} -e GOARCH=${{ matrix.arch }} -e CGO_ENABLED=1 \
             arm64v8/golang:1.18-buster \
-              go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"'
+              go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"' -buildvcs=false
 
       - name: Compress Binary
         run: zip oasvlfy-${{ matrix.os }}-${{ matrix.arch }}.zip ./oasvlfy

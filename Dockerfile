@@ -7,7 +7,7 @@ ADD . /build
 WORKDIR /build
 
 ENV CGO_ENABLED=1
-RUN go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"'
+RUN go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"' -buildvcs=false
 
 # runner
 FROM alpine:3.17
