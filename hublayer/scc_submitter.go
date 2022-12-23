@@ -52,6 +52,7 @@ type SccSubmitter struct {
 	interval      time.Duration
 	concurrency   int
 	confirmations int
+	gasMultiplier float64
 
 	sem    *semaphore.Weighted
 	hubs   *sync.Map
@@ -66,6 +67,7 @@ func NewSccSubmitter(
 	interval time.Duration,
 	concurrency int,
 	confirmations int,
+	gasMultiplier float64,
 ) *SccSubmitter {
 	return &SccSubmitter{
 		db:            db,
@@ -74,6 +76,7 @@ func NewSccSubmitter(
 		interval:      interval,
 		concurrency:   concurrency,
 		confirmations: confirmations,
+		gasMultiplier: gasMultiplier,
 		sem:           semaphore.NewWeighted(int64(concurrency)),
 		hubs:          &sync.Map{},
 		stakes:        &sync.Map{},
@@ -98,7 +101,7 @@ func (w *SccSubmitter) Start(ctx context.Context) {
 	}()
 
 	w.log.Info("Worker started", "sccv", w.sccvAddr,
-		"interval", w.interval, "concurrency", w.concurrency)
+		"interval", w.interval, "concurrency", w.concurrency, "gas-multiplier", w.gasMultiplier)
 
 	wg.Wait()
 	w.log.Info("Worker stopped")
@@ -213,73 +216,16 @@ func (w *SccSubmitter) work(ctx context.Context, task *submitTask) {
 		return
 	}
 
-	// create tx params
-	header := sccverifier.Lib_OVMCodecChainBatchHeader{
-		BatchIndex:        new(big.Int).SetUint64(rows[0].BatchIndex),
-		BatchRoot:         rows[0].BatchRoot,
-		BatchSize:         new(big.Int).SetUint64(rows[0].BatchSize),
-		PrevTotalElements: new(big.Int).SetUint64(rows[0].PrevTotalElements),
-		ExtraData:         rows[0].ExtraData,
-	}
-
-	signatures := make([][]byte, len(rows))
-	for i, row := range rows {
-		signatures[i] = row.Signature[:]
-	}
-
 	// send transaction
-	var (
-		tx     *types.Transaction
-		method string
-	)
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	if rows[0].Approved {
-		method = "Approve"
-		tx, err = sccv.Approve(task.hub.TransactOpts(ctx), task.scc, header, signatures)
-	} else {
-		method = "Reject"
-		tx, err = sccv.Reject(task.hub.TransactOpts(ctx), task.scc, header, signatures)
-	}
-	logCtx = append(logCtx, "method", method)
+
+	tx, err := w.sendTransaction(ctx, logCtx, task, sccv, rows)
 	if err != nil {
-		log.Error("Failed to send transaction to SCCVerifier", append(logCtx, "err", err)...)
 		return
 	}
 
-	logCtx = append(logCtx, "tx", tx.Hash().String())
-	w.log.Info("Sent transaction", logCtx...)
-
-	// wait for receipt
-	receipt, err := bind.WaitMined(ctx, task.hub, tx)
-	if err != nil {
-		w.log.Error("Failed to receive receipt", append(logCtx, "err", err)...)
-		return
-	}
-	if receipt.Status != 1 {
-		w.log.Error("Transaction reverted", logCtx...)
-		return
-	}
-
-	// wait for confirmations
-	confirmed := map[common.Hash]bool{receipt.BlockHash: true}
-	for {
-		remaining := w.confirmations - len(confirmed)
-		if remaining <= 0 {
-			w.log.Info("Transaction succeeded", logCtx...)
-			return
-		}
-
-		w.log.Info("Wait for confirmation", append(logCtx, "remaining", remaining)...)
-		time.Sleep(5 * time.Second)
-
-		h, err := task.hub.HeaderByNumber(ctx, nil)
-		if err != nil {
-			w.log.Error("Failed to fetch block header", append(logCtx, "err", err)...)
-			continue
-		}
-		confirmed[h.Hash()] = true
-	}
+	w.waitForCconfirmation(ctx, append(logCtx, "tx", tx.Hash().String()), task, tx)
 }
 
 func (w *SccSubmitter) refreshStakes(ctx context.Context) {
@@ -414,6 +360,106 @@ func (w *SccSubmitter) findSignatures(
 	})
 
 	return rows, nil
+}
+
+func (w *SccSubmitter) sendTransaction(
+	ctx context.Context,
+	logCtx []interface{},
+	task *submitTask,
+	sccv *sccverifier.Sccverifier,
+	rows []*database.OptimismSignature,
+) (*types.Transaction, error) {
+	var method func(*bind.TransactOpts, common.Address, sccverifier.Lib_OVMCodecChainBatchHeader, [][]byte) (*types.Transaction, error)
+	if rows[0].Approved {
+		logCtx = append(logCtx, "method", "SCCVerifier.approve")
+		method = sccv.Approve
+	} else {
+		logCtx = append(logCtx, "method", "SCCVerifier.reject")
+		method = sccv.Reject
+	}
+
+	// create params
+	header := sccverifier.Lib_OVMCodecChainBatchHeader{
+		BatchIndex:        new(big.Int).SetUint64(rows[0].BatchIndex),
+		BatchRoot:         rows[0].BatchRoot,
+		BatchSize:         new(big.Int).SetUint64(rows[0].BatchSize),
+		PrevTotalElements: new(big.Int).SetUint64(rows[0].PrevTotalElements),
+		ExtraData:         rows[0].ExtraData,
+	}
+
+	signatures := make([][]byte, len(rows))
+	for i, row := range rows {
+		signatures[i] = row.Signature[:]
+	}
+
+	// estimate gas
+	opts := task.hub.TransactOpts(ctx)
+	opts.NoSend = true
+	tx, err := method(opts, task.scc, header, signatures)
+	if err != nil {
+		w.log.Error("Failed to estimate gas", append(logCtx, "err", err)...)
+		return nil, err
+	}
+
+	// send
+	opts = task.hub.TransactOpts(ctx)
+	opts.GasLimit = uint64(float64(tx.Gas()) * w.gasMultiplier)
+	tx, err = method(opts, task.scc, header, signatures)
+	if err != nil {
+		log.Error("Failed to send transaction", append(logCtx, "err", err)...)
+		return nil, err
+	}
+
+	w.log.Info(
+		"Sent transaction",
+		append(
+			logCtx,
+			"tx", tx.Hash().String(),
+			"nonce", tx.Nonce(),
+			"gas-limit", tx.Gas(),
+			"gas-fee", tx.GasFeeCap(),
+			"gas-tip", tx.GasTipCap(),
+		)...)
+
+	return tx, nil
+}
+
+func (w *SccSubmitter) waitForCconfirmation(
+	ctx context.Context,
+	logCtx []interface{},
+	task *submitTask,
+	tx *types.Transaction,
+) {
+	// wait for block to be validated
+	receipt, err := bind.WaitMined(ctx, task.hub, tx)
+	if err != nil {
+		w.log.Error("Failed to receive receipt", append(logCtx, "err", err)...)
+		return
+	}
+	if receipt.Status != 1 {
+		w.log.Error("Transaction reverted", logCtx...)
+		return
+	}
+
+	// wait for confirmations
+	confirmed := map[common.Hash]bool{receipt.BlockHash: true}
+	for {
+		remaining := w.confirmations - len(confirmed)
+		if remaining <= 0 {
+			w.log.Info("Transaction succeeded", logCtx...)
+			return
+		}
+
+		w.log.Info("Wait for confirmation", append(logCtx, "remaining", remaining)...)
+		time.Sleep(time.Second)
+
+		h, err := task.hub.HeaderByNumber(ctx, nil)
+		if err != nil {
+			w.log.Error("Failed to fetch block header", append(logCtx, "err", err)...)
+			continue
+		}
+		confirmed[h.Hash()] = true
+	}
 }
 
 func fromWei(wei *big.Int) *big.Int {

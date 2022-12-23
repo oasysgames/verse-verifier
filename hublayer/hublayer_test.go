@@ -53,7 +53,7 @@ func (s *SccTestSuite) SetupTest() {
 	hubSigner := s.hub.Signer()
 	s.stateCollector = NewEventCollector(s.db, s.hub, hubSigner, time.Millisecond, 1000)
 
-	s.sccSubmitter = NewSccSubmitter(s.db, s.sm, s.sccvAddr, 0, 0, 0)
+	s.sccSubmitter = NewSccSubmitter(s.db, s.sm, s.sccvAddr, 0, 0, 0, 1.0)
 	s.sccSubmitter.AddVerse(s.sccAddr, s.hub)
 }
 

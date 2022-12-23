@@ -13,7 +13,7 @@ const (
 	commandName  = "oasvlfy"
 	versionMajor = 0
 	versionMinor = 0
-	versionPatch = 1
+	versionPatch = 2
 
 	configFlag = "config"
 )
