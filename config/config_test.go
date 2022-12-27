@@ -232,5 +232,5 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(15*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)
 	s.Equal(6, got.Submitter.Confirmations)
-	s.Equal(1.0, got.Submitter.GasMultiplier)
+	s.Equal(1.1, got.Submitter.GasMultiplier)
 }

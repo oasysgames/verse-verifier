@@ -24,7 +24,7 @@ var (
 		"submitter.interval":                     15 * time.Second,
 		"submitter.concurrency":                  50,
 		"submitter.confirmations":                6,
-		"submitter.gas_multiplier":               1.0,
+		"submitter.gas_multiplier":               1.1,
 	}
 )
 
