@@ -194,18 +194,20 @@ func (w *SccVerifier) workLoop(
 }
 
 func (w *SccVerifier) AddVerse(scc common.Address, verse ethutil.ReadOnlyClient) {
-	if _, ok := w.verses.Load(scc); !ok {
-		w.verses.Store(scc, verse)
-	}
+	w.verses.Store(scc, verse)
 }
 
 func (w *SccVerifier) RemoveVerse(scc common.Address) {
 	w.verses.Delete(scc)
 }
 
-func (w *SccVerifier) HasVerse(scc common.Address) bool {
-	_, ok := w.verses.Load(scc)
-	return ok
+func (w *SccVerifier) HasVerse(scc common.Address, verse ethutil.ReadOnlyClient) bool {
+	if value, ok := w.verses.Load(scc); !ok {
+		return false
+	} else {
+		t, _ := value.(ethutil.ReadOnlyClient)
+		return t.URL() == verse.URL()
+	}
 }
 
 func (s *SccVerifier) SubscribeNewSignature(ctx context.Context) *SignatureSubscription {
@@ -271,7 +273,7 @@ func (w *SccVerifier) verify(
 		headers []*types.Header
 		err     error
 	)
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(state.BatchSize)*(time.Second/2))
 	defer cancel()
 
 	headers, err = verse.GetHeaderBatch(ctx, int(start), int(state.BatchSize))
