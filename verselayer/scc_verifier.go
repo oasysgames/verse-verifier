@@ -54,12 +54,6 @@ type verifyTask struct {
 	verse ethutil.ReadOnlyClient
 }
 
-type sigsaveTask struct {
-	state    *database.OptimismState
-	approved bool
-	sig      database.Signature
-}
-
 // Worker to verify the events of OasysStateCommitmentChain.
 type SccVerifier struct {
 	db          *database.Database
@@ -92,64 +86,9 @@ func NewSccVerifier(
 
 // Start verifier.
 func (w *SccVerifier) Start(ctx context.Context) {
-	wg := &sync.WaitGroup{}
-
-	sigsaver := w.newSigsaver(ctx)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sigsaver.Start(ctx)
-	}()
-
-	queue := make(chan *verifyTask)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.workLoop(ctx, sigsaver, queue)
-	}()
-
 	w.log.Info("Worker started", "signer", w.signer.Signer(),
 		"interval", w.interval, "concurrency", w.concurrency)
 
-	wg.Wait()
-	w.log.Info("Worker stopped")
-}
-
-func (w *SccVerifier) newSigsaver(ctx context.Context) *util.JobQueueWorker {
-	return util.NewQueueWorker(ctx, func(ctx context.Context, data interface{}) {
-		task, ok := data.(*sigsaveTask)
-		if !ok {
-			return
-		}
-
-		logCtx := []interface{}{
-			"scc", task.state.OptimismScc.Address.Hex(),
-			"index", task.state.BatchIndex,
-			"approved", task.approved,
-		}
-
-		time.Sleep(time.Millisecond)
-		row, err := w.db.Optimism.SaveSignature(
-			nil, nil,
-			w.signer.Signer(), task.state.OptimismScc.Address,
-			task.state.BatchIndex, task.state.BatchRoot, task.state.BatchSize,
-			task.state.PrevTotalElements, task.state.ExtraData,
-			task.approved, task.sig)
-		if err != nil {
-			w.log.Error("Failed to save signature", append(logCtx, "err", err)...)
-			return
-		}
-
-		w.topic.Publish(row)
-		w.log.Info("State verification completed", logCtx...)
-	})
-}
-
-func (w *SccVerifier) workLoop(
-	ctx context.Context,
-	sigsaver *util.JobQueueWorker,
-	queue chan<- *verifyTask,
-) {
 	wg := util.NewWorkerGroup(w.concurrency)
 	running := &sync.Map{}
 
@@ -159,6 +98,7 @@ func (w *SccVerifier) workLoop(
 	for {
 		select {
 		case <-ctx.Done():
+			w.log.Info("Worker stopped")
 			return
 		case <-tick.C:
 			w.verses.Range(func(key, value interface{}) bool {
@@ -180,7 +120,7 @@ func (w *SccVerifier) workLoop(
 						defer running.Delete(rname)
 
 						if task, ok := data.(*verifyTask); ok {
-							w.work(ctx, task, sigsaver)
+							w.work(ctx, task)
 						}
 					}
 					wg.AddWorker(ctx, name, handler)
@@ -220,7 +160,7 @@ func (s *SccVerifier) SubscribeNewSignature(ctx context.Context) *SignatureSubsc
 	return &SignatureSubscription{Cancel: cancel, ch: ch}
 }
 
-func (w *SccVerifier) work(ctx context.Context, task *verifyTask, sigsaver *util.JobQueueWorker) {
+func (w *SccVerifier) work(ctx context.Context, task *verifyTask) {
 	logCtx := []interface{}{"scc", task.scc.Hex()}
 	scc, err := scc.NewScc(task.scc, w.signer)
 	if err != nil {
@@ -248,12 +188,27 @@ func (w *SccVerifier) work(ctx context.Context, task *verifyTask, sigsaver *util
 	}
 
 	for _, state := range states {
-		w.log.Info("Start state verification", logCtx...)
+		logCtx := append(logCtx, "index", state.BatchIndex)
 
+		w.log.Info("Start state verification", logCtx...)
 		approved, sig, err := w.verify(ctx, task.verse, state)
-		if err == nil {
-			sigsaver.Enqueue(&sigsaveTask{state: state, approved: approved, sig: sig})
+		if err != nil {
+			return
 		}
+
+		row, err := w.db.Optimism.SaveSignature(
+			nil, nil,
+			w.signer.Signer(), state.OptimismScc.Address,
+			state.BatchIndex, state.BatchRoot, state.BatchSize,
+			state.PrevTotalElements, state.ExtraData,
+			approved, sig)
+		if err != nil {
+			w.log.Error("Failed to save signature", append(logCtx, "err", err)...)
+			return
+		}
+
+		w.topic.Publish(row)
+		w.log.Info("State verification completed", append(logCtx, "approved", approved)...)
 	}
 }
 
@@ -276,7 +231,16 @@ func (w *SccVerifier) verify(
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(state.BatchSize)*(time.Second/2))
 	defer cancel()
 
+	st := time.Now()
 	headers, err = verse.GetHeaderBatch(ctx, int(start), int(state.BatchSize))
+	w.log.Info(
+		"Collected block headers",
+		append(
+			logCtx,
+			"start", start, "end", start+state.BatchSize-1,
+			"elapsed", time.Since(st))...,
+	)
+
 	if err != nil {
 		w.log.Error("Failed to collect block headers from verse-layer",
 			append(logCtx, "start", start, "size", state.BatchSize, "err", err)...)
