@@ -271,7 +271,7 @@ func (w *SccVerifier) verify(
 		headers []*types.Header
 		err     error
 	)
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(state.BatchSize)*(time.Second/2))
 	defer cancel()
 
 	headers, err = verse.GetHeaderBatch(ctx, int(start), int(state.BatchSize))
