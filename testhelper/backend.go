@@ -100,7 +100,7 @@ func (s *TestBackend) Mining() *types.Header {
 
 func (s *TestBackend) GetHeaderBatch(
 	ctx context.Context,
-	start, size int,
+	start, size, limit int,
 ) ([]*types.Header, error) {
 	headers := make([]*types.Header, size)
 	for i := 0; i < size; i++ {

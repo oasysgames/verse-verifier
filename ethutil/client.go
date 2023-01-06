@@ -11,6 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/lmittmann/w3"
+	"github.com/lmittmann/w3/module/eth"
+	"github.com/lmittmann/w3/w3types"
 )
 
 type SignDataFn = func(data []byte) (sig []byte, err error)
@@ -24,7 +27,7 @@ type ReadOnlyClient interface {
 		ctx context.Context,
 		hash common.Hash,
 	) (tx *types.Transaction, isPending bool, err error)
-	GetHeaderBatch(ctx context.Context, start, size int) ([]*types.Header, error)
+	GetHeaderBatch(ctx context.Context, start, size, limit int) ([]*types.Header, error)
 }
 
 type WritableClient interface {
@@ -70,16 +73,29 @@ func (c *readOnlyClient) TransactionByHash(
 
 func (c *readOnlyClient) GetHeaderBatch(
 	ctx context.Context,
-	start, size int,
+	start, size, limit int,
 ) ([]*types.Header, error) {
+	client, err := w3.Dial(c.url)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
 	headers := make([]*types.Header, size)
+	calls := make([]w3types.Caller, size)
 	for i := 0; i < size; i++ {
-		h, err := c.HeaderByNumber(ctx, big.NewInt(int64(start+i)))
-		if err != nil {
+		headers[i] = &types.Header{}
+		calls[i] = eth.HeaderByNumber(big.NewInt(int64(start + i))).Returns(headers[i])
+	}
+
+	for i := 0; i < size; i += limit {
+		end := i + limit
+		if size < end {
+			end = size
+		}
+		if err = client.CallCtx(ctx, calls[i:end]...); err != nil {
 			return nil, err
 		}
-
-		headers[i] = h
 	}
 
 	return headers, nil

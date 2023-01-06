@@ -56,10 +56,10 @@ type verifyTask struct {
 
 // Worker to verify the events of OasysStateCommitmentChain.
 type SccVerifier struct {
-	db          *database.Database
-	signer      ethutil.WritableClient
-	interval    time.Duration
-	concurrency int
+	db                 *database.Database
+	signer             ethutil.WritableClient
+	interval           time.Duration
+	limit, concurrency int
 
 	verses *sync.Map
 	topic  *util.Topic
@@ -71,12 +71,13 @@ func NewSccVerifier(
 	db *database.Database,
 	signer ethutil.WritableClient,
 	interval time.Duration,
-	concurrency int,
+	limit, concurrency int,
 ) *SccVerifier {
 	return &SccVerifier{
 		db:          db,
 		signer:      signer,
 		interval:    interval,
+		limit:       limit,
 		concurrency: concurrency,
 		verses:      &sync.Map{},
 		topic:       util.NewTopic(),
@@ -87,7 +88,7 @@ func NewSccVerifier(
 // Start verifier.
 func (w *SccVerifier) Start(ctx context.Context) {
 	w.log.Info("Worker started", "signer", w.signer.Signer(),
-		"interval", w.interval, "concurrency", w.concurrency)
+		"interval", w.interval, "stateroot-limit", w.limit, "concurrency", w.concurrency)
 
 	wg := util.NewWorkerGroup(w.concurrency)
 	running := &sync.Map{}
@@ -232,7 +233,7 @@ func (w *SccVerifier) verify(
 	defer cancel()
 
 	st := time.Now()
-	headers, err = verse.GetHeaderBatch(ctx, int(start), int(state.BatchSize))
+	headers, err = verse.GetHeaderBatch(ctx, int(start), int(state.BatchSize), w.limit)
 	w.log.Info(
 		"Collected block headers",
 		append(

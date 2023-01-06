@@ -50,7 +50,7 @@ func (s *SccVerifierTestSuite) SetupTest() {
 	s.hub.Mining()
 
 	// setup verifier
-	s.verifier = NewSccVerifier(s.db, s.hub, 50*time.Millisecond, 10)
+	s.verifier = NewSccVerifier(s.db, s.hub, 50*time.Millisecond, 10, 10)
 	s.verifier.AddVerse(s.sccAddr, s.verse)
 }
 

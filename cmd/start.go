@@ -313,7 +313,7 @@ func newEventCollector(
 		hub,
 		common.HexToAddress(c.Wallets[c.Verifier.Wallet].Address),
 		c.Verifier.Interval,
-		c.Verifier.BlockLimit,
+		c.Verifier.EventFilterLimit,
 	)
 }
 
@@ -338,7 +338,13 @@ func newSccVerifier(
 		log.Crit("Failed to create hub-layer clinet", "err", err)
 	}
 
-	return verselayer.NewSccVerifier(db, signer, c.Verifier.Interval, c.Verifier.Concurrency)
+	return verselayer.NewSccVerifier(
+		db,
+		signer,
+		c.Verifier.Interval,
+		c.Verifier.StateRootLimit,
+		c.Verifier.Concurrency,
+	)
 }
 
 func newSccSubmitter(
