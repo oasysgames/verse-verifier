@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
@@ -56,10 +57,9 @@ type verifyTask struct {
 
 // Worker to verify the events of OasysStateCommitmentChain.
 type SccVerifier struct {
-	db                 *database.Database
-	signer             ethutil.WritableClient
-	interval           time.Duration
-	limit, concurrency int
+	cfg    *config.Verifier
+	db     *database.Database
+	signer ethutil.WritableClient
 
 	verses *sync.Map
 	topic  *util.Topic
@@ -68,32 +68,34 @@ type SccVerifier struct {
 
 // Returns the new verifier.
 func NewSccVerifier(
+	cfg *config.Verifier,
 	db *database.Database,
 	signer ethutil.WritableClient,
-	interval time.Duration,
-	limit, concurrency int,
 ) *SccVerifier {
 	return &SccVerifier{
-		db:          db,
-		signer:      signer,
-		interval:    interval,
-		limit:       limit,
-		concurrency: concurrency,
-		verses:      &sync.Map{},
-		topic:       util.NewTopic(),
-		log:         log.New("worker", "scc-verifier"),
+		cfg:    cfg,
+		db:     db,
+		signer: signer,
+		verses: &sync.Map{},
+		topic:  util.NewTopic(),
+		log:    log.New("worker", "scc-verifier"),
 	}
 }
 
 // Start verifier.
 func (w *SccVerifier) Start(ctx context.Context) {
-	w.log.Info("Worker started", "signer", w.signer.Signer(),
-		"interval", w.interval, "stateroot-limit", w.limit, "concurrency", w.concurrency)
+	w.log.Info(
+		"Worker started",
+		"signer", w.signer.Signer(),
+		"interval", w.cfg.Interval,
+		"stateroot-limit", w.cfg.StateCollectLimit,
+		"concurrency", w.cfg.Concurrency,
+	)
 
-	wg := util.NewWorkerGroup(w.concurrency)
+	wg := util.NewWorkerGroup(w.cfg.Concurrency)
 	running := &sync.Map{}
 
-	tick := time.NewTicker(w.interval)
+	tick := time.NewTicker(w.cfg.Interval)
 	defer tick.Stop()
 
 	for {
@@ -230,8 +232,6 @@ func (w *SccVerifier) verify(
 		headers []*types.Header
 		err     error
 	)
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(state.BatchSize)*(time.Second/2))
-	defer cancel()
 
 	bc, err := verse.NewBatchHeaderClient()
 	if err != nil {
@@ -239,14 +239,17 @@ func (w *SccVerifier) verify(
 		return false, database.Signature{}, err
 	}
 
-	bi := ethutil.NewBatchHeaderIterator(bc, start, end, w.limit)
+	bi := ethutil.NewBatchHeaderIterator(bc, start, end, w.cfg.StateCollectLimit)
 	defer bi.Close()
+
+	ctx, cancel := context.WithTimeout(ctx, w.cfg.StateCollectTimeout)
+	defer cancel()
 
 	st := time.Now()
 	for {
 		hs, err := bi.Next(ctx)
 		if err != nil {
-			w.log.Error("Failed to collect block headers from verse-layer",
+			w.log.Error("Failed to collect state roots",
 				append(logCtx, "start", start, "size", state.BatchSize, "err", err)...)
 			return false, database.Signature{}, err
 		} else if len(hs) == 0 {
@@ -256,14 +259,8 @@ func (w *SccVerifier) verify(
 	}
 
 	w.log.Info(
-		"Collected block headers",
+		"Collected state roots",
 		append(logCtx, "start", start, "end", end, "elapsed", time.Since(st))...)
-
-	if err != nil {
-		w.log.Error("Failed to collect block headers from verse-layer",
-			append(logCtx, "start", start, "size", state.BatchSize, "err", err)...)
-		return false, database.Signature{}, err
-	}
 
 	// calc and compare state root
 	elements := make([][32]byte, len(headers))

@@ -22,7 +22,8 @@ var (
 		"verifier.concurrency":                   50,
 		"verifier.block_limit":                   1000,
 		"verifier.event_filter_limit":            1000,
-		"verifier.state_root_limit":              1000,
+		"verifier.state_collect_limit":           1000,
+		"verifier.state_collect_timeout":         15 * time.Second,
 		"submitter.interval":                     15 * time.Second,
 		"submitter.concurrency":                  50,
 		"submitter.confirmations":                6,
@@ -100,7 +101,7 @@ type Config struct {
 	IPC ipc `json:"ipc"`
 
 	// Verifier  configuration.
-	Verifier verifier `json:"verifier" mapstructure:"verifier"`
+	Verifier Verifier `json:"verifier" mapstructure:"verifier"`
 
 	// Submitter  configuration.
 	Submitter submitter `json:"submitter" mapstructure:"submitter"`
@@ -172,7 +173,7 @@ type ipc struct {
 	Enable bool `json:"enable"`
 }
 
-type verifier struct {
+type Verifier struct {
 	// Enable to verifier.
 	Enable bool `json:"enable"`
 
@@ -192,7 +193,10 @@ type verifier struct {
 	EventFilterLimit int `json:"event_filter_limit" mapstructure:"event_filter_limit"`
 
 	// Number of state root to collect at a time.
-	StateRootLimit int `json:"state_root_limit" mapstructure:"state_root_limit"`
+	StateCollectLimit int `json:"state_collect_limit" mapstructure:"state_collect_limit"`
+
+	// Timeout for state root collection.
+	StateCollectTimeout time.Duration `json:"state_collect_timeout" mapstructure:"state_collect_timeout"`
 }
 
 type submitter struct {

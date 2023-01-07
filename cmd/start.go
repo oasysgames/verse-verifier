@@ -338,13 +338,7 @@ func newSccVerifier(
 		log.Crit("Failed to create hub-layer clinet", "err", err)
 	}
 
-	return verselayer.NewSccVerifier(
-		db,
-		signer,
-		c.Verifier.Interval,
-		c.Verifier.StateRootLimit,
-		c.Verifier.Concurrency,
-	)
+	return verselayer.NewSccVerifier(&c.Verifier, db, signer)
 }
 
 func newSccSubmitter(

@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
@@ -50,7 +51,12 @@ func (s *SccVerifierTestSuite) SetupTest() {
 	s.hub.Mining()
 
 	// setup verifier
-	s.verifier = NewSccVerifier(s.db, s.hub, 50*time.Millisecond, 2, 10)
+	s.verifier = NewSccVerifier(&config.Verifier{
+		Interval:            50 * time.Millisecond,
+		Concurrency:         10,
+		StateCollectLimit:   2,
+		StateCollectTimeout: time.Second,
+	}, s.db, s.hub)
 	s.verifier.AddVerse(s.sccAddr, s.verse)
 }
 
