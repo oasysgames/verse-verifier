@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/stretchr/testify/suite"
 )
@@ -31,7 +32,7 @@ func (s *BlockCollectorTestSuite) SetupTest() {
 }
 
 func (s *BlockCollectorTestSuite) TestCollectNewBlocks() {
-	worker := NewBlockCollector(s.db, s.backend, 0)
+	worker := NewBlockCollector(s.db, s.backend, 0, 2)
 
 	// mining 5 blocks
 	var wants []*types.Header
@@ -40,11 +41,7 @@ func (s *BlockCollectorTestSuite) TestCollectNewBlocks() {
 	}
 
 	// collect blocks
-	for {
-		if reached := worker.work(context.Background()); reached {
-			break
-		}
-	}
+	worker.work(context.Background())
 
 	// assert
 	gots, _ := s.db.Block.FindUncollecteds(20)
@@ -63,15 +60,12 @@ func (s *BlockCollectorTestSuite) TestHandleReorganization() {
 	}
 
 	// simulate chain reorganization
-	rb := newReorgBackend(s.backend, mined)
-	worker := NewBlockCollector(s.db, rb, 0)
+	reorgedBlock := uint64(5)
+	rb := newReorgBackend(s.backend, mined, reorgedBlock)
+	worker := NewBlockCollector(s.db, rb, 0, 2)
 
 	// collect blocks
-	for {
-		if reached := worker.work(context.Background()); reached {
-			break
-		}
-	}
+	worker.work(context.Background())
 
 	// assert
 	gots, _ := s.db.Block.FindUncollecteds(20)
@@ -83,16 +77,23 @@ func (s *BlockCollectorTestSuite) TestHandleReorganization() {
 
 	// reorg occurred
 	rb.reorg()
-	for {
-		if reached := worker.work(context.Background()); reached {
-			break
-		}
+	worker.work(context.Background())
+
+	// assert
+	gots, _ = s.db.Block.FindUncollecteds(20)
+	s.Equal(reorgedBlock-1, gots[len(gots)-1].Number)
+	for i, want := range mined[:reorgedBlock-1] {
+		s.Equal(want.Number.Uint64(), gots[i].Number)
+		s.Equal(want.Hash(), gots[i].Hash)
 	}
+
+	// collect reorganized blocks
+	worker.work(context.Background())
 
 	// assert
 	gots, _ = s.db.Block.FindUncollecteds(20)
 	s.Len(gots, len(rb.reorged))
-	for i, want := range mined[:len(mined)/2-1] {
+	for i, want := range mined[:reorgedBlock-1] {
 		s.Equal(want.Number.Uint64(), gots[i].Number)
 		s.Equal(want.Hash(), gots[i].Hash)
 	}
@@ -111,27 +112,33 @@ type reorgBackend struct {
 	mined, reorged []*types.Header
 }
 
-func newReorgBackend(tb *testhelper.TestBackend, mined []*types.Header) *reorgBackend {
-	reorged := make([]*types.Header, len(mined))
-	for n := 1; n <= len(mined); n++ {
-		cpy := types.CopyHeader(mined[n-1])
-
-		if n == len(mined)/2 {
-			// reorganization start block.
-			cpy.Difficulty.Add(cpy.Difficulty, common.Big1)
-		} else if n > len(mined)/2 {
-			cpy.ParentHash = reorged[n-2].Hash()
-		}
-
-		reorged[n-1] = cpy
-	}
-
-	return &reorgBackend{
+func newReorgBackend(
+	tb *testhelper.TestBackend,
+	mined []*types.Header,
+	reorgedBlock uint64,
+) *reorgBackend {
+	b := &reorgBackend{
 		TestBackend: tb,
 		mu:          &sync.Mutex{},
 		mined:       mined,
-		reorged:     reorged,
+		reorged:     make([]*types.Header, len(mined)),
 	}
+
+	for i, src := range mined {
+		cpy := types.CopyHeader(src)
+		num := cpy.Number.Uint64()
+
+		if num == reorgedBlock {
+			// reorganization start block.
+			cpy.Difficulty.Add(cpy.Difficulty, common.Big1)
+		} else if num > reorgedBlock {
+			cpy.ParentHash = b.reorged[i-1].Hash()
+		}
+
+		b.reorged[i] = cpy
+	}
+
+	return b
 }
 
 func (r *reorgBackend) reorg() {
@@ -145,9 +152,20 @@ func (r *reorgBackend) reorg() {
 	r.do = true
 }
 
+func (r *reorgBackend) NewBatchHeaderClient() (ethutil.BatchHeaderClient, error) {
+	return &testhelper.TestBatchHeaderClient{ReadOnlyClient: r}, nil
+}
+
 func (r *reorgBackend) HeaderByNumber(_ context.Context, b *big.Int) (*types.Header, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if b == nil {
+		if r.do {
+			return r.reorged[len(r.reorged)-1], nil
+		}
+		return r.mined[len(r.mined)-1], nil
+	}
 
 	n := int(b.Uint64())
 	if r.do {

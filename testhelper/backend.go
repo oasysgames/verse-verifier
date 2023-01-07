@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 )
 
 var (
@@ -85,11 +86,9 @@ func (b *TestBackend) BlockNumber(ctx context.Context) (uint64, error) {
 
 func (b *TestBackend) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
 	header, err := b.SimulatedBackend.HeaderByNumber(ctx, number)
-
-	if err == nil && number != nil && number.Cmp(header.Number) == 1 {
+	if err == nil && header == nil {
 		return nil, ethereum.NotFound
 	}
-
 	return header, err
 }
 
@@ -100,11 +99,12 @@ func (s *TestBackend) Mining() *types.Header {
 
 func (s *TestBackend) GetHeaderBatch(
 	ctx context.Context,
-	start, size, limit int,
+	start uint64,
+	size, limit int,
 ) ([]*types.Header, error) {
 	headers := make([]*types.Header, size)
 	for i := 0; i < size; i++ {
-		h, err := s.HeaderByNumber(ctx, big.NewInt(int64(start+i)))
+		h, err := s.HeaderByNumber(ctx, new(big.Int).SetUint64(start+uint64(i)))
 		if err != nil {
 			return nil, err
 		}
@@ -129,4 +129,34 @@ func (b *TestBackend) SignData(hash []byte) (sig []byte, err error) {
 
 func (b *TestBackend) SignTx(tx *types.Transaction) (*types.Transaction, error) {
 	return b.ks.SignTx(b.account, tx, b.ChainID())
+}
+
+func (b *TestBackend) NewBatchHeaderClient() (ethutil.BatchHeaderClient, error) {
+	return &TestBatchHeaderClient{b}, nil
+}
+
+type TestBatchHeaderClient struct {
+	ethutil.ReadOnlyClient
+}
+
+func (c *TestBatchHeaderClient) Get(
+	ctx context.Context,
+	start, end uint64,
+) ([]*types.Header, error) {
+	size := int(end - start + 1)
+
+	headers := make([]*types.Header, size)
+	for i := 0; i < size; i++ {
+		h, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(start+uint64(i)))
+		if err != nil {
+			return nil, err
+		}
+		headers[i] = h
+	}
+
+	return headers, nil
+}
+
+func (c *TestBatchHeaderClient) Close() error {
+	return nil
 }

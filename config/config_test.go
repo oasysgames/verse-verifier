@@ -59,8 +59,9 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		wallet: wallet1
 		interval: 5s
 		concurrency: 10
-		event_filter_limit: 500
-		state_root_limit: 50
+		block_limit: 500
+		event_filter_limit: 50
+		state_root_limit: 5
 	
 	submitter:
 		enable: true
@@ -125,8 +126,9 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		Wallet:           "wallet1",
 		Interval:         5 * time.Second,
 		Concurrency:      10,
-		EventFilterLimit: 500,
-		StateRootLimit:   50,
+		BlockLimit:       500,
+		EventFilterLimit: 50,
+		StateRootLimit:   5,
 	}, got.Verifier)
 
 	s.Equal(submitter{
@@ -229,6 +231,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal(15*time.Second, got.Verifier.Interval)
 	s.Equal(50, got.Verifier.Concurrency)
+	s.Equal(1000, got.Verifier.BlockLimit)
 	s.Equal(1000, got.Verifier.EventFilterLimit)
 	s.Equal(1000, got.Verifier.StateRootLimit)
 

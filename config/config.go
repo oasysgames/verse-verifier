@@ -20,6 +20,7 @@ var (
 		"p2p.publish_interval":                   5 * time.Minute,
 		"verifier.interval":                      15 * time.Second,
 		"verifier.concurrency":                   50,
+		"verifier.block_limit":                   1000,
 		"verifier.event_filter_limit":            1000,
 		"verifier.state_root_limit":              1000,
 		"submitter.interval":                     15 * time.Second,
@@ -183,6 +184,9 @@ type verifier struct {
 
 	// Number of concurrent executions.
 	Concurrency int `json:"concurrency"`
+
+	// Number of block headers to collect at a time.
+	BlockLimit int `json:"block_limit" mapstructure:"block_limit"`
 
 	// Number of blocks to event filter.
 	EventFilterLimit int `json:"event_filter_limit" mapstructure:"event_filter_limit"`

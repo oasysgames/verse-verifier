@@ -295,7 +295,7 @@ func newBlockCollector(
 		return nil
 	}
 
-	return hublayer.NewBlockCollector(db, hub, c.Verifier.Interval)
+	return hublayer.NewBlockCollector(db, hub, c.Verifier.Interval, c.Verifier.BlockLimit)
 }
 
 func newEventCollector(

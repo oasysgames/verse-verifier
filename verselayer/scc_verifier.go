@@ -226,21 +226,38 @@ func (w *SccVerifier) verify(
 	// collect block headers from verse-layer
 	var (
 		start   = state.PrevTotalElements + 1
+		end     = start + state.BatchSize - 1
 		headers []*types.Header
 		err     error
 	)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(state.BatchSize)*(time.Second/2))
 	defer cancel()
 
+	bc, err := verse.NewBatchHeaderClient()
+	if err != nil {
+		w.log.Error("Failed to construct batch client", "err", err)
+		return false, database.Signature{}, err
+	}
+
+	bi := ethutil.NewBatchHeaderIterator(bc, start, end, w.limit)
+	defer bi.Close()
+
 	st := time.Now()
-	headers, err = verse.GetHeaderBatch(ctx, int(start), int(state.BatchSize), w.limit)
+	for {
+		hs, err := bi.Next(ctx)
+		if err != nil {
+			w.log.Error("Failed to collect block headers from verse-layer",
+				append(logCtx, "start", start, "size", state.BatchSize, "err", err)...)
+			return false, database.Signature{}, err
+		} else if len(hs) == 0 {
+			break
+		}
+		headers = append(headers, hs...)
+	}
+
 	w.log.Info(
 		"Collected block headers",
-		append(
-			logCtx,
-			"start", start, "end", start+state.BatchSize-1,
-			"elapsed", time.Since(st))...,
-	)
+		append(logCtx, "start", start, "end", end, "elapsed", time.Since(st))...)
 
 	if err != nil {
 		w.log.Error("Failed to collect block headers from verse-layer",
