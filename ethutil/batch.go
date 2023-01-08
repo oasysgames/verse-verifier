@@ -37,7 +37,7 @@ func (c *BatchHeaderIterator) Next(ctx context.Context) ([]*types.Header, error)
 	}
 
 	if headers, err := c.client.Get(ctx, start, end); err != nil {
-		return []*types.Header{}, nil
+		return []*types.Header{}, err
 	} else {
 		c.call += 1
 		return headers, nil
