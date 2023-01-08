@@ -33,6 +33,13 @@ func NewDatabase(filepath string) (*Database, error) {
 		return nil, err
 	}
 
+	// workaround for "database is locked" error
+	if rawdb, err := db.DB(); err != nil {
+		return nil, err
+	} else {
+		rawdb.SetMaxOpenConns(1)
+	}
+
 	for _, model := range models {
 		if err := db.AutoMigrate(model); err != nil {
 			return nil, err
