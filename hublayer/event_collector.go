@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
@@ -52,35 +53,33 @@ func init() {
 
 // Worker to collect events for OasysStateCommitmentChain.
 type EventCollector struct {
-	db       *database.Database
-	hub      ethutil.ReadOnlyClient
-	signer   common.Address
-	interval time.Duration
-	limit    int
-	log      log.Logger
+	cfg    *config.Verifier
+	db     *database.Database
+	hub    ethutil.ReadOnlyClient
+	signer common.Address
+	log    log.Logger
 }
 
 func NewEventCollector(
+	cfg *config.Verifier,
 	db *database.Database,
 	hub ethutil.ReadOnlyClient,
 	signer common.Address,
-	interval time.Duration,
-	limit int,
 ) *EventCollector {
 	return &EventCollector{
-		db:       db,
-		hub:      hub,
-		signer:   signer,
-		interval: interval,
-		limit:    limit,
-		log:      log.New("worker", "event-collector"),
+		cfg:    cfg,
+		db:     db,
+		hub:    hub,
+		signer: signer,
+		log:    log.New("worker", "event-collector"),
 	}
 }
 
 func (w *EventCollector) Start(ctx context.Context) {
-	w.log.Info("Worker started", "interval", w.interval, "block-limit", w.limit)
+	w.log.Info("Worker started",
+		"interval", w.cfg.Interval, "event-filter-limit", w.cfg.EventFilterLimit)
 
-	ticker := time.NewTicker(w.interval)
+	ticker := time.NewTicker(w.cfg.Interval)
 	defer ticker.Stop()
 
 	for {
@@ -95,43 +94,47 @@ func (w *EventCollector) Start(ctx context.Context) {
 }
 
 func (w *EventCollector) work(ctx context.Context) {
-	// get new blocks from database
-	blocks, err := w.db.Block.FindUncollecteds(w.limit)
-	if err != nil && !errors.Is(err, database.ErrNotFound) {
-		w.log.Error("Failed to find uncollected blocks", "err", err)
-		return
-	} else if len(blocks) == 0 {
-		w.log.Debug("Wait for new block")
-		return
-	}
-
-	// collect event logs from hub-layer
-	start, end := blocks[0].Number, blocks[len(blocks)-1].Number
-	filter := ethereum.FilterQuery{
-		Topics:    filterTopics,
-		FromBlock: new(big.Int).SetUint64(start),
-		ToBlock:   new(big.Int).SetUint64(end),
-	}
-	logs, err := w.hub.FilterLogs(ctx, filter)
-	if err != nil {
-		w.log.Error("Failed to fetch event logs from hub-layer",
-			"start", start, "end", end, "err", err)
-		return
-	}
-
-	w.db.Transaction(func(tx *database.Database) error {
-		if len(logs) == 0 {
-			w.log.Debug("No event log", "start", start, "end", end)
-		} else {
-			for _, log := range logs {
-				if err := w.processLog(tx, log); err != nil {
-					return err
-				}
-			}
+	for {
+		// get new blocks from database
+		blocks, err := w.db.Block.FindUncollecteds(w.cfg.EventFilterLimit)
+		if err != nil && !errors.Is(err, database.ErrNotFound) {
+			w.log.Error("Failed to find uncollected blocks", "err", err)
+			return
+		} else if len(blocks) == 0 {
+			w.log.Debug("Wait for new block")
+			return
 		}
 
-		return w.saveLogCollectedBlocks(tx, start, end)
-	})
+		// collect event logs from hub-layer
+		start, end := blocks[0].Number, blocks[len(blocks)-1].Number
+		filter := ethereum.FilterQuery{
+			Topics:    filterTopics,
+			FromBlock: new(big.Int).SetUint64(start),
+			ToBlock:   new(big.Int).SetUint64(end),
+		}
+		logs, err := w.hub.FilterLogs(ctx, filter)
+		if err != nil {
+			w.log.Error("Failed to fetch event logs from hub-layer",
+				"start", start, "end", end, "err", err)
+			return
+		}
+
+		if err = w.db.Transaction(func(tx *database.Database) error {
+			if len(logs) == 0 {
+				w.log.Debug("No event log", "start", start, "end", end)
+			} else {
+				for _, log := range logs {
+					if err := w.processLog(tx, log); err != nil {
+						return err
+					}
+				}
+			}
+
+			return w.saveLogCollectedBlocks(tx, start, end)
+		}); err != nil {
+			return
+		}
+	}
 }
 
 // Parse event logs and save to database.

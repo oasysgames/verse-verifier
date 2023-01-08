@@ -309,11 +309,8 @@ func newEventCollector(
 	}
 
 	return hublayer.NewEventCollector(
-		db,
-		hub,
+		&c.Verifier, db, hub,
 		common.HexToAddress(c.Wallets[c.Verifier.Wallet].Address),
-		c.Verifier.Interval,
-		c.Verifier.EventFilterLimit,
 	)
 }
 

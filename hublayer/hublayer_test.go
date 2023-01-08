@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
@@ -51,7 +52,10 @@ func (s *SccTestSuite) SetupTest() {
 
 	// setup workers
 	hubSigner := s.hub.Signer()
-	s.stateCollector = NewEventCollector(s.db, s.hub, hubSigner, time.Millisecond, 1000)
+	s.stateCollector = NewEventCollector(&config.Verifier{
+		Interval:         time.Millisecond,
+		EventFilterLimit: 1000,
+	}, s.db, s.hub, hubSigner)
 
 	s.sccSubmitter = NewSccSubmitter(s.db, s.sm, s.sccvAddr, 0, 0, 0, 1.0)
 	s.sccSubmitter.AddVerse(s.sccAddr, s.hub)
