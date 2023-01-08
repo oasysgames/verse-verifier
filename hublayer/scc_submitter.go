@@ -9,24 +9,40 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
+	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/multicall2"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/sccverifier"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"golang.org/x/net/context"
-	"golang.org/x/sync/semaphore"
+)
+
+const (
+	maxTxSize = 120 * 1024 // 120KB
+	minTxGas  = 24871      // Multicall2 minimum required gas
 )
 
 var (
 	errNoSignature = errors.New("no signatures")
 	minStake       = new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000))
+	mcall2Abi      *abi.ABI
 )
+
+func init() {
+	if abi, err := multicall2.Multicall2MetaData.GetAbi(); err != nil {
+		panic(err)
+	} else {
+		mcall2Abi = abi
+	}
+}
 
 type stakeManager interface {
 	GetTotalStake(callOpts *bind.CallOpts, epoch *big.Int) (*big.Int, error)
@@ -46,41 +62,23 @@ type submitTask struct {
 }
 
 type SccSubmitter struct {
-	db            *database.Database
-	sm            stakeManager
-	sccvAddr      common.Address
-	interval      time.Duration
-	concurrency   int
-	confirmations int
-	gasMultiplier float64
+	cfg *config.Submitter
+	db  *database.Database
+	sm  stakeManager
 
-	sem    *semaphore.Weighted
 	hubs   *sync.Map
 	stakes *sync.Map
 	log    log.Logger
 }
 
-func NewSccSubmitter(
-	db *database.Database,
-	sm stakeManager,
-	sccvAddr common.Address,
-	interval time.Duration,
-	concurrency int,
-	confirmations int,
-	gasMultiplier float64,
-) *SccSubmitter {
+func NewSccSubmitter(cfg *config.Submitter, db *database.Database, sm stakeManager) *SccSubmitter {
 	return &SccSubmitter{
-		db:            db,
-		sm:            sm,
-		sccvAddr:      sccvAddr,
-		interval:      interval,
-		concurrency:   concurrency,
-		confirmations: confirmations,
-		gasMultiplier: gasMultiplier,
-		sem:           semaphore.NewWeighted(int64(concurrency)),
-		hubs:          &sync.Map{},
-		stakes:        &sync.Map{},
-		log:           log.New("worker", "scc-submitter"),
+		cfg:    cfg,
+		db:     db,
+		sm:     sm,
+		hubs:   &sync.Map{},
+		stakes: &sync.Map{},
+		log:    log.New("worker", "scc-submitter"),
 	}
 }
 
@@ -100,8 +98,15 @@ func (w *SccSubmitter) Start(ctx context.Context) {
 		w.workLoop(ctx, queue)
 	}()
 
-	w.log.Info("Worker started", "sccv", w.sccvAddr,
-		"interval", w.interval, "concurrency", w.concurrency, "gas-multiplier", w.gasMultiplier)
+	w.log.Info("Worker started",
+		"interval", w.cfg.Interval,
+		"concurrency", w.cfg.Concurrency,
+		"confirmations", w.cfg.Confirmations,
+		"gas-multiplier", w.cfg.GasMultiplier,
+		"batch-size", w.cfg.BatchSize,
+		"max-gas", w.cfg.MaxGas,
+		"verifier", w.cfg.VerifierAddress,
+		"multicall2", w.cfg.Multicall2Address)
 
 	wg.Wait()
 	w.log.Info("Worker stopped")
@@ -124,10 +129,10 @@ func (w *SccSubmitter) stakeRefreshLoop(ctx context.Context) {
 }
 
 func (w *SccSubmitter) workLoop(ctx context.Context, queue chan<- *submitTask) {
-	wg := util.NewWorkerGroup(w.concurrency)
+	wg := util.NewWorkerGroup(w.cfg.Concurrency)
 	running := &sync.Map{}
 
-	tick := time.NewTicker(w.interval)
+	tick := time.NewTicker(w.cfg.Interval)
 	defer tick.Stop()
 
 	for {
@@ -184,43 +189,17 @@ func (w *SccSubmitter) HasVerse(scc common.Address) bool {
 
 func (w *SccSubmitter) work(ctx context.Context, task *submitTask) {
 	logCtx := []interface{}{"scc", task.scc.Hex()}
-	scc, err := scc.NewScc(task.scc, task.hub)
-	if err != nil {
-		log.Error("Failed to create OasysStateCommitmentChain contract",
-			append(logCtx, "err", err)...)
+	calls, nextIndex, err := w.getMulticallCalls(ctx, logCtx, task)
+	if err != nil || len(calls) == 0 {
 		return
 	}
-
-	sccv, err := sccverifier.NewSccverifier(w.sccvAddr, task.hub)
-	if err != nil {
-		log.Error("Failed to create OasysStateCommitmentChainVerifier contract",
-			append(logCtx, "err", err)...)
-		return
-	}
-
-	// fetch the next index from hub-layer
-	nextIndex, err := scc.NextIndex(&bind.CallOpts{Context: ctx})
-	if err != nil {
-		w.log.Error("Failed to call the SCC.nextIndex method", append(logCtx, "err", err)...)
-		return
-	}
-	logCtx = append(logCtx, "index", nextIndex)
-
-	rows, err := w.findSignatures(task.scc, nextIndex.Uint64(),
-		minStake, w.getTotalStake(), w.getSignerStakes())
-	if errors.Is(err, errNoSignature) {
-		w.log.Info("No signatures", logCtx...)
-		return
-	} else if err != nil {
-		w.log.Error("Failed to find signatures", append(logCtx, "err", err)...)
-		return
-	}
+	logCtx = append(logCtx, "next-index", nextIndex)
 
 	// send transaction
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	tx, err := w.sendTransaction(ctx, logCtx, task, sccv, rows)
+	tx, err := w.sendTransaction(ctx, logCtx, task, calls)
 	if err != nil {
 		return
 	}
@@ -362,40 +341,133 @@ func (w *SccSubmitter) findSignatures(
 	return rows, nil
 }
 
+func (w *SccSubmitter) getMulticallCalls(
+	ctx context.Context,
+	logCtx []interface{},
+	task *submitTask,
+) (calls []multicall2.Multicall2Call, nextIndex uint64, err error) {
+	scc, err := scc.NewScc(task.scc, task.hub)
+	if err != nil {
+		log.Error(
+			"Failed to construct OasysStateCommitmentChain contract",
+			append(logCtx, "err", err)...)
+		return nil, 0, err
+	}
+
+	sccvaddr := common.HexToAddress(w.cfg.VerifierAddress)
+	sccv, err := sccverifier.NewSccverifier(sccvaddr, task.hub)
+	if err != nil {
+		log.Error("Failed to construct OasysStateCommitmentChainVerifier contract",
+			append(logCtx, "err", err)...)
+		return nil, 0, err
+	}
+
+	// fetch the next index from hub-layer
+	ni, err := scc.NextIndex(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		w.log.Error("Failed to call the SCC.nextIndex method", append(logCtx, "err", err)...)
+		return nil, 0, err
+	}
+	nextIndex = ni.Uint64()
+
+	var (
+		totalStake  = w.getTotalStake()
+		signerStake = w.getSignerStakes()
+		opts        = task.hub.TransactOpts(ctx)
+	)
+	opts.NoSend = true
+	opts.Nonce = common.Big1    // prevent `eth_getNonce`
+	opts.GasPrice = common.Big1 // prevent `eth_gasPrice`
+	opts.GasLimit = 21_000      // prevent `eth_estimateGas`
+
+	for i := 0; i < w.cfg.BatchSize; i++ {
+		rows, err := w.findSignatures(
+			task.scc,
+			nextIndex+uint64(i),
+			minStake,
+			totalStake,
+			signerStake,
+		)
+		if errors.Is(err, errNoSignature) {
+			w.log.Info("No signatures", logCtx...)
+			break
+		} else if err != nil {
+			w.log.Error("Failed to find signatures", append(logCtx, "err", err)...)
+			return nil, 0, err
+		}
+
+		batchHeader := sccverifier.Lib_OVMCodecChainBatchHeader{
+			BatchIndex:        new(big.Int).SetUint64(rows[0].BatchIndex),
+			BatchRoot:         rows[0].BatchRoot,
+			BatchSize:         new(big.Int).SetUint64(rows[0].BatchSize),
+			PrevTotalElements: new(big.Int).SetUint64(rows[0].PrevTotalElements),
+			ExtraData:         rows[0].ExtraData,
+		}
+
+		signatures := make([][]byte, len(rows))
+		for i, row := range rows {
+			signatures[i] = row.Signature[:]
+		}
+
+		method := sccv.Approve
+		if !rows[0].Approved {
+			method = sccv.Reject
+		}
+
+		if tx, err := method(opts, task.scc, batchHeader, signatures); err != nil {
+			w.log.Error("Failed to construct transaction", append(logCtx, "err", err)...)
+			return nil, 0, err
+		} else {
+			appended := append(calls, multicall2.Multicall2Call{Target: sccvaddr, CallData: tx.Data()})
+			if data, err := mcall2Abi.Pack("tryAggregate", true, appended); err != nil {
+				w.log.Error("Failed to pack data", "err", err)
+				return nil, 0, err
+			} else if len(data) > maxTxSize {
+				w.log.Warn("Oversized data", "size", len(data), "len", len(appended))
+				break
+			}
+
+			calls = appended
+		}
+
+		// if rejected, do not approve subsequent batch indexes
+		if !rows[0].Approved {
+			break
+		}
+	}
+
+	return calls, nextIndex, nil
+}
+
 func (w *SccSubmitter) sendTransaction(
 	ctx context.Context,
 	logCtx []interface{},
 	task *submitTask,
-	sccv *sccverifier.Sccverifier,
-	rows []*database.OptimismSignature,
+	calls []multicall2.Multicall2Call,
 ) (*types.Transaction, error) {
-	var method func(*bind.TransactOpts, common.Address, sccverifier.Lib_OVMCodecChainBatchHeader, [][]byte) (*types.Transaction, error)
-	if rows[0].Approved {
-		logCtx = append(logCtx, "method", "SCCVerifier.approve")
-		method = sccv.Approve
-	} else {
-		logCtx = append(logCtx, "method", "SCCVerifier.reject")
-		method = sccv.Reject
+	mcall2, err := multicall2.NewMulticall2(common.HexToAddress(w.cfg.Multicall2Address), task.hub)
+	if err != nil {
+		w.log.Error("Failed to construct Multicall2 contract", "err", err)
+		return nil, err
 	}
 
-	// create params
-	header := sccverifier.Lib_OVMCodecChainBatchHeader{
-		BatchIndex:        new(big.Int).SetUint64(rows[0].BatchIndex),
-		BatchRoot:         rows[0].BatchRoot,
-		BatchSize:         new(big.Int).SetUint64(rows[0].BatchSize),
-		PrevTotalElements: new(big.Int).SetUint64(rows[0].PrevTotalElements),
-		ExtraData:         rows[0].ExtraData,
-	}
-
-	signatures := make([][]byte, len(rows))
-	for i, row := range rows {
-		signatures[i] = row.Signature[:]
-	}
-
-	// estimate gas
+	// to fit max gas
 	opts := task.hub.TransactOpts(ctx)
 	opts.NoSend = true
-	tx, err := method(opts, task.scc, header, signatures)
+	tx, err := mcall2.TryAggregate(opts, true, calls[:1])
+	if err != nil {
+		w.log.Error("Failed to estimate gas", append(logCtx, "err", err)...)
+		return nil, err
+	}
+
+	gasPerCall := int(tx.Gas() - minTxGas)
+	end := len(calls)
+	for ; end > 1 && end*gasPerCall > w.cfg.MaxGas; end-- {
+	}
+	calls = calls[:end]
+
+	// estimate gas
+	tx, err = mcall2.TryAggregate(opts, true, calls)
 	if err != nil {
 		w.log.Error("Failed to estimate gas", append(logCtx, "err", err)...)
 		return nil, err
@@ -403,10 +475,10 @@ func (w *SccSubmitter) sendTransaction(
 
 	// send
 	opts = task.hub.TransactOpts(ctx)
-	opts.GasLimit = uint64(float64(tx.Gas()) * w.gasMultiplier)
-	tx, err = method(opts, task.scc, header, signatures)
+	opts.GasLimit = uint64(float64(tx.Gas()) * w.cfg.GasMultiplier)
+	tx, err = mcall2.TryAggregate(opts, true, calls)
 	if err != nil {
-		log.Error("Failed to send transaction", append(logCtx, "err", err)...)
+		w.log.Error("Failed to send transaction", append(logCtx, "err", err)...)
 		return nil, err
 	}
 
@@ -414,6 +486,7 @@ func (w *SccSubmitter) sendTransaction(
 		"Sent transaction",
 		append(
 			logCtx,
+			"call-size", len(calls),
 			"tx", tx.Hash().String(),
 			"nonce", tx.Nonce(),
 			"gas-limit", tx.Gas(),
@@ -444,7 +517,7 @@ func (w *SccSubmitter) waitForCconfirmation(
 	// wait for confirmations
 	confirmed := map[common.Hash]bool{receipt.BlockHash: true}
 	for {
-		remaining := w.confirmations - len(confirmed)
+		remaining := w.cfg.Confirmations - len(confirmed)
 		if remaining <= 0 {
 			w.log.Info("Transaction succeeded", logCtx...)
 			return

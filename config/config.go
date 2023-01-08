@@ -28,6 +28,10 @@ var (
 		"submitter.concurrency":                  50,
 		"submitter.confirmations":                6,
 		"submitter.gas_multiplier":               1.1,
+		"submitter.batch_size":                   20,
+		"submitter.max_gas":                      5_000_000,
+		"submitter.verifier_address":             "0x5200000000000000000000000000000000000014",
+		"submitter.multicall2_address":           "0x5200000000000000000000000000000000000022",
 	}
 )
 
@@ -100,11 +104,11 @@ type Config struct {
 	// IPC configuration.
 	IPC ipc `json:"ipc"`
 
-	// Verifier  configuration.
+	// Verifier configuration.
 	Verifier Verifier `json:"verifier" mapstructure:"verifier"`
 
-	// Submitter  configuration.
-	Submitter submitter `json:"submitter" mapstructure:"submitter"`
+	// Submitter configuration.
+	Submitter Submitter `json:"submitter" mapstructure:"submitter"`
 }
 
 func (c *Config) DatabasePath() string {
@@ -199,7 +203,7 @@ type Verifier struct {
 	StateCollectTimeout time.Duration `json:"state_collect_timeout" mapstructure:"state_collect_timeout"`
 }
 
-type submitter struct {
+type Submitter struct {
 	// Whether to enable worker.
 	Enable bool `json:"enable"`
 
@@ -214,6 +218,18 @@ type submitter struct {
 
 	// How much to increase the estimated gas limit.
 	GasMultiplier float64 `json:"gas_multiplier" mapstructure:"gas_multiplier"`
+
+	// Maximum number of calls for Multicall2.
+	BatchSize int `json:"batch_size" mapstructure:"batch_size"`
+
+	// Maximum gas of calls for Multicall2.
+	MaxGas int `json:"max_gas" mapstructure:"max_gas"`
+
+	// Address of the OasysStateCommitmentChain contract.
+	VerifierAddress string `json:"verifier_address" mapstructure:"verifier_address"`
+
+	// Address of the Multicall2 contract.
+	Multicall2Address string `json:"multicall2_address" mapstructure:"multicall2_address"`
 
 	Targets []struct {
 		// Chain ID of the Verse-Layer.
