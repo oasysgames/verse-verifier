@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
@@ -32,7 +33,7 @@ func (s *BlockCollectorTestSuite) SetupTest() {
 }
 
 func (s *BlockCollectorTestSuite) TestCollectNewBlocks() {
-	worker := NewBlockCollector(s.db, s.backend, 0, 2)
+	worker := NewBlockCollector(&config.Verifier{Interval: 0, BlockLimit: 2}, s.db, s.backend)
 
 	// mining 5 blocks
 	var wants []*types.Header
@@ -62,7 +63,7 @@ func (s *BlockCollectorTestSuite) TestHandleReorganization() {
 	// simulate chain reorganization
 	reorgedBlock := uint64(5)
 	rb := newReorgBackend(s.backend, mined, reorgedBlock)
-	worker := NewBlockCollector(s.db, rb, 0, 2)
+	worker := NewBlockCollector(&config.Verifier{Interval: 0, BlockLimit: 2}, s.db, rb)
 
 	// collect blocks
 	worker.work(context.Background())

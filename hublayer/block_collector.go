@@ -8,41 +8,39 @@ import (
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 )
 
 // Worker to collect new blocks.
 type BlockCollector struct {
-	db       *database.Database
-	hub      ethutil.ReadOnlyClient
-	interval time.Duration
-	limit    int
+	cfg *config.Verifier
+	db  *database.Database
+	hub ethutil.ReadOnlyClient
 
 	log log.Logger
 }
 
 func NewBlockCollector(
+	cfg *config.Verifier,
 	db *database.Database,
 	hub ethutil.ReadOnlyClient,
-	interval time.Duration,
-	limit int,
 ) *BlockCollector {
 	return &BlockCollector{
-		db:       db,
-		hub:      hub,
-		interval: interval,
-		limit:    limit,
-		log:      log.New("worker", "block-collector"),
+		cfg: cfg,
+		db:  db,
+		hub: hub,
+		log: log.New("worker", "block-collector"),
 	}
 }
 
 func (w *BlockCollector) Start(
 	ctx context.Context,
 ) {
-	w.log.Info("Worker started", "interval", w.interval, "block-limit", w.limit)
+	w.log.Info("Worker started", "interval", w.cfg.Interval, "block-limit", w.cfg.BlockLimit)
 
-	ticker := time.NewTicker(w.interval)
+	ticker := time.NewTicker(w.cfg.Interval)
 	defer ticker.Stop()
 
 	for {
@@ -113,7 +111,7 @@ func (w *BlockCollector) batchCollect(ctx context.Context, start, end uint64) {
 		return
 	}
 
-	bi := ethutil.NewBatchHeaderIterator(bc, start, end, w.limit)
+	bi := ethutil.NewBatchHeaderIterator(bc, start, end, w.cfg.BlockLimit)
 	defer bi.Close()
 
 	for {
