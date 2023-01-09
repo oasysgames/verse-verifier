@@ -33,7 +33,6 @@ import (
 const (
 	SccName             = "StateCommitmentChain"
 	StakeManagerAddress = "0x0000000000000000000000000000000000001001"
-	VerifySccAddress    = "0x5200000000000000000000000000000000000014"
 )
 
 var startCmd = &cobra.Command{
@@ -295,7 +294,7 @@ func newBlockCollector(
 		return nil
 	}
 
-	return hublayer.NewBlockCollector(db, hub, c.Verifier.Interval)
+	return hublayer.NewBlockCollector(&c.Verifier, db, hub)
 }
 
 func newEventCollector(
@@ -309,11 +308,8 @@ func newEventCollector(
 	}
 
 	return hublayer.NewEventCollector(
-		db,
-		hub,
+		&c.Verifier, db, hub,
 		common.HexToAddress(c.Wallets[c.Verifier.Wallet].Address),
-		c.Verifier.Interval,
-		c.Verifier.BlockLimit,
 	)
 }
 
@@ -338,7 +334,7 @@ func newSccVerifier(
 		log.Crit("Failed to create hub-layer clinet", "err", err)
 	}
 
-	return verselayer.NewSccVerifier(db, signer, c.Verifier.Interval, c.Verifier.Concurrency)
+	return verselayer.NewSccVerifier(&c.Verifier, db, signer)
 }
 
 func newSccSubmitter(
@@ -357,15 +353,7 @@ func newSccSubmitter(
 		log.Crit("Failed to create StakeManager", "err", err)
 	}
 
-	return hublayer.NewSccSubmitter(
-		db,
-		sm,
-		common.HexToAddress(VerifySccAddress),
-		c.Submitter.Interval,
-		c.Submitter.Concurrency,
-		c.Submitter.Confirmations,
-		c.Submitter.GasMultiplier,
-	)
+	return hublayer.NewSccSubmitter(&c.Submitter, db, sm)
 }
 
 func startVerseDiscovery(

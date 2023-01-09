@@ -79,7 +79,7 @@ func (s *SccSubmitterTestSuite) TestWork() {
 
 	s.sccSubmitter.refreshStakes(context.Background())
 
-	for range s.Range(0, indexes) {
+	for range s.Range(0, indexes/s.sccSubmitter.cfg.BatchSize+1) {
 		go func() {
 			time.Sleep(10 * time.Millisecond)
 			s.hub.Commit()

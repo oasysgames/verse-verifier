@@ -21,10 +21,17 @@ var (
 		"verifier.interval":                      15 * time.Second,
 		"verifier.concurrency":                   50,
 		"verifier.block_limit":                   1000,
+		"verifier.event_filter_limit":            1000,
+		"verifier.state_collect_limit":           1000,
+		"verifier.state_collect_timeout":         15 * time.Second,
 		"submitter.interval":                     15 * time.Second,
 		"submitter.concurrency":                  50,
 		"submitter.confirmations":                6,
 		"submitter.gas_multiplier":               1.1,
+		"submitter.batch_size":                   20,
+		"submitter.max_gas":                      5_000_000,
+		"submitter.verifier_address":             "0x5200000000000000000000000000000000000014",
+		"submitter.multicall2_address":           "0x5200000000000000000000000000000000000022",
 	}
 )
 
@@ -97,11 +104,11 @@ type Config struct {
 	// IPC configuration.
 	IPC ipc `json:"ipc"`
 
-	// Verifier  configuration.
-	Verifier verifier `json:"verifier" mapstructure:"verifier"`
+	// Verifier configuration.
+	Verifier Verifier `json:"verifier" mapstructure:"verifier"`
 
-	// Submitter  configuration.
-	Submitter submitter `json:"submitter" mapstructure:"submitter"`
+	// Submitter configuration.
+	Submitter Submitter `json:"submitter" mapstructure:"submitter"`
 }
 
 func (c *Config) DatabasePath() string {
@@ -170,7 +177,7 @@ type ipc struct {
 	Enable bool `json:"enable"`
 }
 
-type verifier struct {
+type Verifier struct {
 	// Enable to verifier.
 	Enable bool `json:"enable"`
 
@@ -183,11 +190,20 @@ type verifier struct {
 	// Number of concurrent executions.
 	Concurrency int `json:"concurrency"`
 
-	// Number of blocks to event filter.
+	// Number of block headers to collect at a time.
 	BlockLimit int `json:"block_limit" mapstructure:"block_limit"`
+
+	// Number of blocks to event filter.
+	EventFilterLimit int `json:"event_filter_limit" mapstructure:"event_filter_limit"`
+
+	// Number of state root to collect at a time.
+	StateCollectLimit int `json:"state_collect_limit" mapstructure:"state_collect_limit"`
+
+	// Timeout for state root collection.
+	StateCollectTimeout time.Duration `json:"state_collect_timeout" mapstructure:"state_collect_timeout"`
 }
 
-type submitter struct {
+type Submitter struct {
 	// Whether to enable worker.
 	Enable bool `json:"enable"`
 
@@ -202,6 +218,18 @@ type submitter struct {
 
 	// How much to increase the estimated gas limit.
 	GasMultiplier float64 `json:"gas_multiplier" mapstructure:"gas_multiplier"`
+
+	// Maximum number of calls for Multicall2.
+	BatchSize int `json:"batch_size" mapstructure:"batch_size"`
+
+	// Maximum gas of calls for Multicall2.
+	MaxGas int `json:"max_gas" mapstructure:"max_gas"`
+
+	// Address of the OasysStateCommitmentChain contract.
+	VerifierAddress string `json:"verifier_address" mapstructure:"verifier_address"`
+
+	// Address of the Multicall2 contract.
+	Multicall2Address string `json:"multicall2_address" mapstructure:"multicall2_address"`
 
 	Targets []struct {
 		// Chain ID of the Verse-Layer.

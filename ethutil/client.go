@@ -11,6 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/lmittmann/w3"
+	"github.com/lmittmann/w3/module/eth"
+	"github.com/lmittmann/w3/w3types"
 )
 
 type SignDataFn = func(data []byte) (sig []byte, err error)
@@ -24,7 +27,7 @@ type ReadOnlyClient interface {
 		ctx context.Context,
 		hash common.Hash,
 	) (tx *types.Transaction, isPending bool, err error)
-	GetHeaderBatch(ctx context.Context, start, size int) ([]*types.Header, error)
+	NewBatchHeaderClient() (BatchHeaderClient, error)
 }
 
 type WritableClient interface {
@@ -68,21 +71,12 @@ func (c *readOnlyClient) TransactionByHash(
 	return c.Client.TransactionByHash(ctx, hash)
 }
 
-func (c *readOnlyClient) GetHeaderBatch(
-	ctx context.Context,
-	start, size int,
-) ([]*types.Header, error) {
-	headers := make([]*types.Header, size)
-	for i := 0; i < size; i++ {
-		h, err := c.HeaderByNumber(ctx, big.NewInt(int64(start+i)))
-		if err != nil {
-			return nil, err
-		}
-
-		headers[i] = h
+func (c *readOnlyClient) NewBatchHeaderClient() (BatchHeaderClient, error) {
+	client, err := w3.Dial(c.URL())
+	if err != nil {
+		return nil, err
 	}
-
-	return headers, nil
+	return &BatchHeaderRPCClient{client: client}, nil
 }
 
 type writableClient struct {
@@ -139,4 +133,33 @@ func (c *writableClient) SignData(data []byte) (sig []byte, err error) {
 
 func (c *writableClient) SignTx(tx *types.Transaction) (*types.Transaction, error) {
 	return c.wallet.SignTx(*c.signer, tx, c.ChainID())
+}
+
+type BatchHeaderRPCClient struct {
+	client *w3.Client
+}
+
+func (c *BatchHeaderRPCClient) Get(
+	ctx context.Context,
+	start, end uint64,
+) ([]*types.Header, error) {
+	size := int(end - start + 1)
+
+	headers := make([]*types.Header, size)
+	calls := make([]w3types.Caller, size)
+	for i := 0; i < size; i++ {
+		headers[i] = &types.Header{}
+		calls[i] = eth.
+			HeaderByNumber(new(big.Int).SetUint64(start + uint64(i))).
+			Returns(headers[i])
+	}
+
+	if err := c.client.CallCtx(ctx, calls...); err != nil {
+		return nil, err
+	}
+	return headers, nil
+}
+
+func (c *BatchHeaderRPCClient) Close() error {
+	return c.client.Close()
 }

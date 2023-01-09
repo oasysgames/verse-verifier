@@ -2,13 +2,16 @@ package hublayer
 
 import (
 	"context"
+	"math"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	tmcall2 "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/multicall2"
 	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
 	tsccv "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/sccverifier"
 )
@@ -21,6 +24,9 @@ type SccTestSuite struct {
 	verse *testhelper.TestBackend
 
 	sm *stakeManagerMock
+
+	mcall2     *tmcall2.Multicall2
+	mcall2Addr common.Address
 
 	scc     *tscc.Scc
 	sccAddr common.Address
@@ -41,6 +47,10 @@ func (s *SccTestSuite) SetupTest() {
 	s.verse = testhelper.NewTestBackend()
 	s.sm = &stakeManagerMock{}
 
+	// deploy `Multicall2` contract
+	s.mcall2Addr, _, s.mcall2, _ = tmcall2.DeployMulticall2(s.hub.TransactOpts(ctx), s.hub)
+	s.hub.Mining()
+
 	// deploy `StateCommitmentChain` contract
 	s.sccAddr, _, s.scc, _ = tscc.DeployScc(s.hub.TransactOpts(ctx), s.hub)
 	s.hub.Mining()
@@ -51,9 +61,21 @@ func (s *SccTestSuite) SetupTest() {
 
 	// setup workers
 	hubSigner := s.hub.Signer()
-	s.stateCollector = NewEventCollector(s.db, s.hub, hubSigner, time.Millisecond, 1000)
+	s.stateCollector = NewEventCollector(&config.Verifier{
+		Interval:         time.Millisecond,
+		EventFilterLimit: 1000,
+	}, s.db, s.hub, hubSigner)
 
-	s.sccSubmitter = NewSccSubmitter(s.db, s.sm, s.sccvAddr, 0, 0, 0, 1.0)
+	s.sccSubmitter = NewSccSubmitter(&config.Submitter{
+		Interval:          0,
+		Concurrency:       0,
+		Confirmations:     0,
+		GasMultiplier:     1.0,
+		BatchSize:         2,
+		MaxGas:            math.MaxInt,
+		VerifierAddress:   s.sccvAddr.String(),
+		Multicall2Address: s.mcall2Addr.String(),
+	}, s.db, s.sm)
 	s.sccSubmitter.AddVerse(s.sccAddr, s.hub)
 }
 
