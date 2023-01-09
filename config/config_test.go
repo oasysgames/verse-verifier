@@ -60,6 +60,9 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		interval: 5s
 		concurrency: 10
 		block_limit: 500
+		event_filter_limit: 50
+		state_collect_limit: 5
+		state_collect_timeout: 1s
 	
 	submitter:
 		enable: true
@@ -67,6 +70,10 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		concurrency: 10
 		confirmations: 4
 		gas_multiplier: 1.5
+		batch_size: 100
+		max_gas: 1_000
+		verifier_address: '0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA'
+		multicall2_address: '0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5'
 		targets:
 			- chain_id: 12345
 			  wallet: wallet1
@@ -119,20 +126,27 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		},
 	}, got.P2P)
 
-	s.Equal(verifier{
-		Enable:      true,
-		Wallet:      "wallet1",
-		Interval:    5 * time.Second,
-		Concurrency: 10,
-		BlockLimit:  500,
+	s.Equal(Verifier{
+		Enable:              true,
+		Wallet:              "wallet1",
+		Interval:            5 * time.Second,
+		Concurrency:         10,
+		BlockLimit:          500,
+		EventFilterLimit:    50,
+		StateCollectLimit:   5,
+		StateCollectTimeout: time.Second,
 	}, got.Verifier)
 
-	s.Equal(submitter{
-		Enable:        true,
-		Concurrency:   10,
-		Interval:      5 * time.Second,
-		Confirmations: 4,
-		GasMultiplier: 1.5,
+	s.Equal(Submitter{
+		Enable:            true,
+		Concurrency:       10,
+		Interval:          5 * time.Second,
+		Confirmations:     4,
+		GasMultiplier:     1.5,
+		BatchSize:         100,
+		MaxGas:            1_000,
+		VerifierAddress:   "0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA",
+		Multicall2Address: "0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5",
 		Targets: []struct {
 			ChainID uint64 "json:\"chain_id\"     mapstructure:\"chain_id\"     validate:\"required\""
 			Wallet  string "json:\"wallet\" validate:\"required\""
@@ -228,9 +242,16 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(15*time.Second, got.Verifier.Interval)
 	s.Equal(50, got.Verifier.Concurrency)
 	s.Equal(1000, got.Verifier.BlockLimit)
+	s.Equal(1000, got.Verifier.EventFilterLimit)
+	s.Equal(1000, got.Verifier.StateCollectLimit)
+	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
 
 	s.Equal(15*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)
 	s.Equal(6, got.Submitter.Confirmations)
 	s.Equal(1.1, got.Submitter.GasMultiplier)
+	s.Equal(20, got.Submitter.BatchSize)
+	s.Equal(5_000_000, got.Submitter.MaxGas)
+	s.Equal("0x5200000000000000000000000000000000000014", got.Submitter.VerifierAddress)
+	s.Equal("0x5200000000000000000000000000000000000022", got.Submitter.Multicall2Address)
 }
