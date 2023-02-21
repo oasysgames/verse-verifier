@@ -136,6 +136,10 @@ func (w *SccVerifier) Start(ctx context.Context) {
 	}
 }
 
+func (w *SccVerifier) Signer() ethutil.WritableClient {
+	return w.signer
+}
+
 func (w *SccVerifier) AddVerse(scc common.Address, verse ethutil.ReadOnlyClient) {
 	w.verses.Store(scc, verse)
 }

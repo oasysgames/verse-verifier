@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
@@ -184,11 +185,6 @@ func (db *OptimismDatabase) SaveSignature(
 		"approved":            approved,
 		"signature":           signature,
 	}
-	if id != nil {
-		values["id"] = *id
-	} else {
-		values["id"] = ulid.Make().String()
-	}
 
 	if previousID != nil {
 		values["previous_id"] = *previousID
@@ -199,6 +195,7 @@ func (db *OptimismDatabase) SaveSignature(
 		))`, _signer.ID)
 	}
 
+	var created OptimismSignature
 	err = db.db.Transaction(func(s *gorm.DB) error {
 		tx := s.Model(&OptimismSignature{}).
 			Where("signer_id = ? AND optimism_scc_id = ?", _signer.ID, _scc.ID).
@@ -208,14 +205,34 @@ func (db *OptimismDatabase) SaveSignature(
 			return tx.Error
 		}
 
-		tx = s.Model(&OptimismSignature{}).Create(values)
-		return tx.Error
+		if id != nil {
+			values["id"] = *id
+		} else {
+			values["id"] = ulid.Make().String()
+		}
+
+		if tx = s.Model(&OptimismSignature{}).Create(values); tx.Error != nil {
+			return tx.Error
+		}
+
+		tx = s.
+			Joins("Signer").
+			Joins("OptimismScc").
+			First(&created, "optimism_signatures.id = ?", values["id"])
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		if strings.Compare(created.ID, created.PreviousID) <= 0 {
+			return errors.New("previous id is overtaking")
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return db.FindSignatureByID(values["id"].(string))
+	return &created, nil
 }
 
 func (db *OptimismDatabase) FindLatestSignaturePerSigners() ([]*OptimismSignature, error) {
@@ -304,7 +321,7 @@ func (db *OptimismDatabase) FindSignatures(
 	return rows, nil
 }
 
-// Delete states after the specified index.
+// Delete states after the specified batchIndex.
 func (db *OptimismDatabase) DeleteStates(scc common.Address, batchIndex uint64) (int64, error) {
 	var affected int64
 	err := db.db.Transaction(func(s *gorm.DB) error {
@@ -333,6 +350,7 @@ func (db *OptimismDatabase) DeleteStates(scc common.Address, batchIndex uint64) 
 	return affected, nil
 }
 
+// Delete signatures after the specified batchIndex.
 func (db *OptimismDatabase) DeleteSignatures(
 	signer common.Address,
 	scc common.Address,

@@ -2,16 +2,13 @@ package database
 
 import (
 	"math/big"
-	"math/rand"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
-	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/suite"
-	"gorm.io/gorm"
 )
 
 func TestOptimismDatabase(t *testing.T) {
@@ -19,20 +16,14 @@ func TestOptimismDatabase(t *testing.T) {
 }
 
 type OptimismDatabaseTestSuite struct {
-	testhelper.Suite
+	DatabaseTestSuite
 
-	db    *OptimismDatabase
-	rawdb *gorm.DB
+	db *OptimismDatabase
 }
 
 func (s *OptimismDatabaseTestSuite) SetupTest() {
-	// Setup database
-	db, err := NewDatabase(":memory:")
-	if err != nil {
-		panic(err)
-	}
-	s.db = db.Optimism
-	s.rawdb = db.db
+	s.DatabaseTestSuite.SetupTest()
+	s.db = s.DatabaseTestSuite.db.Optimism
 }
 
 func (s *OptimismDatabaseTestSuite) TestFindOrCreateSigner() {
@@ -238,6 +229,13 @@ func (s OptimismDatabaseTestSuite) TestSaveSignature() {
 		s.RandAddress(), scc.Address, batchIndex+2, batchRoot,
 		uint64(batchSize), uint64(prevTotalElements), extraData, approved, signature)
 	s.Equal("", got2.PreviousID)
+
+	// overtaking test
+	id1, id2 := ulid.Make().String(), ulid.Make().String()
+	_, err := s.db.SaveSignature(&id1, &id2,
+		s.RandAddress(), scc.Address, batchIndex+3, batchRoot,
+		uint64(batchSize), uint64(prevTotalElements), extraData, approved, signature)
+	s.ErrorContains(err, "previous id is overtaking")
 }
 
 func (s OptimismDatabaseTestSuite) TestFindSignatureByID() {
@@ -509,47 +507,4 @@ func (s *OptimismDatabaseTestSuite) TestDeleteSignatures() {
 	s.Equal(int64(4), rows1)
 	assert(signer0, scc0, s.Range(0, 3))
 	assert(signer1, scc1, s.Range(0, 6))
-}
-
-func (s *OptimismDatabaseTestSuite) createSigner() *Signer {
-	signer := &Signer{Address: s.RandAddress()}
-	s.NoDBError(s.rawdb.Create(signer))
-	return signer
-}
-
-func (s *OptimismDatabaseTestSuite) createSCC() *OptimismScc {
-	scc := &OptimismScc{Address: s.RandAddress()}
-	s.NoDBError(s.rawdb.Create(scc))
-	return scc
-}
-
-func (s *OptimismDatabaseTestSuite) createState(scc *OptimismScc, index int) *OptimismState {
-	state := &OptimismState{
-		OptimismScc:       *scc,
-		BatchIndex:        uint64(index),
-		BatchRoot:         s.ItoHash(index),
-		BatchSize:         uint64(rand.Intn(99)),
-		PrevTotalElements: uint64(rand.Intn(99)),
-		ExtraData:         s.RandBytes(),
-	}
-	s.NoDBError(s.rawdb.Create(state))
-	return state
-}
-
-func (s *OptimismDatabaseTestSuite) createSignature(
-	signer *Signer,
-	scc *OptimismScc,
-	index int,
-) *OptimismSignature {
-	sig := &OptimismSignature{
-		ID:          ulid.Make().String(),
-		PreviousID:  ulid.Make().String(),
-		Signer:      *signer,
-		OptimismScc: *scc,
-		BatchIndex:  uint64(index),
-		BatchRoot:   s.RandHash(),
-		Signature:   RandSignature(),
-	}
-	s.NoDBError(s.rawdb.Create(sig))
-	return sig
 }

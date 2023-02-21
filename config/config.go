@@ -24,6 +24,7 @@ var (
 		"verifier.event_filter_limit":            1000,
 		"verifier.state_collect_limit":           1000,
 		"verifier.state_collect_timeout":         15 * time.Second,
+		"verifier.db_optimize_interval":          time.Hour,
 		"submitter.interval":                     15 * time.Second,
 		"submitter.concurrency":                  50,
 		"submitter.confirmations":                6,
@@ -201,6 +202,9 @@ type Verifier struct {
 
 	// Timeout for state root collection.
 	StateCollectTimeout time.Duration `json:"state_collect_timeout" mapstructure:"state_collect_timeout"`
+
+	// Interval to optimize database.
+	OptimizeInterval time.Duration `json:"db_optimize_interval" mapstructure:"db_optimize_interval"`
 }
 
 type Submitter struct {
