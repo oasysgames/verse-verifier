@@ -63,6 +63,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		event_filter_limit: 50
 		state_collect_limit: 5
 		state_collect_timeout: 1s
+		db_optimize_interval: 2s
 	
 	submitter:
 		enable: true
@@ -135,6 +136,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		EventFilterLimit:    50,
 		StateCollectLimit:   5,
 		StateCollectTimeout: time.Second,
+		OptimizeInterval:    time.Second * 2,
 	}, got.Verifier)
 
 	s.Equal(Submitter{
@@ -245,6 +247,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(1000, got.Verifier.EventFilterLimit)
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
+	s.Equal(time.Hour, got.Verifier.OptimizeInterval)
 
 	s.Equal(15*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)

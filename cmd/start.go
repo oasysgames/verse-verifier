@@ -25,6 +25,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/ipc"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
 	"github.com/oasysgames/oasys-optimism-verifier/wallet"
 	"github.com/spf13/cobra"
@@ -125,21 +126,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sccVerifier.Start(ctx)
-		}()
-
-		go func() {
-			sub := sccVerifier.SubscribeNewSignature(ctx)
-			defer sub.Cancel()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case sig := <-sub.Next():
-					p2p.PublishSignatures(ctx, []*database.OptimismSignature{sig})
-				}
-			}
+			startSccVerifier(ctx, conf, db, sccVerifier, p2p)
 		}()
 	}
 
@@ -153,6 +140,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		}()
 	}
 
+	// start verse discovery worker
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -457,6 +445,60 @@ func startVerseDiscovery(
 
 	time.Sleep(1 * time.Second)
 	discv.Start(ctx)
+}
+
+func startSccVerifier(
+	ctx context.Context,
+	c *config.Config,
+	db *database.Database,
+	verifier *verselayer.SccVerifier,
+	p2p *p2p.Node,
+) {
+	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		verifier.Start(ctx)
+	}()
+
+	// optimize database every hour
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		tick := util.NewTicker(c.Verifier.OptimizeInterval, 1)
+		defer tick.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				db.Optimism.RepairOvertakingSignatures(verifier.Signer().Signer())
+			}
+		}
+	}()
+
+	// publish new signature via p2p
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		sub := verifier.SubscribeNewSignature(ctx)
+		defer sub.Cancel()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sig := <-sub.Next():
+				p2p.PublishSignatures(ctx, []*database.OptimismSignature{sig})
+			}
+		}
+	}()
+
+	wg.Wait()
 }
 
 func findWallet(
