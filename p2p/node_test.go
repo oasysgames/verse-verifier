@@ -16,7 +16,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
-	"github.com/oklog/ulid/v2"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -108,21 +108,21 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 	}{
 		{
 			&pb.OptimismSignature{
-				Id:     ulid.Make().String(),
+				Id:     util.ULID(nil).String(),
 				Signer: s.signer0[:],
 			},
 			want{s.signer0, s.sigs[s.signer0][s.scc1][99].ID},
 		},
 		{
 			&pb.OptimismSignature{
-				Id:     ulid.Make().String(),
+				Id:     util.ULID(nil).String(),
 				Signer: s.signer1[:],
 			},
 			want{s.signer1, s.sigs[s.signer1][s.scc1][199].ID},
 		},
 		{
 			&pb.OptimismSignature{
-				Id:     ulid.Make().String(),
+				Id:     util.ULID(nil).String(),
 				Signer: s.signer2[:],
 			},
 			want{s.signer2, ""},
@@ -225,7 +225,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 	}{
 		{
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer0][s.scc0][49].ID,
 				Signer:            s.signer0[:],
 				Scc:               s.scc0[:],
@@ -240,7 +240,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 		},
 		{
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer1][s.scc0][99].ID,
 				Signer:            s.signer1[:],
 				Scc:               s.scc0[:],
@@ -255,7 +255,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 		},
 		{
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer1][s.scc0][99].ID,
 				Signer:            s.signer1[:],
 				Scc:               s.scc0[:],
@@ -271,7 +271,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 		// new signer
 		{
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        "",
 				Signer:            s.signer2[:],
 				Scc:               s.scc0[:],
@@ -287,7 +287,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 		// overwrite
 		{
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer0][s.scc0][49].ID,
 				Signer:            s.signer0[:],
 				Scc:               s.scc0[:],
@@ -303,8 +303,8 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 		// Previous ID does not exists
 		{
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
-				PreviousId:        ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
+				PreviousId:        util.ULID(nil).String(),
 				Signer:            s.signer0[:],
 				Scc:               s.scc0[:],
 				BatchIndex:        1001,

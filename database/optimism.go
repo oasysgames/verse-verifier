@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
-	"github.com/oklog/ulid/v2"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -208,7 +208,7 @@ func (db *OptimismDatabase) SaveSignature(
 		if id != nil {
 			values["id"] = *id
 		} else {
-			values["id"] = ulid.Make().String()
+			values["id"] = util.ULID(nil).String()
 		}
 
 		if tx = s.Model(&OptimismSignature{}).Create(values); tx.Error != nil {

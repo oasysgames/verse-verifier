@@ -4,7 +4,7 @@ import (
 	"math/rand"
 
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
-	"github.com/oklog/ulid/v2"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
 )
 
@@ -56,8 +56,8 @@ func (s *DatabaseTestSuite) createSignature(
 	index int,
 ) *OptimismSignature {
 	sig := &OptimismSignature{
-		ID:          ulid.Make().String(),
-		PreviousID:  ulid.Make().String(),
+		ID:          util.ULID(nil).String(),
+		PreviousID:  util.ULID(nil).String(),
 		Signer:      *signer,
 		OptimismScc: *scc,
 		BatchIndex:  uint64(index),
