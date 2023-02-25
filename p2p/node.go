@@ -337,6 +337,17 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 				continue
 			}
 
+			if res.PreviousId != "" {
+				_, err := w.db.Optimism.FindSignatureByID(res.PreviousId)
+				if errors.Is(err, database.ErrNotFound) {
+					w.log.Warn("Previous ID does not exist", logctx...)
+					return
+				} else if err != nil {
+					w.log.Error("Failed to find previous signature", append(logctx, "err", err)...)
+					return
+				}
+			}
+
 			_, err := w.db.Optimism.SaveSignature(
 				&res.Id, &res.PreviousId,
 				signer,

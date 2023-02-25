@@ -492,7 +492,7 @@ func startSccVerifier(
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				db.Optimism.RepairOvertakingSignatures(verifier.Signer().Signer())
+				db.Optimism.RepairPreviousID(verifier.Signer().Signer())
 			}
 		}
 	}()
