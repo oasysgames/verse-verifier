@@ -17,6 +17,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
+	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -103,8 +104,8 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 		idAfter string
 	}
 	cases := []struct {
-		pubsub *pb.OptimismSignature
-		want   want
+		msg  *pb.OptimismSignature
+		want want
 	}{
 		{
 			&pb.OptimismSignature{
@@ -145,14 +146,21 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 		s.Len(gots, len(cases))
 		for i, tt := range cases {
 			s.Equal(tt.want.signer[:], gots[i].Signer, i)
-			s.Equal(tt.want.idAfter, gots[i].IdAfter, i)
+
+			if tt.want.idAfter == "" {
+				s.Equal("", gots[i].IdAfter, i)
+			} else {
+				got := ulid.MustParse(gots[i].IdAfter)
+				want := ulid.MustParse(tt.want.idAfter)
+				s.Equal(want.Time()-1000, got.Time())
+			}
 		}
 	})
 
 	// publish message
 	m := &pb.OptimismSignatureExchange{}
 	for _, tt := range cases {
-		m.Latests = append(m.Latests, tt.pubsub)
+		m.Latests = append(m.Latests, tt.msg)
 	}
 	s.node1.handleOptimismSignatureExchangeFromPubSub(ctx, s.node2.h.ID(), m)
 

@@ -21,6 +21,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
+	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -177,23 +178,39 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 ) {
 	// get latest signatures for each signer
 	var reqs []*pb.OptimismSignatureExchange_Request
-	for _, latest := range recv.Latests {
-		loc, err := w.db.Optimism.FindLatestSignatureBySigner(
-			common.BytesToAddress(latest.Signer))
+	for _, remote := range recv.Latests {
+		signer := common.BytesToAddress(remote.Signer)
+		local, err := w.db.Optimism.FindLatestSignatureBySigner(signer)
 
-		if errors.Is(err, database.ErrNotFound) {
-			// request all signatures to peer
-			reqs = append(reqs, &pb.OptimismSignatureExchange_Request{
-				Signer:  latest.Signer,
-				IdAfter: "",
-			})
-		} else if err == nil && strings.Compare(latest.Id, loc.ID) == 1 {
-			// request the latest local signature or later to peer
-			reqs = append(reqs, &pb.OptimismSignatureExchange_Request{
-				Signer:  latest.Signer,
-				IdAfter: loc.ID,
-			})
+		var idAfter string
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				w.log.Info("Request all signatures", "signer", signer.Hex())
+			} else {
+				w.log.Error("Failed to find the latest signature", "signer", signer.Hex(), "err", err)
+				continue
+			}
+		} else if strings.Compare(local.ID, remote.Id) == 1 {
+			// fully synchronized or less than local
+			continue
+		} else {
+			if localID, err := ulid.ParseStrict(local.ID); err == nil {
+				// Prevent out-of-sync by specifying the ID of 1 second ago
+				ms := localID.Time() - 1000
+				idAfter = ulid.MustNew(ms, ulid.DefaultEntropy()).String()
+				w.log.Info("Request signatures", "signer", signer.Hex(),
+					"remote-id", remote.Id, "local-id", local.ID,
+					"created-after", time.UnixMilli(int64(ms)))
+			} else {
+				w.log.Error("Failed to parse ULID", "local-id", local.ID, "err", err)
+				continue
+			}
 		}
+
+		reqs = append(reqs, &pb.OptimismSignatureExchange_Request{
+			Signer:  remote.Signer,
+			IdAfter: idAfter,
+		})
 	}
 	if len(reqs) == 0 {
 		return
@@ -216,10 +233,6 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	if err = writeStream(s, m); err != nil {
 		w.log.Error("Failed to send signature request", "err", err)
 		return
-	}
-	for _, req := range reqs {
-		w.log.Info("Request signatures",
-			"signer", common.Bytes2Hex(req.Signer), "id-after", req.IdAfter)
 	}
 
 	if err := writeStream(s, eom); err != nil {
@@ -300,17 +313,6 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 			// deduplication
 			if _, err := w.db.Optimism.FindSignatureByID(res.Id); err == nil {
 				continue
-			}
-
-			if res.PreviousId != "" {
-				_, err := w.db.Optimism.FindSignatureByID(res.PreviousId)
-				if errors.Is(err, database.ErrNotFound) {
-					w.log.Warn("Previous ID does not exist", logctx...)
-					return
-				} else if err != nil {
-					w.log.Error("Failed to find previous signature", append(logctx, "err", err)...)
-					return
-				}
 			}
 
 			_, err := w.db.Optimism.SaveSignature(
