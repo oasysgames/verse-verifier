@@ -33,6 +33,9 @@ var (
 		"submitter.max_gas":                      5_000_000,
 		"submitter.verifier_address":             "0x5200000000000000000000000000000000000014",
 		"submitter.multicall2_address":           "0x5200000000000000000000000000000000000022",
+		"beacon.enable":                          true,
+		"beacon.endpoint":                        "https://script.google.com/macros/s/AKfycbzJpDKyn271jbm5otk_BxGkrS2b1YdMQerVq2-XxLdTOdhUPKCZICqvagvGgByxx_nq0Q/exec",
+		"beacon.interval":                        15 * time.Minute,
 	}
 )
 
@@ -110,6 +113,9 @@ type Config struct {
 
 	// Submitter configuration.
 	Submitter Submitter `json:"submitter" mapstructure:"submitter"`
+
+	// Beacon worker configuration.
+	Beacon Beacon `json:"beacon" mapstructure:"beacon"`
 }
 
 func (c *Config) DatabasePath() string {
@@ -242,4 +248,15 @@ type Submitter struct {
 		// Name of the wallet to send transaction.
 		Wallet string `json:"wallet" validate:"required"`
 	} `json:"targets" validate:"dive"`
+}
+
+type Beacon struct {
+	// Whether to enable worker.
+	Enable bool `json:"enable"`
+
+	// URL of beacon.
+	Endpoint string `json:"endpoint" validate:"omitempty,url"`
+
+	// Interval for send beacon.
+	Interval time.Duration `json:"interval"`
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/suite"
 )
@@ -231,7 +232,7 @@ func (s OptimismDatabaseTestSuite) TestSaveSignature() {
 	s.Equal("", got2.PreviousID)
 
 	// overtaking test
-	id1, id2 := ulid.Make().String(), ulid.Make().String()
+	id1, id2 := util.ULID(nil).String(), util.ULID(nil).String()
 	_, err := s.db.SaveSignature(&id1, &id2,
 		s.RandAddress(), scc.Address, batchIndex+3, batchRoot,
 		uint64(batchSize), uint64(prevTotalElements), extraData, approved, signature)

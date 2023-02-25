@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/oasysgames/oasys-optimism-verifier/beacon"
 	"github.com/oasysgames/oasys-optimism-verifier/cmd/ipccmd"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
@@ -27,6 +28,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/p2p"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
+	"github.com/oasysgames/oasys-optimism-verifier/version"
 	"github.com/oasysgames/oasys-optimism-verifier/wallet"
 	"github.com/spf13/cobra"
 )
@@ -127,6 +129,21 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		go func() {
 			defer wg.Done()
 			startSccVerifier(ctx, conf, db, sccVerifier, p2p)
+		}()
+	}
+
+	// start beacon worker
+	if sccVerifier != nil && conf.Beacon.Enable {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bw := beacon.NewBeaconWorker(
+				&conf.Beacon,
+				http.DefaultClient,
+				sccVerifier.Signer().Signer(),
+				version.SemVer(),
+			)
+			bw.Start(ctx)
 		}()
 	}
 
@@ -264,7 +281,7 @@ func newP2P(ctx context.Context, c *config.Config, db *database.Database) *p2p.N
 	// connect to bootstrap peers and setup peer discovery
 	p2p.Bootstrap(ctx, host, dht, p2p.ConvertPeers(c.P2P.Bootnodes))
 
-	node, err := p2p.NewNode(db, host, dht, bwm, c.P2P.PublishInterval)
+	node, err := p2p.NewNode(db, host, dht, bwm, c.P2P.PublishInterval, c.HubLayer.ChainId)
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}
@@ -475,7 +492,7 @@ func startSccVerifier(
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				db.Optimism.RepairOvertakingSignatures(verifier.Signer().Signer())
+				db.Optimism.RepairPreviousID(verifier.Signer().Signer())
 			}
 		}
 	}()

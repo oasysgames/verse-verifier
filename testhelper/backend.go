@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"io/ioutil"
 	"math/big"
 	"os"
@@ -64,6 +65,18 @@ type TestBackend struct {
 	account accounts.Account
 }
 
+func (b *TestBackend) NewAccountBackend() *TestBackend {
+	priv, _ := ecdsa.GenerateKey(crypto.S256(), rand.Reader)
+	account, _ := b.ks.ImportECDSA(priv, "")
+	b.ks.Unlock(account, "")
+
+	return &TestBackend{
+		SimulatedBackend: b.SimulatedBackend,
+		ks:               b.ks,
+		account:          account,
+	}
+}
+
 func (b *TestBackend) URL() string {
 	return "SimulatedBackend"
 }
@@ -92,19 +105,19 @@ func (b *TestBackend) HeaderByNumber(ctx context.Context, number *big.Int) (*typ
 	return header, err
 }
 
-func (s *TestBackend) Mining() *types.Header {
-	s.Commit()
-	return s.Blockchain().CurrentHeader()
+func (b *TestBackend) Mining() *types.Header {
+	b.Commit()
+	return b.Blockchain().CurrentHeader()
 }
 
-func (s *TestBackend) GetHeaderBatch(
+func (b *TestBackend) GetHeaderBatch(
 	ctx context.Context,
 	start uint64,
 	size, limit int,
 ) ([]*types.Header, error) {
 	headers := make([]*types.Header, size)
 	for i := 0; i < size; i++ {
-		h, err := s.HeaderByNumber(ctx, new(big.Int).SetUint64(start+uint64(i)))
+		h, err := b.HeaderByNumber(ctx, new(big.Int).SetUint64(start+uint64(i)))
 		if err != nil {
 			return nil, err
 		}
@@ -123,8 +136,8 @@ func (b *TestBackend) Signer() common.Address {
 	return b.account.Address
 }
 
-func (b *TestBackend) SignData(hash []byte) (sig []byte, err error) {
-	return b.ks.SignHash(b.account, crypto.Keccak256(hash))
+func (b *TestBackend) SignData(data []byte) (sig []byte, err error) {
+	return b.ks.SignHash(b.account, crypto.Keccak256(data))
 }
 
 func (b *TestBackend) SignTx(tx *types.Transaction) (*types.Transaction, error) {

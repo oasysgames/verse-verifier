@@ -78,6 +78,11 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		targets:
 			- chain_id: 12345
 			  wallet: wallet1
+
+	beacon:
+		enable: true
+		endpoint: http://127.0.0.1/beacon
+		interval: 1s
 	`)
 
 	got, _ := NewConfig([]byte(strings.ReplaceAll(input, "\t", "  ")))
@@ -159,6 +164,12 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			},
 		},
 	}, got.Submitter)
+
+	s.Equal(Beacon{
+		Enable:   true,
+		Endpoint: "http://127.0.0.1/beacon",
+		Interval: time.Second,
+	}, got.Beacon)
 }
 
 func (s *ConfigTestSuite) TestValidate() {
@@ -257,4 +268,11 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(5_000_000, got.Submitter.MaxGas)
 	s.Equal("0x5200000000000000000000000000000000000014", got.Submitter.VerifierAddress)
 	s.Equal("0x5200000000000000000000000000000000000022", got.Submitter.Multicall2Address)
+
+	s.True(got.Beacon.Enable)
+	s.Equal(
+		"https://script.google.com/macros/s/AKfycbzJpDKyn271jbm5otk_BxGkrS2b1YdMQerVq2-XxLdTOdhUPKCZICqvagvGgByxx_nq0Q/exec",
+		got.Beacon.Endpoint,
+	)
+	s.Equal(15*time.Minute, got.Beacon.Interval)
 }

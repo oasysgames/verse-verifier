@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
-	"github.com/oklog/ulid/v2"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -197,29 +197,28 @@ func (db *OptimismDatabase) SaveSignature(
 
 	var created OptimismSignature
 	err = db.db.Transaction(func(s *gorm.DB) error {
-		tx := s.Model(&OptimismSignature{}).
+		// Delete the same batch index signature as it may be recreated for reasons such as chain reorganization.
+		if tx := s.Model(&OptimismSignature{}).
 			Where("signer_id = ? AND optimism_scc_id = ?", _signer.ID, _scc.ID).
-			Where("batch_index = ?", batchIndex).
-			Delete(&OptimismSignature{})
-		if tx.Error != nil {
+			Where("batch_index = ? AND signature != ?", batchIndex, signature).
+			Delete(&OptimismSignature{}); tx.Error != nil {
 			return tx.Error
 		}
 
 		if id != nil {
 			values["id"] = *id
 		} else {
-			values["id"] = ulid.Make().String()
+			values["id"] = util.ULID(nil).String()
 		}
 
-		if tx = s.Model(&OptimismSignature{}).Create(values); tx.Error != nil {
+		if tx := s.Model(&OptimismSignature{}).Create(values); tx.Error != nil {
 			return tx.Error
 		}
 
-		tx = s.
+		if tx := s.
 			Joins("Signer").
 			Joins("OptimismScc").
-			First(&created, "optimism_signatures.id = ?", values["id"])
-		if tx.Error != nil {
+			First(&created, "optimism_signatures.id = ?", values["id"]); tx.Error != nil {
 			return tx.Error
 		}
 

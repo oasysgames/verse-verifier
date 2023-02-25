@@ -16,6 +16,8 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
+	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/suite"
 )
@@ -27,11 +29,10 @@ func TestNode(t *testing.T) {
 type NodeTestSuite struct {
 	testhelper.Suite
 
-	bootnode *Node
-	node1    *Node
-	node2    *Node
-
 	baseTime time.Time
+	b0       *testhelper.TestBackend
+	b1       *testhelper.TestBackend
+	b2       *testhelper.TestBackend
 	signer0  common.Address
 	signer1  common.Address
 	signer2  common.Address
@@ -39,21 +40,28 @@ type NodeTestSuite struct {
 	scc1     common.Address
 	scc2     common.Address
 	sigs     map[common.Address]map[common.Address][]*database.OptimismSignature
+
+	bootnode *Node
+	node1    *Node
+	node2    *Node
 }
 
 func (s *NodeTestSuite) SetupTest() {
-	s.bootnode = s.newWorker()
-	s.node1 = s.newWorker()
-	s.node2 = s.newWorker()
-
 	s.baseTime = time.Now().UTC()
-	s.signer0 = s.RandAddress()
-	s.signer1 = s.RandAddress()
-	s.signer2 = s.RandAddress()
+	s.b0 = testhelper.NewTestBackend()
+	s.b1 = s.b0.NewAccountBackend()
+	s.b2 = s.b0.NewAccountBackend()
+	s.signer0 = s.b0.Signer()
+	s.signer1 = s.b1.Signer()
+	s.signer2 = s.b2.Signer()
 	s.scc0 = s.RandAddress()
 	s.scc1 = s.RandAddress()
 	s.scc2 = s.RandAddress()
 	s.sigs = map[common.Address]map[common.Address][]*database.OptimismSignature{}
+
+	s.bootnode = s.newWorker()
+	s.node1 = s.newWorker()
+	s.node2 = s.newWorker()
 
 	// setup libp2p
 	bootstrapPeers := ConvertPeers([]string{
@@ -103,26 +111,26 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 		idAfter string
 	}
 	cases := []struct {
-		pubsub *pb.OptimismSignature
-		want   want
+		msg  *pb.OptimismSignature
+		want want
 	}{
 		{
 			&pb.OptimismSignature{
-				Id:     ulid.Make().String(),
+				Id:     util.ULID(nil).String(),
 				Signer: s.signer0[:],
 			},
 			want{s.signer0, s.sigs[s.signer0][s.scc1][99].ID},
 		},
 		{
 			&pb.OptimismSignature{
-				Id:     ulid.Make().String(),
+				Id:     util.ULID(nil).String(),
 				Signer: s.signer1[:],
 			},
 			want{s.signer1, s.sigs[s.signer1][s.scc1][199].ID},
 		},
 		{
 			&pb.OptimismSignature{
-				Id:     ulid.Make().String(),
+				Id:     util.ULID(nil).String(),
 				Signer: s.signer2[:],
 			},
 			want{s.signer2, ""},
@@ -145,14 +153,21 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 		s.Len(gots, len(cases))
 		for i, tt := range cases {
 			s.Equal(tt.want.signer[:], gots[i].Signer, i)
-			s.Equal(tt.want.idAfter, gots[i].IdAfter, i)
+
+			if tt.want.idAfter == "" {
+				s.Equal("", gots[i].IdAfter, i)
+			} else {
+				got := ulid.MustParse(gots[i].IdAfter)
+				want := ulid.MustParse(tt.want.idAfter)
+				s.Equal(want.Time()-1000, got.Time())
+			}
 		}
 	})
 
 	// publish message
 	m := &pb.OptimismSignatureExchange{}
 	for _, tt := range cases {
-		m.Latests = append(m.Latests, tt.pubsub)
+		m.Latests = append(m.Latests, tt.msg)
 	}
 	s.node1.handleOptimismSignatureExchangeFromPubSub(ctx, s.node2.h.ID(), m)
 
@@ -221,13 +236,14 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 	cases := []struct {
+		b    *testhelper.TestBackend
 		want *pb.OptimismSignature
 	}{
 		{
+			s.b0,
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer0][s.scc0][49].ID,
-				Signer:            s.signer0[:],
 				Scc:               s.scc0[:],
 				BatchIndex:        1000,
 				BatchRoot:         s.RandHash().Bytes(),
@@ -235,14 +251,13 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 				PrevTotalElements: uint64(rand.Intn(100)),
 				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
 				Approved:          true,
-				Signature:         database.RandSignature().Bytes(),
 			},
 		},
 		{
+			s.b1,
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer1][s.scc0][99].ID,
-				Signer:            s.signer1[:],
 				Scc:               s.scc0[:],
 				BatchIndex:        1000,
 				BatchRoot:         s.RandHash().Bytes(),
@@ -250,14 +265,13 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 				PrevTotalElements: uint64(rand.Intn(100)),
 				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
 				Approved:          true,
-				Signature:         database.RandSignature().Bytes(),
 			},
 		},
 		{
+			s.b1,
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer1][s.scc0][99].ID,
-				Signer:            s.signer1[:],
 				Scc:               s.scc0[:],
 				BatchIndex:        1001,
 				BatchRoot:         s.RandHash().Bytes(),
@@ -265,15 +279,14 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 				PrevTotalElements: uint64(rand.Intn(100)),
 				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
 				Approved:          true,
-				Signature:         database.RandSignature().Bytes(),
 			},
 		},
 		// new signer
 		{
+			s.b2,
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        "",
-				Signer:            s.signer2[:],
 				Scc:               s.scc0[:],
 				BatchIndex:        0,
 				BatchRoot:         s.RandHash().Bytes(),
@@ -281,15 +294,14 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 				PrevTotalElements: uint64(rand.Intn(100)),
 				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
 				Approved:          true,
-				Signature:         database.RandSignature().Bytes(),
 			},
 		},
 		// overwrite
 		{
+			s.b0,
 			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
+				Id:                util.ULID(nil).String(),
 				PreviousId:        s.sigs[s.signer0][s.scc0][49].ID,
-				Signer:            s.signer0[:],
 				Scc:               s.scc0[:],
 				BatchIndex:        s.sigs[s.signer0][s.scc0][1].BatchIndex,
 				BatchRoot:         s.RandHash().Bytes(),
@@ -297,23 +309,6 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 				PrevTotalElements: uint64(rand.Intn(99999)),
 				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(99999))),
 				Approved:          true,
-				Signature:         database.RandSignature().Bytes(),
-			},
-		},
-		// Previous ID does not exists
-		{
-			&pb.OptimismSignature{
-				Id:                ulid.Make().String(),
-				PreviousId:        ulid.Make().String(),
-				Signer:            s.signer0[:],
-				Scc:               s.scc0[:],
-				BatchIndex:        1001,
-				BatchRoot:         s.RandHash().Bytes(),
-				BatchSize:         uint64(rand.Intn(100)),
-				PrevTotalElements: uint64(rand.Intn(100)),
-				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
-				Approved:          true,
-				Signature:         database.RandSignature().Bytes(),
 			},
 		},
 	}
@@ -321,6 +316,17 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 	// send message
 	responses := []*pb.OptimismSignature{}
 	for _, tt := range cases {
+		m := verselayer.NewSccMessage(
+			tt.b.ChainID(),
+			common.BytesToAddress(tt.want.Scc),
+			new(big.Int).SetUint64(tt.want.BatchIndex),
+			common.BytesToHash(tt.want.BatchRoot),
+			tt.want.Approved,
+		)
+		sig, _ := m.Signature(tt.b.SignData)
+
+		tt.want.Signer = tt.b.Signer().Bytes()
+		tt.want.Signature = sig[:]
 		responses = append(responses, tt.want)
 	}
 	st, _ := s.node2.h.NewStream(context.Background(), s.node1.h.ID(), streamProtocol)
@@ -337,26 +343,22 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 	s.Len(reads, 1)
 	s.NotNil(reads[0].GetEom())
 
-	for i, tt := range cases {
+	for _, tt := range cases {
 		signer := common.BytesToAddress(tt.want.Signer)
 		scc := common.BytesToAddress(tt.want.Scc)
 		index := tt.want.BatchIndex
 		got, _ := s.node1.db.Optimism.FindSignatures(nil, &signer, &scc, &index, 1, 0)
 
-		if i == len(cases)-1 {
-			s.Len(got, 0)
-		} else {
-			s.Equal(tt.want.Id, got[0].ID)
-			s.Equal(tt.want.Signer, got[0].Signer.Address[:])
-			s.Equal(tt.want.Scc, got[0].OptimismScc.Address[:])
-			s.Equal(tt.want.BatchIndex, got[0].BatchIndex)
-			s.Equal(tt.want.BatchRoot, got[0].BatchRoot[:])
-			s.Equal(tt.want.BatchSize, got[0].BatchSize)
-			s.Equal(tt.want.PrevTotalElements, got[0].PrevTotalElements)
-			s.Equal(tt.want.ExtraData, got[0].ExtraData)
-			s.Equal(tt.want.Approved, got[0].Approved)
-			s.Equal(tt.want.Signature, got[0].Signature[:])
-		}
+		s.Equal(tt.want.Id, got[0].ID)
+		s.Equal(tt.want.Signer, got[0].Signer.Address[:])
+		s.Equal(tt.want.Scc, got[0].OptimismScc.Address[:])
+		s.Equal(tt.want.BatchIndex, got[0].BatchIndex)
+		s.Equal(tt.want.BatchRoot, got[0].BatchRoot[:])
+		s.Equal(tt.want.BatchSize, got[0].BatchSize)
+		s.Equal(tt.want.PrevTotalElements, got[0].PrevTotalElements)
+		s.Equal(tt.want.ExtraData, got[0].ExtraData)
+		s.Equal(tt.want.Approved, got[0].Approved)
+		s.Equal(tt.want.Signature, got[0].Signature[:])
 	}
 }
 
@@ -411,7 +413,7 @@ func (s *NodeTestSuite) newWorker() *Node {
 	priv, _, _, _ := GenerateKeyPair()
 	host, dht, bwm, _ := NewHost(context.Background(), "127.0.0.1", s.findPort(5), priv)
 
-	worker, err := NewNode(db, host, dht, bwm, 0)
+	worker, err := NewNode(db, host, dht, bwm, 0, s.b0.ChainID().Uint64())
 	if err != nil {
 		s.Fail(err.Error())
 	}

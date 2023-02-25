@@ -6,16 +6,13 @@ import (
 	"os"
 
 	"github.com/oasysgames/oasys-optimism-verifier/config"
+	"github.com/oasysgames/oasys-optimism-verifier/version"
 	"github.com/spf13/cobra"
 )
 
 const (
-	commandName  = "oasvlfy"
-	versionMajor = 0
-	versionMinor = 0
-	versionPatch = 4
-
-	configFlag = "config"
+	commandName = "oasvlfy"
+	configFlag  = "config"
 )
 
 var rootCmd = &cobra.Command{
@@ -26,7 +23,7 @@ var rootCmd = &cobra.Command{
   Copyright 2022 Oasys | Blockchain for Games All Rights Reserved.
   
 Version:
-  %d.%d.%d`, commandName, versionMajor, versionMinor, versionPatch),
+  %s`, commandName, version.SemVer()),
 }
 
 func Execute() {
