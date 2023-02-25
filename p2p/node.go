@@ -1,15 +1,18 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/metrics"
@@ -19,8 +22,10 @@ import (
 	ps "github.com/libp2p/go-libp2p-pubsub"
 	msgio "github.com/libp2p/go-msgio"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
+	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
 	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/proto"
 )
@@ -43,6 +48,7 @@ type Node struct {
 	dht             *kaddht.IpfsDHT
 	bwm             *metrics.BandwidthCounter
 	publishInterval time.Duration
+	hubLayerChainID *big.Int
 
 	topic *ps.Topic
 	sub   *ps.Subscription
@@ -55,6 +61,7 @@ func NewNode(
 	dht *kaddht.IpfsDHT,
 	bwm *metrics.BandwidthCounter,
 	publishInterval time.Duration,
+	hubLayerChainID uint64,
 ) (*Node, error) {
 	_, topic, sub, err := setupPubSub(context.Background(), host, pubsubTopic)
 	if err != nil {
@@ -67,6 +74,7 @@ func NewNode(
 		dht:             dht,
 		bwm:             bwm,
 		publishInterval: publishInterval,
+		hubLayerChainID: new(big.Int).SetUint64(hubLayerChainID),
 		topic:           topic,
 		sub:             sub,
 		log:             log.New("worker", "p2p"),
@@ -180,6 +188,15 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	var reqs []*pb.OptimismSignatureExchange_Request
 	for _, remote := range recv.Latests {
 		signer := common.BytesToAddress(remote.Signer)
+
+		if ok, err := verifySignature(w.hubLayerChainID, remote); !ok || err != nil {
+			w.log.Error("Invalid signature",
+				"signer", signer, "id", remote.Id,
+				"scc", common.BytesToAddress(remote.Scc), "index", remote.BatchIndex,
+				"verify", ok, "err", err)
+			continue
+		}
+
 		local, err := w.db.Optimism.FindLatestSignatureBySigner(signer)
 
 		var idAfter string
@@ -305,9 +322,14 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 			signer := common.BytesToAddress(res.Signer)
 			scc := common.BytesToAddress(res.Scc)
 			logctx := []interface{}{
-				"signer", signer, "scc", scc.Hex(),
-				"id", res.Id, "previous-id", res.PreviousId,
-				"index", res.BatchIndex,
+				"signer", signer, "id", res.Id,
+				"scc", scc.Hex(), "index", res.BatchIndex,
+			}
+
+			if ok, err := verifySignature(w.hubLayerChainID, res); !ok || err != nil {
+				w.log.Error("Invalid signature",
+					append(logctx, "verify", ok, "err", err)...)
+				return
 			}
 
 			// deduplication
@@ -466,4 +488,27 @@ func subscribe(
 	}
 
 	return recv.GetFrom(), &m, nil
+}
+
+func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) (bool, error) {
+	// verify ulid
+	if id, err := ulid.ParseStrict(sig.Id); err != nil {
+		return false, err
+	} else if id.Time() > uint64(time.Now().UnixMilli()) {
+		return false, fmt.Errorf("future ulid: %s, timestamp: %d", sig.Id, id.Time())
+	}
+
+	// verify signer
+	msg := verselayer.NewSccMessage(
+		hubLayerChainID,
+		common.BytesToAddress(sig.Scc),
+		new(big.Int).SetUint64(sig.BatchIndex),
+		common.BytesToHash(sig.BatchRoot),
+		sig.Approved)
+	hash := crypto.Keccak256([]byte(msg.Eip712Msg))
+	if recoverd, err := ethutil.Ecrecover(hash, sig.Signature); err != nil {
+		return false, err
+	} else {
+		return bytes.Equal(recoverd.Bytes(), sig.Signer), nil
+	}
 }

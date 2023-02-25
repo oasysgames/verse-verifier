@@ -8,7 +8,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/lmittmann/w3"
@@ -16,7 +15,7 @@ import (
 	"github.com/lmittmann/w3/w3types"
 )
 
-type SignDataFn = func(data []byte) (sig []byte, err error)
+type SignDataFn = func(hash []byte) (sig []byte, err error)
 
 type ReadOnlyClient interface {
 	bind.ContractBackend
@@ -127,8 +126,7 @@ func (c *writableClient) TransactOpts(ctx context.Context) *bind.TransactOpts {
 }
 
 func (c *writableClient) SignData(data []byte) (sig []byte, err error) {
-	_, msg := accounts.TextAndHash(crypto.Keccak256(data))
-	return c.wallet.SignData(*c.signer, "", []byte(msg))
+	return c.wallet.SignData(*c.signer, "", data)
 }
 
 func (c *writableClient) SignTx(tx *types.Transaction) (*types.Transaction, error) {

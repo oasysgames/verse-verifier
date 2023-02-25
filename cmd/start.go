@@ -281,7 +281,7 @@ func newP2P(ctx context.Context, c *config.Config, db *database.Database) *p2p.N
 	// connect to bootstrap peers and setup peer discovery
 	p2p.Bootstrap(ctx, host, dht, p2p.ConvertPeers(c.P2P.Bootnodes))
 
-	node, err := p2p.NewNode(db, host, dht, bwm, c.P2P.PublishInterval)
+	node, err := p2p.NewNode(db, host, dht, bwm, c.P2P.PublishInterval, c.HubLayer.ChainId)
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}

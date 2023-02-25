@@ -281,20 +281,19 @@ func (w *SccVerifier) verify(
 	approved := bytes.Equal(state.BatchRoot[:], merkleRoot[:])
 
 	// calc and save signature
-	sig, err := calcSignature(
-		w.signer.SignData,
+	msg := NewSccMessage(
 		new(big.Int).SetUint64(w.signer.ChainID().Uint64()),
 		state.OptimismScc.Address,
 		new(big.Int).SetUint64(state.BatchIndex),
 		state.BatchRoot,
 		approved,
 	)
-	if err != nil {
+	if sig, err := msg.Signature(w.signer.SignData); err == nil {
+		return approved, sig, nil
+	} else {
 		w.log.Error("Failed to calculate signature", append(logCtx, "err", err)...)
 		return false, database.Signature{}, err
 	}
-
-	return approved, sig, nil
 }
 
 // Calculates a merkle root for a list of 32-byte leaf hashes.
@@ -338,39 +337,6 @@ func calcMerkleRoot(elements [][32]byte) ([32]byte, error) {
 	}
 
 	return elements[0], nil
-}
-
-func calcSignature(
-	signData ethutil.SignDataFn,
-	hubLayerChainID *big.Int,
-	scc common.Address,
-	batchIndex *big.Int,
-	batchRoot [32]byte,
-	approved bool,
-) (database.Signature, error) {
-	b := common.Big0
-	if approved {
-		b = common.Big1
-	}
-
-	data := bytes.Join([][]byte{
-		common.LeftPadBytes(hubLayerChainID.Bytes(), 32),
-		scc[:],
-		common.LeftPadBytes(batchIndex.Bytes(), 32),
-		batchRoot[:],
-		b.Bytes(),
-	}, nil)
-
-	var sig database.Signature
-	signed, err := signData(data)
-	if err != nil {
-		return sig, err
-	}
-	copy(sig[:], signed)
-
-	// Transform V from 0/1 to 27/28 according to the yellow paper
-	sig[crypto.RecoveryIDOffset] += 27
-	return sig, nil
 }
 
 func toByte32(s []byte) (a [32]byte) {
