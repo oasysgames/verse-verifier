@@ -200,7 +200,8 @@ func (db *OptimismDatabase) SaveSignature(
 		// Delete the same batch index signature as it may be recreated for reasons such as chain reorganization.
 		if tx := s.Model(&OptimismSignature{}).
 			Where("signer_id = ? AND optimism_scc_id = ?", _signer.ID, _scc.ID).
-			Where("batch_index = ? AND signature != ?", batchIndex, signature).
+			// WARNING: Do not condition on signature comparison as this will result in a UNIQUE constraint error.
+			Where("batch_index = ?", batchIndex).
 			Delete(&OptimismSignature{}); tx.Error != nil {
 			return tx.Error
 		}
