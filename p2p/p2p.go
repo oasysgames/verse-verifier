@@ -5,10 +5,8 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"io/ioutil"
-	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p"
@@ -75,36 +73,32 @@ func NewHost(
 	return h, dht, bwm, nil
 }
 
-// Connect to bootstrap peers and setup Kademlia DHT.
-func Bootstrap(
-	ctx context.Context,
-	h host.Host,
-	dht *kaddht.IpfsDHT,
-	bootstrapPeers []peer.AddrInfo,
-) {
+// Setup Kademlia DHT.
+func Bootstrap(ctx context.Context, h host.Host, dht *kaddht.IpfsDHT) {
 	// Bootstrap the DHT. In the default configuration, this spawns a Background
 	// thread that will refresh the peer table every five minutes.
 	dht.Bootstrap(ctx)
+}
 
-	if len(bootstrapPeers) == 0 {
-		return
+// Connect to peers.
+func ConnectPeers(ctx context.Context, h host.Host, peers []peer.AddrInfo) {
+	connectedPeers := map[peer.ID]int{}
+	for _, p := range h.Network().Peers() {
+		connectedPeers[p] = 1
 	}
 
-	for _, p := range bootstrapPeers {
-		go func(p peer.AddrInfo) {
-			for {
-				err := h.Connect(ctx, p)
-				if err == nil {
-					log.Info("Connected to bootstrap peer", "id", p.ID)
-					h.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.AddressTTL)
-					return
-				}
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return
-				}
+	for _, p := range peers {
+		if _, ok := connectedPeers[p.ID]; ok {
+			log.Debug("Peers are already connected", "id", p.ID)
+			continue
+		}
 
-				log.Error("Failed to connect to bootstrap peer", "id", p.ID, "err", err)
-				time.Sleep(5 * time.Second)
+		go func(p peer.AddrInfo) {
+			if err := h.Connect(ctx, p); err == nil {
+				h.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.AddressTTL)
+				log.Info("Connected to peer", "id", p.ID)
+			} else {
+				log.Error("Failed to connect to peer", "id", p.ID, "err", err)
 			}
 		}(p)
 	}

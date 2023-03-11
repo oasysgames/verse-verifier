@@ -289,7 +289,23 @@ func newP2P(
 	}
 
 	// connect to bootstrap peers and setup peer discovery
-	p2p.Bootstrap(ctx, host, dht, p2p.ConvertPeers(c.P2P.Bootnodes))
+	p2p.Bootstrap(ctx, host, dht)
+	bootstrapPeers := p2p.ConvertPeers(c.P2P.Bootnodes)
+	if len(bootstrapPeers) > 0 {
+		go func() {
+			ticker := util.NewTicker(time.Minute, 1)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					p2p.ConnectPeers(ctx, host, p2p.ConvertPeers(c.P2P.Bootnodes))
+				}
+			}
+		}()
+	}
 
 	// ignore self-signed signatures
 	ignoreSigners := []common.Address{}

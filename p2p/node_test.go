@@ -64,11 +64,14 @@ func (s *NodeTestSuite) SetupTest() {
 	s.node2 = s.newWorker()
 
 	// setup libp2p
+	ctx := context.Background()
 	bootstrapPeers := ConvertPeers([]string{
 		maToP2P(s.bootnode.h.Addrs()[0], s.bootnode.h.ID()),
 	})
-	Bootstrap(context.Background(), s.node1.h, s.node1.dht, bootstrapPeers)
-	Bootstrap(context.Background(), s.node2.h, s.node2.dht, bootstrapPeers)
+	Bootstrap(ctx, s.node1.h, s.node1.dht)
+	Bootstrap(ctx, s.node2.h, s.node2.dht)
+	ConnectPeers(ctx, s.node1.h, bootstrapPeers)
+	ConnectPeers(ctx, s.node2.h, bootstrapPeers)
 
 	// create sample records
 	for _, node := range []*Node{s.node1, s.node2} {
