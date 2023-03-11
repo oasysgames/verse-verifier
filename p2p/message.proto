@@ -16,6 +16,7 @@ message Stream {
     bytes misc = 1;
     bytes eom = 2;
     OptimismSignatureExchange optimism_signature_exchange = 3;
+    FindCommonOptimismSignature find_common_optimism_signature = 4;
   }
 }
 
@@ -41,5 +42,15 @@ message OptimismSignatureExchange {
   message Request {
     bytes signer = 1;
     string id_after = 2;
+  }
+}
+
+message FindCommonOptimismSignature {
+  repeated Local locals = 1;
+  optional OptimismSignature found = 2;
+
+  message Local {
+    string id = 1;
+    string previous_id = 2;
   }
 }

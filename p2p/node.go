@@ -49,6 +49,7 @@ type Node struct {
 	bwm             *metrics.BandwidthCounter
 	publishInterval time.Duration
 	hubLayerChainID *big.Int
+	ignoreSigners   map[common.Address]int
 
 	topic *ps.Topic
 	sub   *ps.Subscription
@@ -62,6 +63,7 @@ func NewNode(
 	bwm *metrics.BandwidthCounter,
 	publishInterval time.Duration,
 	hubLayerChainID uint64,
+	ignoreSigners []common.Address,
 ) (*Node, error) {
 	_, topic, sub, err := setupPubSub(context.Background(), host, pubsubTopic)
 	if err != nil {
@@ -75,11 +77,16 @@ func NewNode(
 		bwm:             bwm,
 		publishInterval: publishInterval,
 		hubLayerChainID: new(big.Int).SetUint64(hubLayerChainID),
+		ignoreSigners:   map[common.Address]int{},
 		topic:           topic,
 		sub:             sub,
 		log:             log.New("worker", "p2p"),
 	}
 	worker.h.SetStreamHandler(streamProtocol, worker.handleStream)
+
+	for _, addr := range ignoreSigners {
+		worker.ignoreSigners[addr] = 1
+	}
 
 	return worker, nil
 }
@@ -154,6 +161,7 @@ func (w *Node) handleStream(s network.Stream) {
 	for {
 		m, err := readStream(s)
 		if errors.Is(err, errUnavailableStream) {
+			w.log.Error("Failed to read stream message", "err", err)
 			return
 		} else if err != nil {
 			w.log.Error(err.Error())
@@ -167,6 +175,9 @@ func (w *Node) handleStream(s network.Stream) {
 		case *pb.Stream_OptimismSignatureExchange:
 			// received signature exchange request or response
 			w.handleOptimismSignatureExchangeFromStream(s, t.OptimismSignatureExchange)
+		case *pb.Stream_FindCommonOptimismSignature:
+			// received FindCommonOptimismSignature request
+			w.handleFindCommonOptimismSignature(s, t.FindCommonOptimismSignature)
 		}
 	}
 }
@@ -184,52 +195,7 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	sender peer.ID,
 	recv *pb.OptimismSignatureExchange,
 ) {
-	// get latest signatures for each signer
-	var reqs []*pb.OptimismSignatureExchange_Request
-	for _, remote := range recv.Latests {
-		signer := common.BytesToAddress(remote.Signer)
-
-		if ok, err := verifySignature(w.hubLayerChainID, remote); !ok || err != nil {
-			w.log.Error("Invalid signature",
-				"signer", signer, "id", remote.Id,
-				"scc", common.BytesToAddress(remote.Scc), "index", remote.BatchIndex,
-				"verify", ok, "err", err)
-			continue
-		}
-
-		local, err := w.db.Optimism.FindLatestSignatureBySigner(signer)
-
-		var idAfter string
-		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				w.log.Info("Request all signatures", "signer", signer.Hex())
-			} else {
-				w.log.Error("Failed to find the latest signature", "signer", signer.Hex(), "err", err)
-				continue
-			}
-		} else if strings.Compare(local.ID, remote.Id) == 1 {
-			// fully synchronized or less than local
-			continue
-		} else {
-			if localID, err := ulid.ParseStrict(local.ID); err == nil {
-				// Prevent out-of-sync by specifying the ID of 1 second ago
-				ms := localID.Time() - 1000
-				idAfter = ulid.MustNew(ms, ulid.DefaultEntropy()).String()
-				w.log.Info("Request signatures", "signer", signer.Hex(),
-					"remote-id", remote.Id, "local-id", local.ID,
-					"created-after", time.UnixMilli(int64(ms)))
-			} else {
-				w.log.Error("Failed to parse ULID", "local-id", local.ID, "err", err)
-				continue
-			}
-		}
-
-		reqs = append(reqs, &pb.OptimismSignatureExchange_Request{
-			Signer:  remote.Signer,
-			IdAfter: idAfter,
-		})
-	}
-	if len(reqs) == 0 {
+	if len(recv.Latests) == 0 {
 		return
 	}
 
@@ -240,6 +206,73 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		return
 	}
 	defer closeStream(s)
+
+	// get latest signatures for each signer
+	var reqs []*pb.OptimismSignatureExchange_Request
+	for _, remote := range recv.Latests {
+		signer := common.BytesToAddress(remote.Signer)
+		logctx := []interface{}{
+			"signer", signer,
+			"remote-id", remote.Id,
+			"remote-previous-id", remote.PreviousId,
+			"index", remote.BatchIndex,
+		}
+
+		if ok, err := verifySignature(w.hubLayerChainID, remote); !ok || err != nil {
+			w.log.Error("Invalid signature", append(logctx, "verify", ok, "err", err)...)
+			continue
+		}
+		if _, ok := w.ignoreSigners[signer]; ok {
+			w.log.Info("Ignored", logctx...)
+			continue
+		}
+
+		local, err := w.db.Optimism.FindLatestSignaturesBySigner(signer, 1, 0)
+		if err != nil {
+			w.log.Error("Failed to find the latest signature", append(logctx, "err", err)...)
+			continue
+		}
+
+		var idAfter string
+		if len(local) == 0 {
+			w.log.Info("Request all signatures", logctx...)
+		} else if strings.Compare(local[0].ID, remote.Id) == 1 {
+			// fully synchronized or less than local
+			continue
+		} else {
+			if found, err := w.findCommonLatestSignature(s, signer); err == nil {
+				fsigner := common.BytesToAddress(found.Signer)
+				if fsigner != signer {
+					w.log.Error("SIgner does not match", append(logctx, "found-signer", fsigner)...)
+					continue
+				}
+
+				idAfter = found.Id
+				w.log.Info("Found common signature from peer",
+					"signer", signer, "id", found.Id, "previous-id", found.PreviousId)
+			} else {
+				if localID, err := ulid.ParseStrict(local[0].ID); err == nil {
+					// Prevent out-of-sync by specifying the ID of 1 second ago
+					ms := localID.Time() - 1000
+					idAfter = ulid.MustNew(ms, ulid.DefaultEntropy()).String()
+					logctx = append(logctx, "local-id", local[0].ID, "created-after", time.UnixMilli(int64(ms)))
+				} else {
+					w.log.Error("Failed to parse ULID", "local-id", local[0].ID, "err", err)
+					continue
+				}
+			}
+
+			w.log.Info("Request signatures", append(logctx, "id-after", idAfter)...)
+		}
+
+		reqs = append(reqs, &pb.OptimismSignatureExchange_Request{
+			Signer:  remote.Signer,
+			IdAfter: idAfter,
+		})
+	}
+	if len(reqs) == 0 {
+		return
+	}
 
 	// send request to peer
 	m := &pb.Stream{
@@ -288,19 +321,7 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 
 				responses := make([]*pb.OptimismSignature, len(sigs))
 				for i, sig := range sigs {
-					responses[i] = &pb.OptimismSignature{
-						Id:                sig.ID,
-						PreviousId:        sig.PreviousID,
-						Signer:            sig.Signer.Address[:],
-						Scc:               sig.OptimismScc.Address[:],
-						BatchIndex:        sig.BatchIndex,
-						BatchRoot:         sig.BatchRoot[:],
-						BatchSize:         sig.BatchSize,
-						PrevTotalElements: sig.PrevTotalElements,
-						ExtraData:         sig.ExtraData,
-						Approved:          sig.Approved,
-						Signature:         sig.Signature[:],
-					}
+					responses[i] = toProtoBufSig(sig)
 				}
 				m := &pb.Stream{Body: &pb.Stream_OptimismSignatureExchange{
 					OptimismSignatureExchange: &pb.OptimismSignatureExchange{
@@ -331,9 +352,13 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 					append(logctx, "verify", ok, "err", err)...)
 				return
 			}
+			if _, ok := w.ignoreSigners[signer]; ok {
+				w.log.Info("Ignored", logctx...)
+				return
+			}
 
 			// deduplication
-			if _, err := w.db.Optimism.FindSignatureByID(res.Id); err == nil {
+			if local, err := w.db.Optimism.FindSignatureByID(res.Id); err == nil && local.PreviousID == res.PreviousId {
 				continue
 			}
 
@@ -369,10 +394,123 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 	}
 }
 
+func (w *Node) handleFindCommonOptimismSignature(
+	s network.Stream,
+	recv *pb.FindCommonOptimismSignature,
+) {
+	remotes := recv.Locals
+	w.log.Info("Received FindCommonOptimismSignature request",
+		"from", remotes[0].Id, "to", remotes[len(remotes)-1].Id)
+
+	var found *pb.OptimismSignature
+	for _, remote := range remotes {
+		local, err := w.db.Optimism.FindSignatureByID(remote.Id)
+		if errors.Is(err, database.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			w.log.Error("Failed to find signature", "remote-id", remote.Id, "err", err)
+			return
+		}
+		if local.PreviousID == remote.PreviousId {
+			found = toProtoBufSig(local)
+			break
+		}
+	}
+
+	m := &pb.Stream{
+		Body: &pb.Stream_FindCommonOptimismSignature{
+			FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{Found: found},
+		},
+	}
+	if err := writeStream(s, m); err == nil {
+		if found == nil {
+			w.log.Info("Sent FindCommonOptimismSignature response", "found", found != nil)
+		} else {
+			w.log.Info("Sent FindCommonOptimismSignature response",
+				"found", found != nil, "id", found.Id, "previous-id", found.PreviousId)
+		}
+	} else {
+		w.log.Error("Failed to send FindCommonOptimismSignature response", "err", err)
+	}
+}
+
+// Find the latest signature of the same ID and PreviousID from peer
+func (w *Node) findCommonLatestSignature(
+	s network.Stream,
+	signer common.Address,
+) (*pb.OptimismSignature, error) {
+	limit, offset := 100, 0
+	for {
+		logctx := []interface{}{"signer", signer}
+
+		// find local latest signatures (order by: id desc)
+		sigs, err := w.db.Optimism.FindLatestSignaturesBySigner(signer, limit, offset)
+		if err != nil {
+			w.log.Error("Failed to find latest signatures", append(logctx, "err", err)...)
+			return nil, err
+		}
+		if len(sigs) == 0 {
+			// reached the last
+			break
+		}
+		logctx = append(logctx, "from", sigs[0].ID, "to", sigs[len(sigs)-1].ID)
+
+		// construct protobuf message
+		locals := make([]*pb.FindCommonOptimismSignature_Local, len(sigs))
+		for i, sig := range sigs {
+			locals[i] = &pb.FindCommonOptimismSignature_Local{
+				Id:         sig.ID,
+				PreviousId: sig.PreviousID,
+			}
+		}
+		req := &pb.Stream{Body: &pb.Stream_FindCommonOptimismSignature{
+			FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{Locals: locals},
+		}}
+
+		// send request
+		if err = writeStream(s, req); err != nil {
+			w.log.Error(
+				"Failed to send FindCommonOptimismSignature request",
+				append(logctx, "err", err)...)
+			return nil, err
+		}
+		w.log.Info("Sent FindCommonOptimismSignature request", logctx...)
+
+		// read response
+		res, err := readStreamWithTimeout(context.Background(), s, time.Second*5)
+		if errors.Is(err, context.DeadlineExceeded) {
+			w.log.Warn("Timeout or peer does not support FindCommonOptimismSignature", logctx...)
+			return nil, err
+		} else if err != nil {
+			w.log.Error("Failed to read stream message", append(logctx, "err", err)...)
+			return nil, err
+		}
+
+		t := res.GetFindCommonOptimismSignature()
+		if t == nil {
+			w.log.Error("Unexpected response", logctx...)
+			return nil, errors.New("unexpected response")
+		}
+		if t.Found != nil {
+			// found!
+			return t.Found, nil
+		}
+
+		offset += limit
+	}
+
+	w.log.Warn("Common signature not found", "signer", signer)
+	return nil, errors.New("not found")
+}
+
 func (w *Node) publishLatestSignatures(ctx context.Context) {
 	latests, err := w.db.Optimism.FindLatestSignaturePerSigners()
 	if err != nil {
 		w.log.Error("Failed to find latest signatures", "err", err)
+		return
+	}
+	if len(latests) == 0 {
 		return
 	}
 	w.PublishSignatures(ctx, latests)
@@ -383,19 +521,7 @@ func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismS
 		Latests: make([]*pb.OptimismSignature, len(rows)),
 	}
 	for i, row := range rows {
-		sigs.Latests[i] = &pb.OptimismSignature{
-			Id:                row.ID,
-			PreviousId:        row.PreviousID,
-			Signer:            row.Signer.Address[:],
-			Scc:               row.OptimismScc.Address[:],
-			BatchIndex:        row.BatchIndex,
-			BatchRoot:         row.BatchRoot[:],
-			BatchSize:         row.BatchSize,
-			PrevTotalElements: row.PrevTotalElements,
-			ExtraData:         row.ExtraData,
-			Approved:          row.Approved,
-			Signature:         row.Signature[:],
-		}
+		sigs.Latests[i] = toProtoBufSig(row)
 	}
 
 	m := &pb.PubSub{Body: &pb.PubSub_OptimismSignatureExchange{
@@ -432,7 +558,6 @@ func writeStream(s io.Writer, m *pb.Stream) error {
 func readStream(s io.Reader) (*pb.Stream, error) {
 	data, err := msgio.NewReader(s).ReadMsg()
 	if err != nil {
-		log.Error("Failed to read stream message", "err", err)
 		return nil, errUnavailableStream
 	}
 
@@ -447,6 +572,26 @@ func readStream(s io.Reader) (*pb.Stream, error) {
 	}
 
 	return &m, nil
+}
+
+func readStreamWithTimeout(
+	parent context.Context,
+	s io.Reader,
+	timeout time.Duration,
+) (m *pb.Stream, err error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	go func() {
+		defer cancel()
+		m, err = readStream(s)
+	}()
+	<-ctx.Done()
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil, context.DeadlineExceeded
+	}
+	return m, err
 }
 
 // Send end-of-message and close libp2p stream.
@@ -521,5 +666,21 @@ func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) (bool,
 		return false, err
 	} else {
 		return bytes.Equal(recoverd.Bytes(), sig.Signer), nil
+	}
+}
+
+func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {
+	return &pb.OptimismSignature{
+		Id:                row.ID,
+		PreviousId:        row.PreviousID,
+		Signer:            row.Signer.Address[:],
+		Scc:               row.OptimismScc.Address[:],
+		BatchIndex:        row.BatchIndex,
+		BatchRoot:         row.BatchRoot[:],
+		BatchSize:         row.BatchSize,
+		PrevTotalElements: row.PrevTotalElements,
+		ExtraData:         row.ExtraData,
+		Approved:          row.Approved,
+		Signature:         row.Signature[:],
 	}
 }

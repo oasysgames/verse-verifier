@@ -254,21 +254,24 @@ func (db *OptimismDatabase) FindLatestSignaturePerSigners() ([]*OptimismSignatur
 	return rows, nil
 }
 
-func (db *OptimismDatabase) FindLatestSignatureBySigner(
+func (db *OptimismDatabase) FindLatestSignaturesBySigner(
 	signer common.Address,
-) (*OptimismSignature, error) {
-	var row OptimismSignature
+	limit, offset int,
+) ([]*OptimismSignature, error) {
+	var rows []*OptimismSignature
 	tx := db.db.
 		Joins("Signer").
 		Joins("OptimismScc").
 		Where("Signer.address = ?", signer).
 		Order("optimism_signatures.id DESC").
-		First(&row)
+		Limit(limit).
+		Offset(offset).
+		Find(&rows)
 
-	if err := errconv(tx.Error); err != nil {
-		return nil, err
+	if tx.Error != nil {
+		return nil, tx.Error
 	}
-	return &row, nil
+	return rows, nil
 }
 
 func (db *OptimismDatabase) FindSignatureByID(id string) (*OptimismSignature, error) {

@@ -64,11 +64,14 @@ func (s *NodeTestSuite) SetupTest() {
 	s.node2 = s.newWorker()
 
 	// setup libp2p
+	ctx := context.Background()
 	bootstrapPeers := ConvertPeers([]string{
 		maToP2P(s.bootnode.h.Addrs()[0], s.bootnode.h.ID()),
 	})
-	Bootstrap(context.Background(), s.node1.h, s.node1.dht, bootstrapPeers)
-	Bootstrap(context.Background(), s.node2.h, s.node2.dht, bootstrapPeers)
+	Bootstrap(ctx, s.node1.h, s.node1.dht)
+	Bootstrap(ctx, s.node2.h, s.node2.dht)
+	ConnectPeers(ctx, s.node1.h, bootstrapPeers)
+	ConnectPeers(ctx, s.node2.h, bootstrapPeers)
 
 	// create sample records
 	for _, node := range []*Node{s.node1, s.node2} {
@@ -79,25 +82,43 @@ func (s *NodeTestSuite) SetupTest() {
 		node.db.Optimism.FindOrCreateSCC(s.scc1)
 		node.db.Optimism.FindOrCreateSCC(s.scc2)
 	}
+
+	backends := []*testhelper.TestBackend{s.b0, s.b1, s.b2}
+	signers := []common.Address{s.signer0, s.signer1}
+	sccs := []common.Address{s.scc0, s.scc1}
 	sizes := [][]int{{50, 100}, {150, 200}}
-	for i, signer := range []common.Address{s.signer0, s.signer1} {
+
+	for i, signer := range signers {
+		backend := backends[i]
 		s.sigs[signer] = map[common.Address][]*database.OptimismSignature{}
 
-		for j, scc := range []common.Address{s.scc0, s.scc1} {
+		for j, scc := range sccs {
 			s.sigs[signer][scc] = []*database.OptimismSignature{}
 
 			for _, index := range s.Range(0, sizes[i][j]) {
+				batchRoot := s.genStateRoot(scc[:], index)
+				approved := true
+
+				msg := verselayer.NewSccMessage(
+					backend.ChainID(),
+					scc,
+					big.NewInt(int64(index)),
+					util.BytesToBytes32(batchRoot[:]),
+					approved,
+				)
+				sigbin, _ := msg.Signature(backend.SignData)
+
 				sig, _ := s.node1.db.Optimism.SaveSignature(
 					nil, nil,
 					signer,
 					scc,
 					uint64(index),
-					s.genStateRoot(scc[:], index),
+					batchRoot,
 					uint64(index),
 					uint64(index),
 					[]byte(fmt.Sprintf("test-%d", index)),
-					true,
-					s.genSignature(signer[:], scc[:], index),
+					approved,
+					sigbin,
 				)
 				s.sigs[signer][scc] = append(s.sigs[signer][scc], sig)
 			}
@@ -110,46 +131,114 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 		signer  common.Address
 		idAfter string
 	}
-	cases := []struct {
+	type testcase struct {
 		msg  *pb.OptimismSignature
 		want want
-	}{
+	}
+	cases := []*testcase{
 		{
-			&pb.OptimismSignature{
-				Id:     util.ULID(nil).String(),
-				Signer: s.signer0[:],
-			},
+			toProtoBufSig(s.sigs[s.signer0][s.scc1][99]),
 			want{s.signer0, s.sigs[s.signer0][s.scc1][99].ID},
 		},
 		{
-			&pb.OptimismSignature{
-				Id:     util.ULID(nil).String(),
-				Signer: s.signer1[:],
-			},
+			toProtoBufSig(s.sigs[s.signer1][s.scc1][199]),
 			want{s.signer1, s.sigs[s.signer1][s.scc1][199].ID},
 		},
 		{
 			&pb.OptimismSignature{
-				Id:     util.ULID(nil).String(),
-				Signer: s.signer2[:],
+				Id:                util.ULID(nil).String(),
+				PreviousId:        util.ULID(nil).String(),
+				Signer:            s.signer2[:],
+				Scc:               s.scc2[:],
+				BatchIndex:        0,
+				BatchRoot:         s.genStateRoot(s.scc2[:], 0).Bytes(),
+				BatchSize:         0,
+				PrevTotalElements: 0,
+				ExtraData:         []byte(fmt.Sprintf("test-%d", 0)),
+				Approved:          true,
 			},
 			want{s.signer2, ""},
 		},
 	}
 
+	lastcase := cases[len(cases)-1]
+	msg := verselayer.NewSccMessage(
+		s.b2.ChainID(),
+		common.BytesToAddress(lastcase.msg.Scc),
+		new(big.Int).SetUint64(lastcase.msg.BatchIndex),
+		util.BytesToBytes32(lastcase.msg.BatchRoot),
+		lastcase.msg.Approved,
+	)
+	sigbin, _ := msg.Signature(s.b2.SignData)
+	lastcase.msg.Signature = sigbin[:]
+
 	// set assertion func to subscriber
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	asserted := false
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	s.node2.h.SetStreamHandler(streamProtocol, func(st network.Stream) {
 		defer cancel()
 		defer closeStream(st)
 
-		reads := s.readsStream(st)
+		var reads []*pb.Stream
+		func() {
+			for {
+				m, _ := readStream(st)
+				reads = append(reads, m)
 
-		s.Len(reads, 2)
-		s.NotNil(reads[0].GetOptimismSignatureExchange())
-		s.NotNil(reads[1].GetEom())
+				switch m.Body.(type) {
+				case *pb.Stream_Eom:
+					return
+				case *pb.Stream_FindCommonOptimismSignature:
+					writeStream(st, &pb.Stream{Body: &pb.Stream_FindCommonOptimismSignature{
+						FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{
+							Found: nil,
+						},
+					}})
+				}
+			}
+		}()
 
-		gots := reads[0].GetOptimismSignatureExchange().Requests
+		s.Len(reads, 8)
+		s.NotNil(reads[0].GetFindCommonOptimismSignature())
+		s.NotNil(reads[1].GetFindCommonOptimismSignature())
+		s.NotNil(reads[2].GetFindCommonOptimismSignature())
+		s.NotNil(reads[3].GetFindCommonOptimismSignature())
+		s.NotNil(reads[4].GetFindCommonOptimismSignature())
+		s.NotNil(reads[5].GetFindCommonOptimismSignature())
+		s.NotNil(reads[6].GetOptimismSignatureExchange())
+		s.NotNil(reads[7].GetEom())
+
+		gots0 := reads[0].GetFindCommonOptimismSignature().Locals
+		s.Len(gots0, 100)
+		s.Equal(gots0[0].Id, s.sigs[s.signer0][s.scc1][99].ID)
+		s.Equal(gots0[99].Id, s.sigs[s.signer0][s.scc1][0].ID)
+
+		gots1 := reads[1].GetFindCommonOptimismSignature().Locals
+		s.Len(gots1, 50)
+		s.Equal(gots1[0].Id, s.sigs[s.signer0][s.scc0][49].ID)
+		s.Equal(gots1[49].Id, s.sigs[s.signer0][s.scc0][0].ID)
+
+		gots2 := reads[2].GetFindCommonOptimismSignature().Locals
+		s.Len(gots2, 100)
+		s.Equal(gots2[0].Id, s.sigs[s.signer1][s.scc1][199].ID)
+		s.Equal(gots2[99].Id, s.sigs[s.signer1][s.scc1][100].ID)
+
+		gots3 := reads[3].GetFindCommonOptimismSignature().Locals
+		s.Len(gots3, 100)
+		s.Equal(gots3[0].Id, s.sigs[s.signer1][s.scc1][99].ID)
+		s.Equal(gots3[99].Id, s.sigs[s.signer1][s.scc1][0].ID)
+
+		gots4 := reads[4].GetFindCommonOptimismSignature().Locals
+		s.Len(gots4, 100)
+		s.Equal(gots4[0].Id, s.sigs[s.signer1][s.scc0][149].ID)
+		s.Equal(gots4[99].Id, s.sigs[s.signer1][s.scc0][50].ID)
+
+		gots5 := reads[5].GetFindCommonOptimismSignature().Locals
+		s.Len(gots5, 50)
+		s.Equal(gots5[0].Id, s.sigs[s.signer1][s.scc0][49].ID)
+		s.Equal(gots5[49].Id, s.sigs[s.signer1][s.scc0][0].ID)
+
+		gots := reads[6].GetOptimismSignatureExchange().Requests
 		s.Len(gots, len(cases))
 		for i, tt := range cases {
 			s.Equal(tt.want.signer[:], gots[i].Signer, i)
@@ -162,6 +251,8 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 				s.Equal(want.Time()-1000, got.Time())
 			}
 		}
+
+		asserted = true
 	})
 
 	// publish message
@@ -172,6 +263,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 	s.node1.handleOptimismSignatureExchangeFromPubSub(ctx, s.node2.h.ID(), m)
 
 	<-ctx.Done()
+	s.True(asserted)
 }
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
@@ -362,6 +454,41 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 	}
 }
 
+func (s *NodeTestSuite) TestHandleFindCommonOptimismSignature() {
+	want := s.sigs[s.signer0][s.scc0][0]
+
+	// sent request from node2 to node1
+	st, _ := s.node2.h.NewStream(context.Background(), s.node1.h.ID(), streamProtocol)
+	writeStream(st, &pb.Stream{Body: &pb.Stream_FindCommonOptimismSignature{
+		FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{
+			Locals: []*pb.FindCommonOptimismSignature_Local{
+				{Id: util.ULID(nil).String(), PreviousId: util.ULID(nil).String()},
+				{Id: util.ULID(nil).String(), PreviousId: util.ULID(nil).String()},
+			},
+		},
+	}})
+	writeStream(st, &pb.Stream{Body: &pb.Stream_FindCommonOptimismSignature{
+		FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{
+			Locals: []*pb.FindCommonOptimismSignature_Local{
+				{Id: util.ULID(nil).String(), PreviousId: util.ULID(nil).String()},
+				{Id: want.ID, PreviousId: want.PreviousID},
+				{Id: util.ULID(nil).String(), PreviousId: util.ULID(nil).String()},
+			},
+		},
+	}})
+	writeStream(st, eom)
+
+	// read response from node1
+	reads := s.readsStream(st)
+
+	// assert
+	s.Len(reads, 3)
+	s.Nil(reads[0].GetFindCommonOptimismSignature().Found)
+	s.Equal(reads[1].GetFindCommonOptimismSignature().Found.Id, want.ID)
+	s.Equal(reads[1].GetFindCommonOptimismSignature().Found.PreviousId, want.PreviousID)
+	s.NotNil(reads[2].GetEom())
+}
+
 func (s *NodeTestSuite) TestPublishLatestSignatures() {
 	// Wait for pubsub to be ready
 	time.Sleep(50 * time.Millisecond)
@@ -413,7 +540,7 @@ func (s *NodeTestSuite) newWorker() *Node {
 	priv, _, _, _ := GenerateKeyPair()
 	host, dht, bwm, _ := NewHost(context.Background(), "127.0.0.1", s.findPort(5), priv)
 
-	worker, err := NewNode(db, host, dht, bwm, 0, s.b0.ChainID().Uint64())
+	worker, err := NewNode(db, host, dht, bwm, 0, s.b0.ChainID().Uint64(), []common.Address{})
 	if err != nil {
 		s.Fail(err.Error())
 	}

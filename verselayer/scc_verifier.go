@@ -46,7 +46,7 @@ var (
 func init() {
 	merkleDefaultBytes = make([][32]byte, len(merkleDefaultHexs))
 	for i, hex := range merkleDefaultHexs {
-		merkleDefaultBytes[i] = toByte32(common.FromHex(hex))
+		merkleDefaultBytes[i] = util.BytesToBytes32(common.FromHex(hex))
 	}
 }
 
@@ -316,7 +316,7 @@ func calcMerkleRoot(elements [][32]byte) ([32]byte, error) {
 		for i := 0; i < halfRowSize; i++ {
 			leftSibling := elements[(2 * i)][:]
 			rightSibling := elements[(2*i)+1][:]
-			elements[i] = toByte32(
+			elements[i] = util.BytesToBytes32(
 				crypto.Keccak256(bytes.Join([][]byte{leftSibling, rightSibling}, []byte(""))),
 			)
 		}
@@ -324,7 +324,7 @@ func calcMerkleRoot(elements [][32]byte) ([32]byte, error) {
 		if rowSizeIsOdd {
 			leftSibling := elements[rowSize-1][:]
 			rightSibling := merkleDefaultBytes[depth][:]
-			elements[halfRowSize] = toByte32(
+			elements[halfRowSize] = util.BytesToBytes32(
 				crypto.Keccak256(bytes.Join([][]byte{leftSibling, rightSibling}, []byte(""))),
 			)
 		}
@@ -337,12 +337,6 @@ func calcMerkleRoot(elements [][32]byte) ([32]byte, error) {
 	}
 
 	return elements[0], nil
-}
-
-func toByte32(s []byte) (a [32]byte) {
-	var b32 [32]byte
-	copy(b32[:], s)
-	return b32
 }
 
 type SignatureSubscription struct {

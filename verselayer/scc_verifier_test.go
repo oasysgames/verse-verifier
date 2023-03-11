@@ -18,6 +18,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/stretchr/testify/suite"
 
 	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
@@ -89,7 +90,7 @@ func (s *SccVerifierTestSuite) TestVerify() {
 		s.db.Optimism.SaveState(&scc.SccStateBatchAppended{
 			Raw:               types.Log{Address: s.sccAddr},
 			BatchIndex:        big.NewInt(int64(i)),
-			BatchRoot:         toByte32(common.FromHex(tt.batchRoot)),
+			BatchRoot:         util.BytesToBytes32(common.FromHex(tt.batchRoot)),
 			BatchSize:         big.NewInt(int64(batchSize)),
 			PrevTotalElements: big.NewInt(int64(batchSize * i)),
 			ExtraData:         []byte(fmt.Sprintf("test-%d", batchSize))})
@@ -154,7 +155,7 @@ func (s *SccVerifierTestSuite) TestCalcMerkleRoot() {
 			"single element",
 			func() {
 				elements := [][32]byte{
-					toByte32(
+					util.BytesToBytes32(
 						common.FromHex(
 							"0x56570de287d73cd1cb6092bb8fdee6173974955fdef345ae579ee9f475ea7432",
 						),
@@ -185,14 +186,14 @@ func (s *SccVerifierTestSuite) TestCalcMerkleRoot() {
 				}
 				sizes := []int{2, 3, 7, 9, 13, 63, 64, 123, 128, 129, 255, 1021, 1023, 1024}
 				for i := range wants {
-					want := toByte32(common.FromHex(wants[i]))
+					want := util.BytesToBytes32(common.FromHex(wants[i]))
 					size := sizes[i]
 
 					s.Run(fmt.Sprintf("size %d", size), func() {
 						elements := make([][32]byte, size)
 						for i := range elements {
 							bhash := common.FromHex(hexutil.EncodeBig(big.NewInt(int64(i))))
-							elements[i] = toByte32(crypto.Keccak256(bhash))
+							elements[i] = util.BytesToBytes32(crypto.Keccak256(bhash))
 						}
 						got, _ := calcMerkleRoot(s.fillDefaultHashes(elements))
 						s.Equal(want, got)
@@ -204,9 +205,9 @@ func (s *SccVerifierTestSuite) TestCalcMerkleRoot() {
 			"odd number of elements",
 			func() {
 				elements := [][32]byte{
-					toByte32(crypto.Keccak256(common.FromHex("0x12"))),
-					toByte32(crypto.Keccak256(common.FromHex("0x34"))),
-					toByte32(crypto.Keccak256(common.FromHex("0x56"))),
+					util.BytesToBytes32(crypto.Keccak256(common.FromHex("0x12"))),
+					util.BytesToBytes32(crypto.Keccak256(common.FromHex("0x34"))),
+					util.BytesToBytes32(crypto.Keccak256(common.FromHex("0x56"))),
 				}
 				_, err := calcMerkleRoot(elements)
 				s.Equal(nil, err)
@@ -235,7 +236,9 @@ func (s *SccVerifierTestSuite) sendTransaction(count int) {
 }
 
 func (s *SccVerifierTestSuite) fillDefaultHashes(elements [][32]byte) [][32]byte {
-	fillhash := toByte32(crypto.Keccak256(common.FromHex("0x" + strings.Repeat("00", 32))))
+	fillhash := util.BytesToBytes32(
+		crypto.Keccak256(common.FromHex("0x" + strings.Repeat("00", 32))),
+	)
 
 	filled := [][32]byte{}
 	for i := 0; float64(i) < math.Pow(2, math.Ceil(math.Log2(float64(len(elements))))); i++ {
