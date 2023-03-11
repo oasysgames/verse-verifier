@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"math/big"
 	"net/http"
@@ -53,6 +54,8 @@ func init() {
 }
 
 func runStartCmd(cmd *cobra.Command, args []string) {
+	log.Info(fmt.Sprintf("Start %s", commandName), "version", version.SemVer())
+
 	ctx, stop := signal.NotifyContext(context.Background(),
 		syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -94,14 +97,6 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		log.Crit("Failed to create hub-layer client", "err", err)
 	}
 
-	//  start p2p server
-	p2p := newP2P(ctx, conf, db)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		p2p.Start(ctx)
-	}()
-
 	// start block collector
 	bkCollector := newBlockCollector(ctx, conf, db, hub)
 	if bkCollector != nil {
@@ -122,8 +117,18 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		}()
 	}
 
-	// start state verifier
+	// construct state verifier
 	sccVerifier := newSccVerifier(ctx, conf, ks, db)
+
+	//  start p2p
+	p2p := newP2P(ctx, conf, db, sccVerifier)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p2p.Start(ctx)
+	}()
+
+	// start state verifier
 	if sccVerifier != nil {
 		wg.Add(1)
 		go func() {
@@ -264,7 +269,12 @@ func newIPC(c *config.Config, ks *wallet.KeyStore) *ipc.IPCServer {
 	return ipc
 }
 
-func newP2P(ctx context.Context, c *config.Config, db *database.Database) *p2p.Node {
+func newP2P(
+	ctx context.Context,
+	c *config.Config,
+	db *database.Database,
+	verifier *verselayer.SccVerifier,
+) *p2p.Node {
 	// get p2p private key
 	p2pKey, err := getOrCreateP2PKey(c.P2PKeyPath())
 	if err != nil {
@@ -281,7 +291,15 @@ func newP2P(ctx context.Context, c *config.Config, db *database.Database) *p2p.N
 	// connect to bootstrap peers and setup peer discovery
 	p2p.Bootstrap(ctx, host, dht, p2p.ConvertPeers(c.P2P.Bootnodes))
 
-	node, err := p2p.NewNode(db, host, dht, bwm, c.P2P.PublishInterval, c.HubLayer.ChainId)
+	// ignore self-signed signatures
+	ignoreSigners := []common.Address{}
+	if verifier != nil {
+		ignoreSigners = append(ignoreSigners, verifier.Signer().Signer())
+	}
+
+	node, err := p2p.NewNode(
+		db, host, dht, bwm,
+		c.P2P.PublishInterval, c.HubLayer.ChainId, ignoreSigners)
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}

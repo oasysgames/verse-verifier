@@ -262,23 +262,45 @@ func (s OptimismDatabaseTestSuite) TestFindSignatureByID() {
 	s.Error(err, ErrNotFound)
 }
 
-func (s OptimismDatabaseTestSuite) TestFindLatestSignatureBySigner() {
+func (s OptimismDatabaseTestSuite) TestFindLatestSignaturesBySigner() {
 	signer0 := s.createSigner()
 	signer1 := s.createSigner()
 	scc := s.createSCC()
 
-	var want0, want1 *OptimismSignature
+	var wants0, wants1 []*OptimismSignature
 	for _, index := range s.Range(0, 5) {
-		want0 = s.createSignature(signer0, scc, index)
+		wants0 = append(wants0, s.createSignature(signer0, scc, index))
 	}
 	for _, index := range s.Range(0, 10) {
-		want1 = s.createSignature(signer1, scc, index)
+		wants1 = append(wants1, s.createSignature(signer1, scc, index))
 	}
 
-	got0, _ := s.db.FindLatestSignatureBySigner(signer0.Address)
-	got1, _ := s.db.FindLatestSignatureBySigner(signer1.Address)
-	s.Equal(want0.ID, got0.ID)
-	s.Equal(want1.ID, got1.ID)
+	gots0, _ := s.db.FindLatestSignaturesBySigner(signer0.Address, 2, 0)
+	s.Len(gots0, 2)
+	s.Equal(wants0[len(wants0)-1].ID, gots0[0].ID)
+	s.Equal(wants0[len(wants0)-2].ID, gots0[1].ID)
+
+	gots1, _ := s.db.FindLatestSignaturesBySigner(signer1.Address, 2, 0)
+	s.Len(gots1, 2)
+	s.Equal(wants1[len(wants1)-1].ID, gots1[0].ID)
+	s.Equal(wants1[len(wants1)-2].ID, gots1[1].ID)
+
+	gots0, _ = s.db.FindLatestSignaturesBySigner(signer0.Address, 10, 2)
+	s.Len(gots0, 3)
+	s.Equal(wants0[len(wants0)-3].ID, gots0[0].ID)
+	s.Equal(wants0[len(wants0)-4].ID, gots0[1].ID)
+	s.Equal(wants0[len(wants0)-5].ID, gots0[2].ID)
+
+	gots1, _ = s.db.FindLatestSignaturesBySigner(signer1.Address, 10, 2)
+	s.Len(gots1, 8)
+	s.Equal(wants1[len(wants1)-3].ID, gots1[0].ID)
+	s.Equal(wants1[len(wants1)-4].ID, gots1[1].ID)
+	s.Equal(wants1[len(wants1)-5].ID, gots1[2].ID)
+	s.Equal(wants1[len(wants1)-6].ID, gots1[3].ID)
+	s.Equal(wants1[len(wants1)-7].ID, gots1[4].ID)
+	s.Equal(wants1[len(wants1)-8].ID, gots1[5].ID)
+	s.Equal(wants1[len(wants1)-9].ID, gots1[6].ID)
+	s.Equal(wants1[len(wants1)-10].ID, gots1[7].ID)
 }
 
 func (s OptimismDatabaseTestSuite) TestFindLatestSignaturePerSigners() {
