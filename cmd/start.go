@@ -145,8 +145,11 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 			bw := beacon.NewBeaconWorker(
 				&conf.Beacon,
 				http.DefaultClient,
-				sccVerifier.Signer().Signer(),
-				version.SemVer(),
+				beacon.Beacon{
+					Signer:  sccVerifier.Signer().Signer().String(),
+					Version: version.SemVer(),
+					PeerID:  p2p.PeerID().String(),
+				},
 			)
 			bw.Start(ctx)
 		}()

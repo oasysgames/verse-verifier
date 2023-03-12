@@ -37,7 +37,11 @@ func (s *BeaconWorkerTestSuite) TestBeaconWorker() {
 
 	conf := &config.Beacon{Endpoint: "https://example.com/", Interval: time.Hour}
 	signer := common.HexToAddress("0xa379E5DeD16Bfc8D8B36449c45966648A2cE2AAE")
-	worker := NewBeaconWorker(conf, client, signer, "0.0.1")
+	worker := NewBeaconWorker(conf, client, Beacon{
+		Signer:  signer.String(),
+		Version: "0.0.1",
+		PeerID:  "12D3KooWGqAVCkVwK2V8rrYS4GerjeUrGgzYUWZHp7SUng5LUMPY",
+	})
 
 	go worker.Start(context.Background())
 	time.Sleep(time.Second / 10)
@@ -45,7 +49,7 @@ func (s *BeaconWorkerTestSuite) TestBeaconWorker() {
 	// assert
 	s.Equal("https://example.com/", url)
 	s.Equal(
-		`{"signer":"0xa379E5DeD16Bfc8D8B36449c45966648A2cE2AAE","version":"0.0.1"}`,
+		`{"signer":"0xa379E5DeD16Bfc8D8B36449c45966648A2cE2AAE","version":"0.0.1","peer_id":"12D3KooWGqAVCkVwK2V8rrYS4GerjeUrGgzYUWZHp7SUng5LUMPY"}`,
 		string(data),
 	)
 }

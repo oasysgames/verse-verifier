@@ -114,10 +114,14 @@ func (w *Node) Start(ctx context.Context) {
 		w.subscribeLoop(ctx)
 	}()
 
-	w.log.Info("Worker started", "id", w.h.ID(),
+	w.log.Info("Worker started", "id", w.PeerID(),
 		"publish-interval", w.cfg.PublishInterval, "stream-timeout", w.cfg.StreamTimeout)
 	wg.Wait()
 	w.log.Info("Worker stopped")
+}
+
+func (w *Node) PeerID() peer.ID {
+	return w.h.ID()
 }
 
 func (w *Node) publishLoop(ctx context.Context) {
