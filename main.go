@@ -13,8 +13,13 @@ func main() {
 }
 
 func setupLogger() {
+	level := log.LvlInfo
+	if os.Getenv("DEBUG") != "" {
+		level = log.LvlDebug
+	}
+
 	logHandler := log.StreamHandler(os.Stdout, log.TerminalFormat(true))
-	logHandler = log.LvlFilterHandler(log.LvlInfo, logHandler)
+	logHandler = log.LvlFilterHandler(level, logHandler)
 	logHandler = log.CallerFileHandler(logHandler)
 	log.Root().SetHandler(logHandler)
 }

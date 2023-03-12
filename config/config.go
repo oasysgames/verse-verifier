@@ -18,6 +18,7 @@ var (
 	defaults = map[string]interface{}{
 		"verse_layer.discovery.refresh_interval": time.Hour,
 		"p2p.publish_interval":                   5 * time.Minute,
+		"p2p.stream_timeout":                     15 * time.Second,
 		"verifier.interval":                      15 * time.Second,
 		"verifier.concurrency":                   50,
 		"verifier.block_limit":                   1000,
@@ -103,7 +104,7 @@ type Config struct {
 	VerseLayer verseLayer `json:"verse_layer" mapstructure:"verse_layer"`
 
 	// P2P worker configuration.
-	P2P p2p `json:"p2p"`
+	P2P P2P `json:"p2p"`
 
 	// IPC configuration.
 	IPC ipc `json:"ipc"`
@@ -168,12 +169,15 @@ type verseLayer struct {
 	Directs []*Verse `json:"directs" validate:"dive"`
 }
 
-type p2p struct {
+type P2P struct {
 	// Address and port to listen.
 	Listen string `json:"listen" validate:"hostname_port"`
 
 	// Interval to publish own signature status.
 	PublishInterval time.Duration `json:"publish_interval" mapstructure:"publish_interval"`
+
+	// Timeout for P2P stream communication.
+	StreamTimeout time.Duration `json:"stream_timeout" mapstructure:"stream_timeout"`
 
 	// Initial node list.
 	Bootnodes []string `json:"bootnodes"`

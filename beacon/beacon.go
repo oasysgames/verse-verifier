@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
@@ -16,13 +15,13 @@ import (
 type Beacon struct {
 	Signer  string `json:"signer"`
 	Version string `json:"version"`
+	PeerID  string `json:"peer_id"`
 }
 
 type BeaconWorker struct {
-	conf    *config.Beacon
-	client  *http.Client
-	signer  common.Address
-	version string
+	conf   *config.Beacon
+	client *http.Client
+	beacon Beacon
 
 	log log.Logger
 }
@@ -30,15 +29,13 @@ type BeaconWorker struct {
 func NewBeaconWorker(
 	conf *config.Beacon,
 	client *http.Client,
-	signer common.Address,
-	version string,
+	beacon Beacon,
 ) *BeaconWorker {
 	return &BeaconWorker{
-		conf:    conf,
-		client:  client,
-		signer:  signer,
-		version: version,
-		log:     log.New("worker", "beacon"),
+		conf:   conf,
+		client: client,
+		beacon: beacon,
+		log:    log.New("worker", "beacon"),
 	}
 }
 
@@ -68,7 +65,7 @@ func (w *BeaconWorker) work(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	body, err := json.Marshal(&Beacon{Signer: w.signer.String(), Version: w.version})
+	body, err := json.Marshal(&w.beacon)
 	if err != nil {
 		return err
 	}

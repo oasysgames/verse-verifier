@@ -51,6 +51,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 	p2p:
 		listen: 127.0.0.1:20001
 		publish_interval: 5s
+		stream_timeout: 5s
 		bootnodes:
 			- /ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899
 	
@@ -124,9 +125,10 @@ func (s *ConfigTestSuite) TestParseConfig() {
 
 	s.Equal(ipc{Enable: true}, got.IPC)
 
-	s.Equal(p2p{
+	s.Equal(P2P{
 		Listen:          "127.0.0.1:20001",
 		PublishInterval: 5 * time.Second,
+		StreamTimeout:   5 * time.Second,
 		Bootnodes: []string{
 			"/ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899",
 		},
@@ -251,6 +253,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 
 	s.Equal(5*time.Minute, got.P2P.PublishInterval)
+	s.Equal(15*time.Second, got.P2P.StreamTimeout)
 
 	s.Equal(15*time.Second, got.Verifier.Interval)
 	s.Equal(50, got.Verifier.Concurrency)

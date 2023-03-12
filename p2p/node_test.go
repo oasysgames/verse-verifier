@@ -7,12 +7,14 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
@@ -173,97 +175,107 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 	lastcase.msg.Signature = sigbin[:]
 
 	// set assertion func to subscriber
-	asserted := false
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	var (
+		mu          = &sync.Mutex{}
+		reads       = []*pb.Stream{}
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	)
+	defer cancel()
 	s.node2.h.SetStreamHandler(streamProtocol, func(st network.Stream) {
-		defer cancel()
+		mu.Lock()
+		defer mu.Unlock()
 		defer closeStream(st)
 
-		var reads []*pb.Stream
-		func() {
-			for {
-				m, _ := readStream(st)
-				reads = append(reads, m)
+		for {
+			m, _ := readStream(st)
+			reads = append(reads, m)
 
-				switch m.Body.(type) {
-				case *pb.Stream_Eom:
-					return
-				case *pb.Stream_FindCommonOptimismSignature:
-					writeStream(st, &pb.Stream{Body: &pb.Stream_FindCommonOptimismSignature{
-						FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{
-							Found: nil,
-						},
-					}})
-				}
-			}
-		}()
-
-		s.Len(reads, 8)
-		s.NotNil(reads[0].GetFindCommonOptimismSignature())
-		s.NotNil(reads[1].GetFindCommonOptimismSignature())
-		s.NotNil(reads[2].GetFindCommonOptimismSignature())
-		s.NotNil(reads[3].GetFindCommonOptimismSignature())
-		s.NotNil(reads[4].GetFindCommonOptimismSignature())
-		s.NotNil(reads[5].GetFindCommonOptimismSignature())
-		s.NotNil(reads[6].GetOptimismSignatureExchange())
-		s.NotNil(reads[7].GetEom())
-
-		gots0 := reads[0].GetFindCommonOptimismSignature().Locals
-		s.Len(gots0, 100)
-		s.Equal(gots0[0].Id, s.sigs[s.signer0][s.scc1][99].ID)
-		s.Equal(gots0[99].Id, s.sigs[s.signer0][s.scc1][0].ID)
-
-		gots1 := reads[1].GetFindCommonOptimismSignature().Locals
-		s.Len(gots1, 50)
-		s.Equal(gots1[0].Id, s.sigs[s.signer0][s.scc0][49].ID)
-		s.Equal(gots1[49].Id, s.sigs[s.signer0][s.scc0][0].ID)
-
-		gots2 := reads[2].GetFindCommonOptimismSignature().Locals
-		s.Len(gots2, 100)
-		s.Equal(gots2[0].Id, s.sigs[s.signer1][s.scc1][199].ID)
-		s.Equal(gots2[99].Id, s.sigs[s.signer1][s.scc1][100].ID)
-
-		gots3 := reads[3].GetFindCommonOptimismSignature().Locals
-		s.Len(gots3, 100)
-		s.Equal(gots3[0].Id, s.sigs[s.signer1][s.scc1][99].ID)
-		s.Equal(gots3[99].Id, s.sigs[s.signer1][s.scc1][0].ID)
-
-		gots4 := reads[4].GetFindCommonOptimismSignature().Locals
-		s.Len(gots4, 100)
-		s.Equal(gots4[0].Id, s.sigs[s.signer1][s.scc0][149].ID)
-		s.Equal(gots4[99].Id, s.sigs[s.signer1][s.scc0][50].ID)
-
-		gots5 := reads[5].GetFindCommonOptimismSignature().Locals
-		s.Len(gots5, 50)
-		s.Equal(gots5[0].Id, s.sigs[s.signer1][s.scc0][49].ID)
-		s.Equal(gots5[49].Id, s.sigs[s.signer1][s.scc0][0].ID)
-
-		gots := reads[6].GetOptimismSignatureExchange().Requests
-		s.Len(gots, len(cases))
-		for i, tt := range cases {
-			s.Equal(tt.want.signer[:], gots[i].Signer, i)
-
-			if tt.want.idAfter == "" {
-				s.Equal("", gots[i].IdAfter, i)
-			} else {
-				got := ulid.MustParse(gots[i].IdAfter)
-				want := ulid.MustParse(tt.want.idAfter)
-				s.Equal(want.Time()-1000, got.Time())
+			switch m.Body.(type) {
+			case *pb.Stream_Eom:
+				return
+			case *pb.Stream_FindCommonOptimismSignature:
+				writeStream(st, &pb.Stream{Body: &pb.Stream_FindCommonOptimismSignature{
+					FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{
+						Found: nil,
+					},
+				}})
 			}
 		}
-
-		asserted = true
 	})
 
 	// publish message
-	m := &pb.OptimismSignatureExchange{}
 	for _, tt := range cases {
-		m.Latests = append(m.Latests, tt.msg)
+		go s.node1.handleOptimismSignatureExchangeFromPubSub(ctx, s.node2.h.ID(), tt.msg)
+		time.Sleep(time.Millisecond * 50)
 	}
-	s.node1.handleOptimismSignatureExchangeFromPubSub(ctx, s.node2.h.ID(), m)
-
 	<-ctx.Done()
-	s.True(asserted)
+
+	s.Len(reads, 12)
+
+	// signer0
+	gots0 := reads[0].GetFindCommonOptimismSignature().Locals
+	s.Len(gots0, 100)
+	s.Equal(gots0[0].Id, s.sigs[s.signer0][s.scc1][99].ID)
+	s.Equal(gots0[99].Id, s.sigs[s.signer0][s.scc1][0].ID)
+
+	gots1 := reads[1].GetFindCommonOptimismSignature().Locals
+	s.Len(gots1, 50)
+	s.Equal(gots1[0].Id, s.sigs[s.signer0][s.scc0][49].ID)
+	s.Equal(gots1[49].Id, s.sigs[s.signer0][s.scc0][0].ID)
+
+	gots2 := reads[2].GetOptimismSignatureExchange().Requests
+	s.Len(gots2, 1)
+	s.Equal(cases[0].want.signer[:], gots2[0].Signer)
+	func() {
+		gt := ulid.MustParse(gots2[0].IdAfter)
+		wt := ulid.MustParse(cases[0].want.idAfter)
+		s.Equal(wt.Time()-1000, gt.Time())
+	}()
+
+	gots3 := reads[3].GetEom()
+	s.NotNil(gots3)
+
+	// signer1
+	gots4 := reads[4].GetFindCommonOptimismSignature().Locals
+	s.Len(gots4, 100)
+	s.Equal(gots4[0].Id, s.sigs[s.signer1][s.scc1][199].ID)
+	s.Equal(gots4[99].Id, s.sigs[s.signer1][s.scc1][100].ID)
+
+	gots5 := reads[5].GetFindCommonOptimismSignature().Locals
+	s.Len(gots5, 100)
+	s.Equal(gots5[0].Id, s.sigs[s.signer1][s.scc1][99].ID)
+	s.Equal(gots5[99].Id, s.sigs[s.signer1][s.scc1][0].ID)
+
+	gots6 := reads[6].GetFindCommonOptimismSignature().Locals
+	s.Len(gots6, 100)
+	s.Equal(gots6[0].Id, s.sigs[s.signer1][s.scc0][149].ID)
+	s.Equal(gots6[99].Id, s.sigs[s.signer1][s.scc0][50].ID)
+
+	gots7 := reads[7].GetFindCommonOptimismSignature().Locals
+	s.Len(gots7, 50)
+	s.Equal(gots7[0].Id, s.sigs[s.signer1][s.scc0][49].ID)
+	s.Equal(gots7[49].Id, s.sigs[s.signer1][s.scc0][0].ID)
+
+	gots8 := reads[8].GetOptimismSignatureExchange().Requests
+	s.Len(gots8, 1)
+	s.Equal(cases[1].want.signer[:], gots8[0].Signer)
+	func() {
+		gt := ulid.MustParse(gots8[0].IdAfter)
+		wt := ulid.MustParse(cases[1].want.idAfter)
+		s.Equal(wt.Time()-1000, gt.Time())
+	}()
+
+	gots9 := reads[9].GetEom()
+	s.NotNil(gots9)
+
+	// signer2
+	gots10 := reads[10].GetOptimismSignatureExchange().Requests
+	s.Len(gots10, 1)
+	s.Equal(cases[2].want.signer[:], gots10[0].Signer)
+	s.Equal("", gots10[0].IdAfter)
+
+	gots11 := reads[11].GetEom()
+	s.NotNil(gots11)
 }
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
@@ -309,16 +321,17 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
 				got := gots[0]
 				gots = gots[1:]
 
-				s.Equal(s.sigs[want.signer][want.scc][bi].ID, got.Id)
-				s.Equal(want.signer[:], got.Signer)
-				s.Equal(want.scc[:], got.Scc)
-				s.Equal(uint64(bi), got.BatchIndex)
-				s.Equal(s.genStateRoot(want.scc[:], bi).Bytes(), got.BatchRoot)
-				s.Equal(uint64(bi), got.BatchSize)
-				s.Equal(uint64(bi), got.PrevTotalElements)
-				s.Equal([]byte(fmt.Sprintf("test-%d", bi)), got.ExtraData)
-				s.True(got.Approved)
-				s.Equal(s.genSignature(want.signer[:], want.scc[:], bi).Bytes(), got.Signature)
+				wantsig := s.sigs[want.signer][want.scc][bi]
+				s.Equal(wantsig.ID, got.Id)
+				s.Equal(wantsig.Signer.Address[:], got.Signer)
+				s.Equal(wantsig.OptimismScc.Address[:], got.Scc)
+				s.Equal(wantsig.BatchIndex, got.BatchIndex)
+				s.Equal(wantsig.BatchRoot[:], got.BatchRoot)
+				s.Equal(wantsig.BatchSize, got.BatchSize)
+				s.Equal(wantsig.PrevTotalElements, got.PrevTotalElements)
+				s.Equal(wantsig.ExtraData, got.ExtraData)
+				s.Equal(wantsig.Approved, got.Approved)
+				s.Equal(wantsig.Signature[:], got.Signature)
 			}
 		}
 
@@ -540,7 +553,9 @@ func (s *NodeTestSuite) newWorker() *Node {
 	priv, _, _, _ := GenerateKeyPair()
 	host, dht, bwm, _ := NewHost(context.Background(), "127.0.0.1", s.findPort(5), priv)
 
-	worker, err := NewNode(db, host, dht, bwm, 0, s.b0.ChainID().Uint64(), []common.Address{})
+	worker, err := NewNode(
+		&config.P2P{PublishInterval: 0, StreamTimeout: 3 * time.Second},
+		db, host, dht, bwm, s.b0.ChainID().Uint64(), []common.Address{})
 	if err != nil {
 		s.Fail(err.Error())
 	}

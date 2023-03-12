@@ -145,8 +145,11 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 			bw := beacon.NewBeaconWorker(
 				&conf.Beacon,
 				http.DefaultClient,
-				sccVerifier.Signer().Signer(),
-				version.SemVer(),
+				beacon.Beacon{
+					Signer:  sccVerifier.Signer().Signer().String(),
+					Version: version.SemVer(),
+					PeerID:  p2p.PeerID().String(),
+				},
 			)
 			bw.Start(ctx)
 		}()
@@ -313,9 +316,7 @@ func newP2P(
 		ignoreSigners = append(ignoreSigners, verifier.Signer().Signer())
 	}
 
-	node, err := p2p.NewNode(
-		db, host, dht, bwm,
-		c.P2P.PublishInterval, c.HubLayer.ChainId, ignoreSigners)
+	node, err := p2p.NewNode(&c.P2P, db, host, dht, bwm, c.HubLayer.ChainId, ignoreSigners)
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}
