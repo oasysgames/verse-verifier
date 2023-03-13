@@ -390,14 +390,6 @@ func (w *SccSubmitter) getMulticallCalls(
 		batchIndex := fromIndex + i
 		cpyLogCtx = append(cpyLogCtx, "index", batchIndex)
 
-		// fetch the StateBatchAppended that matches the target batch index
-		ev, err := findStateBatchAppendedEvent(ctx, sccc, batchIndex)
-		if err != nil {
-			w.log.Error("Failed to fetch the StateBatchAppended event",
-				append(cpyLogCtx, "err", err)...)
-			return nil, 0, err
-		}
-
 		rows, err := w.findSignatures(
 			task.scc,
 			batchIndex,
@@ -413,6 +405,13 @@ func (w *SccSubmitter) getMulticallCalls(
 			return nil, 0, err
 		}
 
+		// fetch the StateBatchAppended that matches the target batch index
+		ev, err := findStateBatchAppendedEvent(ctx, sccc, batchIndex)
+		if err != nil {
+			w.log.Error("Failed to fetch the StateBatchAppended event",
+				append(cpyLogCtx, "err", err)...)
+			return nil, 0, err
+		}
 		batchHeader := sccverifier.Lib_OVMCodecChainBatchHeader{
 			BatchIndex:        ev.BatchIndex,
 			BatchRoot:         ev.BatchRoot,
