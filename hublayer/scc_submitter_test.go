@@ -50,6 +50,9 @@ func (s *SccSubmitterTestSuite) TestWork() {
 
 		batchIndex := uint64(i)
 		batchRoot := s.RandHash()
+		batchSize := uint64(i)
+		prevTotalElements := uint64(i + 1)
+		extraData := []byte(fmt.Sprintf("%d", i))
 		approved := i < indexes-1
 
 		// create sample signatures
@@ -60,21 +63,30 @@ func (s *SccSubmitterTestSuite) TestWork() {
 				s.sccAddr,
 				batchIndex,
 				batchRoot,
-				uint64(i),
-				uint64(i+1),
-				[]byte(fmt.Sprintf("%d", i)),
+				batchSize,
+				prevTotalElements,
+				extraData,
 				approved,
 				database.RandSignature(),
 			)
 
 			signatures[i][j] = sig
 		}
-
 		sort.Slice(signatures[i], func(x, y int) bool {
 			a := signatures[i][x].Signer.Address.Hash().Big()
 			b := signatures[i][y].Signer.Address.Hash().Big()
 			return a.Cmp(b) == -1
 		})
+
+		// emit StateBatchAppended event to the test contract
+		s.scc.EmitStateBatchAppended(
+			s.hub.TransactOpts(context.Background()),
+			new(big.Int).SetUint64(batchIndex),
+			batchRoot,
+			new(big.Int).SetUint64(batchSize),
+			new(big.Int).SetUint64(prevTotalElements),
+			extraData)
+		s.mining()
 	}
 
 	s.sccSubmitter.refreshStakes(context.Background())
