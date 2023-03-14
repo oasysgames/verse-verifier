@@ -40,7 +40,7 @@ type SccTestSuite struct {
 
 func (s *SccTestSuite) SetupTest() {
 	ctx := context.Background()
-	s.db, _ = database.NewDatabase(":memory:")
+	s.db, _ = database.NewDatabase(&config.Database{Path: ":memory:"})
 
 	// setup test chain
 	s.hub = testhelper.NewTestBackend()

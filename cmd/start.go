@@ -69,7 +69,10 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	}
 
 	// setup database
-	db, err := database.NewDatabase(conf.DatabasePath())
+	if conf.Database.Path == "" {
+		conf.Database.Path = conf.DatabasePath()
+	}
+	db, err := database.NewDatabase(&conf.Database)
 	if err != nil {
 		log.Crit("Failed to open database", "err", err)
 	}

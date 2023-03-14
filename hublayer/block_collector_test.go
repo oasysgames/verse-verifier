@@ -28,7 +28,7 @@ func TestBlockCollector(t *testing.T) {
 }
 
 func (s *BlockCollectorTestSuite) SetupTest() {
-	s.db, _ = database.NewDatabase(":memory:")
+	s.db, _ = database.NewDatabase(&config.Database{Path: ":memory:"})
 	s.backend = testhelper.NewTestBackend()
 }
 

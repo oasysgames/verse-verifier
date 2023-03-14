@@ -37,6 +37,8 @@ var (
 		"beacon.enable":                          true,
 		"beacon.endpoint":                        "https://script.google.com/macros/s/AKfycbzJpDKyn271jbm5otk_BxGkrS2b1YdMQerVq2-XxLdTOdhUPKCZICqvagvGgByxx_nq0Q/exec",
 		"beacon.interval":                        15 * time.Minute,
+		"database.long_query_time":               200 * time.Millisecond,
+		"database.min_examined_row_limit":        10000,
 	}
 )
 
@@ -117,6 +119,9 @@ type Config struct {
 
 	// Beacon worker configuration.
 	Beacon Beacon `json:"beacon" mapstructure:"beacon"`
+
+	// Database configuration.
+	Database Database `json:"database" mapstructure:"database"`
 }
 
 func (c *Config) DatabasePath() string {
@@ -263,4 +268,13 @@ type Beacon struct {
 
 	// Interval for send beacon.
 	Interval time.Duration `json:"interval"`
+}
+
+type Database struct {
+	// File path of the SQLite database.
+	Path string `json:"path" mapstructure:"path"`
+
+	// Slow query log configurations.
+	LongQueryTime       time.Duration `json:"long_query_time"        mapstructure:"long_query_time"`
+	MinExaminedRowLimit int           `json:"min_examined_row_limit" mapstructure:"min_examined_row_limit"`
 }

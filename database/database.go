@@ -3,8 +3,10 @@ package database
 import (
 	"errors"
 
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	gormlog "gorm.io/gorm/logger"
 )
 
 var (
@@ -26,9 +28,13 @@ type Database struct {
 	Optimism *OptimismDatabase
 }
 
-func NewDatabase(filepath string) (*Database, error) {
-	config := &gorm.Config{Logger: &mylogger{}}
-	db, err := gorm.Open(sqlite.Open(filepath), config)
+func NewDatabase(cfg *config.Database) (*Database, error) {
+	config := &gorm.Config{Logger: &mylogger{
+		LogLevel:            gormlog.Info,
+		LongQueryTime:       cfg.LongQueryTime,
+		MinExaminedRowLimit: cfg.MinExaminedRowLimit,
+	}}
+	db, err := gorm.Open(sqlite.Open(cfg.Path), config)
 	if err != nil {
 		return nil, err
 	}

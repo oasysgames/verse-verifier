@@ -84,6 +84,10 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		enable: true
 		endpoint: http://127.0.0.1/beacon
 		interval: 1s
+
+	database:
+		long_query_time: 1s
+		min_examined_row_limit: 100
 	`)
 
 	got, _ := NewConfig([]byte(strings.ReplaceAll(input, "\t", "  ")))
@@ -172,6 +176,11 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		Endpoint: "http://127.0.0.1/beacon",
 		Interval: time.Second,
 	}, got.Beacon)
+
+	s.Equal(Database{
+		LongQueryTime:       time.Second,
+		MinExaminedRowLimit: 100,
+	}, got.Database)
 }
 
 func (s *ConfigTestSuite) TestValidate() {
@@ -278,4 +287,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 		got.Beacon.Endpoint,
 	)
 	s.Equal(15*time.Minute, got.Beacon.Interval)
+
+	s.Equal(250*time.Millisecond, got.Database.LongQueryTime)
+	s.Equal(10000, got.Database.MinExaminedRowLimit)
 }

@@ -3,6 +3,7 @@ package database
 import (
 	"math/rand"
 
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
@@ -17,7 +18,7 @@ type DatabaseTestSuite struct {
 
 func (s *DatabaseTestSuite) SetupTest() {
 	// Setup database
-	db, err := NewDatabase(":memory:")
+	db, err := NewDatabase(&config.Database{Path: ":memory:"})
 	if err != nil {
 		panic(err)
 	}

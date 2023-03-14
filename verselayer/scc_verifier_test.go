@@ -43,7 +43,7 @@ func TestSccVerifier(t *testing.T) {
 
 func (s *SccVerifierTestSuite) SetupTest() {
 	// setup test env
-	s.db, _ = database.NewDatabase(":memory:")
+	s.db, _ = database.NewDatabase(&config.Database{Path: ":memory:"})
 	s.hub = testhelper.NewTestBackend()
 	s.verse = testhelper.NewTestBackend()
 

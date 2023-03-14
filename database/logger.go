@@ -11,7 +11,9 @@ import (
 )
 
 type mylogger struct {
-	LogLevel gormlog.LogLevel
+	LogLevel            gormlog.LogLevel
+	LongQueryTime       time.Duration
+	MinExaminedRowLimit int
 }
 
 func (l *mylogger) LogMode(level gormlog.LogLevel) gormlog.Interface {
@@ -50,20 +52,29 @@ func (l *mylogger) Trace(
 
 	elapsed := time.Since(begin)
 	sql, rows := fc()
+	if elapsed >= l.LongQueryTime || rows > int64(l.MinExaminedRowLimit) {
+		log.Warn(
+			"Slow query",
+			"elapsed", elapsed,
+			"affected", rows,
+			"sql", sql,
+		)
+	}
+
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		log.Error(
 			"gorm",
-			"sql", sql,
-			"affected", rows,
 			"elapsed", elapsed,
+			"affected", rows,
+			"sql", sql,
 			"err", err,
 		)
 	} else {
 		log.Debug(
 			"gorm",
-			"sql", sql,
-			"affected", rows,
 			"elapsed", elapsed,
+			"affected", rows,
+			"sql", sql,
 		)
 	}
 }

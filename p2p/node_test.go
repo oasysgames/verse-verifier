@@ -547,7 +547,7 @@ func (s *NodeTestSuite) TestPublishLatestSignatures() {
 
 func (s *NodeTestSuite) newWorker() *Node {
 	// Setup database.
-	db, _ := database.NewDatabase(":memory:")
+	db, _ := database.NewDatabase(&config.Database{Path: ":memory:"})
 
 	// Setup libp2p.
 	priv, _, _, _ := GenerateKeyPair()
