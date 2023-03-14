@@ -59,10 +59,16 @@ func (db *OptimismDatabase) FindState(
 	scc common.Address,
 	batchIndex uint64,
 ) (*OptimismState, error) {
+	sub, err := db.sccIdSub(scc)
+	if err != nil {
+		return nil, err
+	}
+
 	var row OptimismState
 	tx := db.db.
 		Joins("OptimismScc").
-		Where("OptimismScc.address = ? AND batch_index = ?", scc, batchIndex).
+		Where("optimism_states.optimism_scc_id = (?)", sub).
+		Where("optimism_states.batch_index = ?", batchIndex).
 		First(&row)
 
 	if err := errconv(tx.Error); err != nil {
@@ -78,6 +84,11 @@ func (db *OptimismDatabase) FindVerificationWaitingStates(
 	nextIndex uint64,
 	limit int,
 ) ([]*OptimismState, error) {
+	signerSub, err := db.signerIdSub(signer)
+	if err != nil {
+		return nil, err
+	}
+
 	_scc, err := db.FindOrCreateSCC(scc)
 	if err != nil {
 		return nil, err
@@ -91,7 +102,8 @@ func (db *OptimismDatabase) FindVerificationWaitingStates(
 	tx := db.db.
 		Joins("Signer").
 		Joins("OptimismScc").
-		Where("Signer.address = ? AND OptimismScc.id = ?", signer, _scc.ID).
+		Where("optimism_signatures.signer_id = (?)", signerSub).
+		Where("optimism_signatures.optimism_scc_id = ?", _scc.ID).
 		Order("optimism_signatures.batch_index DESC").
 		First(&latestSig)
 	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
@@ -236,16 +248,20 @@ func (db *OptimismDatabase) SaveSignature(
 }
 
 func (db *OptimismDatabase) FindLatestSignaturePerSigners() ([]*OptimismSignature, error) {
-	sub := db.db.Model(&OptimismSignature{}).
-		Select("signer_id, MAX(id) AS id").
-		Group("signer_id")
+	var maxIds []string
+	tx := db.db.Model(&OptimismSignature{}).
+		Select("MAX(id)").
+		Group("signer_id").
+		Find(&maxIds)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
 
 	var rows []*OptimismSignature
-	tx := db.db.
-		Table("optimism_signatures AS t1").
+	tx = db.db.
 		Joins("Signer").
 		Joins("OptimismScc").
-		Joins("INNER JOIN (?) AS t2 ON t1.signer_id = t2.signer_id AND t1.id = t2.id", sub).
+		Where("optimism_signatures.id IN (?)", maxIds).
 		Find(&rows)
 
 	if tx.Error != nil {
@@ -258,11 +274,16 @@ func (db *OptimismDatabase) FindLatestSignaturesBySigner(
 	signer common.Address,
 	limit, offset int,
 ) ([]*OptimismSignature, error) {
+	sub, err := db.signerIdSub(signer)
+	if err != nil {
+		return nil, err
+	}
+
 	var rows []*OptimismSignature
 	tx := db.db.
 		Joins("Signer").
 		Joins("OptimismScc").
-		Where("Signer.address = ?", signer).
+		Where("optimism_signatures.signer_id = (?)", sub).
 		Order("optimism_signatures.id DESC").
 		Limit(limit).
 		Offset(offset).
@@ -306,10 +327,18 @@ func (db *OptimismDatabase) FindSignatures(
 		tx = tx.Where("optimism_signatures.id >= ?", *idAfter)
 	}
 	if signer != nil {
-		tx = tx.Where("Signer.address = ?", *signer)
+		if sub, err := db.signerIdSub(*signer); err != nil {
+			return nil, err
+		} else {
+			tx = tx.Where("optimism_signatures.signer_id = (?)", sub)
+		}
 	}
 	if scc != nil {
-		tx = tx.Where("OptimismScc.address = ?", *scc)
+		if sub, err := db.sccIdSub(*scc); err != nil {
+			return nil, err
+		} else {
+			tx = tx.Where("optimism_signatures.optimism_scc_id = (?)", sub)
+		}
 	}
 	if index != nil {
 		tx = tx.Where("optimism_signatures.batch_index = ?", *index)
@@ -386,4 +415,24 @@ func (db *OptimismDatabase) DeleteSignatures(
 	}
 
 	return affected, nil
+}
+
+func (db *OptimismDatabase) signerIdSub(signer common.Address) (*gorm.DB, error) {
+	sub := db.db.Model(&Signer{}).
+		Select("id").
+		Where("address = ?", signer)
+	if sub.Error != nil {
+		return nil, sub.Error
+	}
+	return sub, nil
+}
+
+func (db *OptimismDatabase) sccIdSub(scc common.Address) (*gorm.DB, error) {
+	sub := db.db.Model(&OptimismScc{}).
+		Select("id").
+		Where("address = ?", scc)
+	if sub.Error != nil {
+		return nil, sub.Error
+	}
+	return sub, nil
 }

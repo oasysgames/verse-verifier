@@ -40,10 +40,10 @@ type OptimismState struct {
 }
 
 type OptimismSignature struct {
-	ID         string `gorm:"primarykey"`
+	ID         string `gorm:"primarykey;index:optimism_signature_idx3,priority:2"`
 	PreviousID string
 
-	SignerID uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:1"`
+	SignerID uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:1;index:optimism_signature_idx3,priority:1"`
 	Signer   Signer
 
 	OptimismSccID uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:2"`

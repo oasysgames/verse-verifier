@@ -384,7 +384,7 @@ func (w *SccSubmitter) getMulticallCalls(
 	opts.GasLimit = 21_000      // prevent `eth_estimateGas`
 
 	for i := uint64(0); i < uint64(w.cfg.BatchSize); i++ {
-		var cpyLogCtx []interface{}
+		cpyLogCtx := make([]interface{}, len(logCtx))
 		copy(cpyLogCtx, logCtx)
 
 		batchIndex := fromIndex + i
