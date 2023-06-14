@@ -202,6 +202,7 @@ func (w *SccVerifier) work(ctx context.Context, task *verifyTask) {
 
 		w.log.Info("Start state verification", logCtx...)
 		approved, sig, err := w.verify(ctx, task.verse, state)
+		// approved, sig, err := w.verifyWithoutCalc(ctx, task.verse, state)
 		if err != nil {
 			return
 		}
@@ -279,6 +280,34 @@ func (w *SccVerifier) verify(
 		return false, database.Signature{}, err
 	}
 	approved := bytes.Equal(state.BatchRoot[:], merkleRoot[:])
+
+	// calc and save signature
+	msg := NewSccMessage(
+		new(big.Int).SetUint64(w.signer.ChainID().Uint64()),
+		state.OptimismScc.Address,
+		new(big.Int).SetUint64(state.BatchIndex),
+		state.BatchRoot,
+		approved,
+	)
+	if sig, err := msg.Signature(w.signer.SignData); err == nil {
+		return approved, sig, nil
+	} else {
+		w.log.Error("Failed to calculate signature", append(logCtx, "err", err)...)
+		return false, database.Signature{}, err
+	}
+}
+
+func (w *SccVerifier) verifyWithoutCalc(
+	ctx context.Context,
+	verse ethutil.ReadOnlyClient,
+	state *database.OptimismState,
+) (bool, database.Signature, error) {
+	logCtx := []interface{}{
+		"scc", state.OptimismScc.Address.Hex(),
+		"index", state.BatchIndex,
+	}
+
+	approved := true
 
 	// calc and save signature
 	msg := NewSccMessage(
