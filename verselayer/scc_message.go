@@ -22,17 +22,18 @@ func NewSccMessage(
 	batchRoot [32]byte,
 	approved bool,
 ) *SccMessage {
-	b := common.Big0
+	_approved := []byte{0}
 	if approved {
-		b = common.Big1
+		_approved = []byte{1}
 	}
 
+	// See: https://github.com/oasysgames/oasys-optimism/blob/5186190c3250121179064b70d8e2fbd2d0a03ce3/packages/contracts/contracts/oasys/L1/rollup/OasysStateCommitmentChainVerifier.sol#L111-L119
 	abiPacked := bytes.Join([][]byte{
 		common.LeftPadBytes(hubChainID.Bytes(), 32),
 		scc[:],
 		common.LeftPadBytes(batchIndex.Bytes(), 32),
 		batchRoot[:],
-		b.Bytes(),
+		_approved,
 	}, nil)
 	_, msg := accounts.TextAndHash(crypto.Keccak256(abiPacked))
 
