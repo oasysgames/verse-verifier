@@ -55,3 +55,16 @@ func (m *SccMessage) Signature(signDataFn ethutil.SignDataFn) ([65]byte, error) 
 	sig[crypto.RecoveryIDOffset] += 27
 	return sig, nil
 }
+
+func (m *SccMessage) Ecrecover(signature []byte) (common.Address, error) {
+	hash := crypto.Keccak256([]byte(m.Eip712Msg))
+	return ethutil.Ecrecover(hash, signature)
+}
+
+func (m *SccMessage) VerifySigner(signature []byte, signer common.Address) (bool, error) {
+	if recoverd, err := m.Ecrecover(signature); err != nil {
+		return false, err
+	} else {
+		return bytes.Equal(recoverd.Bytes(), signer.Bytes()), nil
+	}
+}

@@ -183,13 +183,20 @@ func (w *SccVerifier) work(ctx context.Context, task *verifyTask) {
 		return
 	}
 
+	// verify the signature that match the nextIndex
+	// and delete after signatures if there is a problem.
+	// Prevent getting stuck indefinitely in the Verify waiting
+	// state due to a bug in the signature creation process.
+	w.deleteInvalidSignature(task.scc, nextIndex.Uint64())
+
+	// run verification tasks until time out
 	ctx, cancel := context.WithTimeout(ctx, w.cfg.StateCollectTimeout)
 	defer cancel()
 
 	for i := nextIndex.Uint64(); ; i++ {
 		states, err := w.db.Optimism.FindVerificationWaitingStates(
 			w.signer.Signer(), task.scc, i, 1)
-		if err != nil && !errors.Is(err, database.ErrNotFound) {
+		if err != nil {
 			w.log.Error("Failed to find states", append(logCtx, "err", err)...)
 			return
 		} else if len(states) == 0 {
@@ -201,7 +208,7 @@ func (w *SccVerifier) work(ctx context.Context, task *verifyTask) {
 		logCtx := append(logCtx, "index", state.BatchIndex)
 
 		w.log.Info("Start state verification", logCtx...)
-		approved, sig, err := w.verify(ctx, task.verse, state)
+		approved, sig, err := w.verifyState(ctx, task.verse, state)
 		if err != nil {
 			return
 		}
@@ -222,7 +229,7 @@ func (w *SccVerifier) work(ctx context.Context, task *verifyTask) {
 	}
 }
 
-func (w *SccVerifier) verify(
+func (w *SccVerifier) verifyState(
 	ctx context.Context,
 	verse ethutil.ReadOnlyClient,
 	state *database.OptimismState,
@@ -282,7 +289,7 @@ func (w *SccVerifier) verify(
 
 	// calc and save signature
 	msg := NewSccMessage(
-		new(big.Int).SetUint64(w.signer.ChainID().Uint64()),
+		w.signer.ChainID(),
 		state.OptimismScc.Address,
 		new(big.Int).SetUint64(state.BatchIndex),
 		state.BatchRoot,
@@ -293,6 +300,41 @@ func (w *SccVerifier) verify(
 	} else {
 		w.log.Error("Failed to calculate signature", append(logCtx, "err", err)...)
 		return false, database.Signature{}, err
+	}
+}
+
+func (w *SccVerifier) deleteInvalidSignature(scc common.Address, nextIndex uint64) {
+	logCtx := []interface{}{"scc", scc.Hex(), "next-index", nextIndex}
+
+	signer := w.signer.Signer()
+	sigs, err := w.db.Optimism.FindSignatures(nil, &signer, &scc, &nextIndex, 1, 0)
+	if err != nil {
+		w.log.Error("Unable to find signatures", append(logCtx, "err", err)...)
+		return
+	} else if len(sigs) == 0 {
+		w.log.Debug("No invalid signature", logCtx...)
+		return
+	}
+
+	msg := NewSccMessage(
+		w.signer.ChainID(),
+		sigs[0].OptimismScc.Address,
+		new(big.Int).SetUint64(sigs[0].BatchIndex),
+		sigs[0].BatchRoot,
+		sigs[0].Approved)
+	if match, err := msg.VerifySigner(sigs[0].Signature[:], signer); err == nil && match {
+		w.log.Debug("No invalid signature", logCtx...)
+		return
+	} else if err != nil {
+		w.log.Error("Unable to verify signature", append(logCtx, "err", err)...)
+	}
+
+	w.log.Warn("Found invalid signature", append(logCtx, "signature", sigs[0].Signature.Hex())...)
+
+	if rows, err := w.db.Optimism.DeleteSignatures(signer, scc, nextIndex); err != nil {
+		w.log.Error("Unable to delete signatures", append(logCtx, "err", err)...)
+	} else {
+		w.log.Warn("Deleted invalid signature", append(logCtx, "delete-rows", rows)...)
 	}
 }
 

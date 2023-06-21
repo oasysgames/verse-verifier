@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/stretchr/testify/suite"
@@ -75,22 +76,52 @@ func (s *SccSigTestSuite) TestNewRejectSccMessage() {
 	s.Equal(wantEip712Msg, s.rejectMsg.Eip712Msg)
 }
 
-func (s *SccSigTestSuite) TestApproveSignature() {
-	got, _ := s.approveMsg.Signature(s.b.SignData)
+func (s *SccSigTestSuite) TestSignature() {
+	got1, _ := s.approveMsg.Signature(s.b.SignData)
+	got2, _ := s.rejectMsg.Signature(s.b.SignData)
 
-	want, _ := hex.DecodeString(
-		"1718cfc352e84bf50ced8b0aaf8a8955fb038389223b289cca33bdd1bd72b7d0" +
-			"29b5f6ebf983f38ddc85086b58d48b16637b8bf8929230eec38ab05595504a5b1c")
-
-	s.Equal(want, got[:])
+	s.Equal(hexutil.MustDecode(
+		"0x1718cfc352e84bf50ced8b0aaf8a8955fb038389223b289cca33bdd1bd72b7d0"+
+			"29b5f6ebf983f38ddc85086b58d48b16637b8bf8929230eec38ab05595504a5b1c"), got1[:])
+	s.Equal(hexutil.MustDecode(
+		"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729"+
+			"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef1b"), got2[:])
 }
 
-func (s *SccSigTestSuite) TestRejectSignature() {
-	got, _ := s.rejectMsg.Signature(s.b.SignData)
+func (s *SccSigTestSuite) TestEcrecover() {
+	got1, _ := s.approveMsg.Ecrecover(
+		hexutil.MustDecode(
+			"0x1718cfc352e84bf50ced8b0aaf8a8955fb038389223b289cca33bdd1bd72b7d0" +
+				"29b5f6ebf983f38ddc85086b58d48b16637b8bf8929230eec38ab05595504a5b1c"))
+	got2, _ := s.rejectMsg.Ecrecover(
+		hexutil.MustDecode(
+			"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729" +
+				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef1b"))
+	got3, _ := s.rejectMsg.Ecrecover(
+		hexutil.MustDecode(
+			"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729" +
+				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef10"))
 
-	want, _ := hex.DecodeString(
-		"821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729" +
-			"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef1b")
+	s.Equal(s.b.Signer(), got1)
+	s.Equal(s.b.Signer(), got2)
+	s.NotEqual(s.b.Signer(), got3)
+}
 
-	s.Equal(want, got[:])
+func (s *SccSigTestSuite) TestVerifySigner() {
+	got1, _ := s.approveMsg.VerifySigner(
+		hexutil.MustDecode(
+			"0x1718cfc352e84bf50ced8b0aaf8a8955fb038389223b289cca33bdd1bd72b7d0"+
+				"29b5f6ebf983f38ddc85086b58d48b16637b8bf8929230eec38ab05595504a5b1c"), s.b.Signer())
+	got2, _ := s.rejectMsg.VerifySigner(
+		hexutil.MustDecode(
+			"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729"+
+				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef1b"), s.b.Signer())
+	got3, _ := s.rejectMsg.VerifySigner(
+		hexutil.MustDecode(
+			"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729"+
+				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef10"), s.b.Signer())
+
+	s.True(got1)
+	s.True(got2)
+	s.False(got3)
 }

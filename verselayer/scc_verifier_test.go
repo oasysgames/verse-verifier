@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/big"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -79,7 +78,6 @@ func (s *SccVerifierTestSuite) TestVerify() {
 		},
 	}
 
-	ctx := context.Background()
 	batchSize := 10
 
 	// send transactions to verse-layer
@@ -97,21 +95,7 @@ func (s *SccVerifierTestSuite) TestVerify() {
 	}
 
 	// subscribe new signature
-	var (
-		wg         = &sync.WaitGroup{}
-		sub        = s.verifier.SubscribeNewSignature(ctx)
-		subscribes []*database.OptimismSignature
-	)
-	wg.Add(len(cases))
-	go func() {
-		for sig := range sub.Next() {
-			subscribes = append(subscribes, sig)
-			wg.Done()
-		}
-	}()
-
-	go s.verifier.Start(ctx)
-	wg.Wait()
+	subscribes := s.startAndWait(s.verifier, len(cases))
 
 	// assert
 	for i, tt := range cases {
@@ -136,6 +120,98 @@ func (s *SccVerifierTestSuite) TestVerify() {
 
 		s.Equal(tt.wantSignature, got0[0].Signature.Hex())
 		s.Equal(tt.wantSignature, got1.Signature.Hex())
+	}
+}
+
+func (s *SccVerifierTestSuite) TestDeleteInvalidSignature() {
+	batches := s.Range(0, 10)
+	batchSize := 5
+	invalidBatch := 6
+
+	// send transactions to verse-layer
+	merkleRoots := make([][32]byte, len(batches))
+	for batchIdx := range batches {
+		elements := make([][32]byte, batchSize)
+		for i, header := range s.sendTransaction(batchSize) {
+			elements[i] = header.Root
+		}
+		if merkleRoot, err := calcMerkleRoot(elements); s.NoError(err) {
+			merkleRoots[batchIdx] = merkleRoot
+		}
+	}
+
+	createds := make([]*database.OptimismSignature, len(batches))
+	for batchIdx, merkleRoot := range merkleRoots {
+		// save verify waiting state
+		s.db.Optimism.SaveState(&scc.SccStateBatchAppended{
+			Raw:               types.Log{Address: s.sccAddr},
+			BatchIndex:        big.NewInt(int64(batchIdx)),
+			BatchRoot:         merkleRoot,
+			BatchSize:         big.NewInt(int64(batchSize)),
+			PrevTotalElements: big.NewInt(int64(batchIdx * batchSize)),
+			ExtraData:         []byte(fmt.Sprintf("test-%d", batchIdx))})
+
+		// run verification
+		sigs := s.startAndWait(s.verifier, 1)
+		s.Len(sigs, 1)
+		s.Equal(merkleRoot[:], sigs[0].BatchRoot[:])
+		createds[batchIdx] = sigs[0]
+	}
+
+	// increment `nextIndex`
+	for batchIdx := range s.Range(0, invalidBatch) {
+		s.scc.EmitStateBatchVerified(
+			s.hub.TransactOpts(context.Background()),
+			big.NewInt(int64(batchIdx)),
+			merkleRoots[batchIdx],
+		)
+		s.hub.Commit()
+	}
+
+	// run `deleteInvalidSignature`, but nothing happens
+	s.Len(s.startAndWait(s.verifier, 1), 0)
+
+	signer := s.hub.Signer()
+	gots, _ := s.db.Optimism.FindSignatures(nil, &signer, &s.sccAddr, nil, 100, 0)
+	s.Equal(len(batches), len(gots))
+
+	for batchIdx := range batches {
+		// should not be re-created
+		s.Equal(createds[batchIdx].ID, gots[batchIdx].ID)
+		s.Equal(createds[batchIdx].Signature, gots[batchIdx].Signature)
+	}
+
+	// update to invalid signature
+	s.db.Optimism.SaveSignature(
+		&createds[invalidBatch].ID,
+		&createds[invalidBatch].PreviousID,
+		createds[invalidBatch].Signer.Address,
+		createds[invalidBatch].OptimismScc.Address,
+		createds[invalidBatch].BatchIndex,
+		createds[invalidBatch].BatchRoot,
+		createds[invalidBatch].BatchSize,
+		createds[invalidBatch].PrevTotalElements,
+		createds[invalidBatch].ExtraData,
+		createds[invalidBatch].Approved,
+		database.RandSignature())
+
+	// run `deleteInvalidSignature`
+	s.Len(
+		s.startAndWait(s.verifier, len(batches)-invalidBatch),
+		len(batches)-invalidBatch,
+	)
+
+	gots, _ = s.db.Optimism.FindSignatures(nil, &signer, &s.sccAddr, nil, 100, 0)
+	s.Equal(len(batches), len(gots))
+
+	for batchIdx := range batches {
+		if batchIdx < invalidBatch {
+			s.Equal(createds[batchIdx].ID, gots[batchIdx].ID)
+		} else {
+			// should be re-created
+			s.NotEqual(createds[batchIdx].ID, gots[batchIdx].ID)
+		}
+		s.Equal(createds[batchIdx].Signature, gots[batchIdx].Signature)
 	}
 }
 
@@ -220,7 +296,7 @@ func (s *SccVerifierTestSuite) TestCalcMerkleRoot() {
 	}
 }
 
-func (s *SccVerifierTestSuite) sendTransaction(count int) {
+func (s *SccVerifierTestSuite) sendTransaction(count int) (headers []*types.Header) {
 	for i := 0; i < count; i++ {
 		signedTx, _ := s.hub.SignTx(types.NewTransaction(
 			uint64(i),
@@ -231,8 +307,11 @@ func (s *SccVerifierTestSuite) sendTransaction(count int) {
 			nil))
 
 		s.verse.SendTransaction(context.Background(), signedTx)
-		s.verse.Commit()
+		if h, err := s.verse.HeaderByHash(context.Background(), s.verse.Commit()); s.NoError(err) {
+			headers = append(headers, h)
+		}
 	}
+	return headers
 }
 
 func (s *SccVerifierTestSuite) fillDefaultHashes(elements [][32]byte) [][32]byte {
@@ -250,4 +329,38 @@ func (s *SccVerifierTestSuite) fillDefaultHashes(elements [][32]byte) [][32]byte
 	}
 
 	return filled
+}
+
+func (s *SccVerifierTestSuite) startAndWait(
+	verifier *SccVerifier,
+	count int,
+) []*database.OptimismSignature {
+	ctx, candel := context.WithTimeout(context.Background(), time.Second/2)
+	defer candel()
+
+	sub := verifier.SubscribeNewSignature(ctx)
+	defer sub.Cancel()
+
+	published := []*database.OptimismSignature{}
+	go func() {
+		defer candel()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sig := <-sub.Next():
+				published = append(published, sig)
+				if len(published) == count {
+					return
+				}
+			}
+		}
+
+	}()
+
+	go verifier.Start(ctx)
+	<-ctx.Done()
+
+	return published
 }

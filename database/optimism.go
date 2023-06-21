@@ -98,27 +98,20 @@ func (db *OptimismDatabase) FindVerificationWaitingStates(
 		nextIndex = _scc.NextIndex
 	}
 
-	var latestSig OptimismSignature
-	tx := db.db.
-		Joins("Signer").
-		Joins("OptimismScc").
-		Where("optimism_signatures.signer_id = (?)", signerSub).
-		Where("optimism_signatures.optimism_scc_id = ?", _scc.ID).
-		Order("optimism_signatures.batch_index DESC").
-		First(&latestSig)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		// noop
-	} else if tx.Error != nil {
-		return nil, tx.Error
-	} else if latestSig.BatchIndex >= nextIndex {
-		nextIndex = latestSig.BatchIndex + 1
+	sub := db.db.Model(&OptimismSignature{}).
+		Select("batch_index").
+		Where("optimism_scc_id = ? AND signer_id = (?)", _scc.ID, signerSub).
+		Where("batch_index >= ?", nextIndex)
+	if sub.Error != nil {
+		return nil, sub.Error
 	}
 
 	var rows []*OptimismState
-	tx = db.db.
+	tx := db.db.
 		Joins("OptimismScc").
 		Where("optimism_scc_id = ? AND batch_index >= ?", _scc.ID, nextIndex).
-		Order("optimism_states.batch_index ASC").
+		Where("batch_index NOT IN (?)", sub).
+		Order("batch_index ASC").
 		Limit(limit).
 		Find(&rows)
 	if tx.Error != nil {
