@@ -288,6 +288,6 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	)
 	s.Equal(15*time.Minute, got.Beacon.Interval)
 
-	s.Equal(250*time.Millisecond, got.Database.LongQueryTime)
+	s.Equal(200*time.Millisecond, got.Database.LongQueryTime)
 	s.Equal(10000, got.Database.MinExaminedRowLimit)
 }
