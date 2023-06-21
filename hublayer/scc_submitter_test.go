@@ -211,9 +211,10 @@ func (s *SccSubmitterTestSuite) TestFindSignatures() {
 		s.Equal(want.Signature, gots[i].Signature)
 	}
 
-	_, err := s.sccSubmitter.findSignatures(
+	rows, err := s.sccSubmitter.findSignatures(
 		s.sccAddr, batchIndex+1, common.Big0, totalStake, signerStakes)
-	s.Equal("no signatures", err.Error())
+	s.Len(rows, 0)
+	s.NoError(err)
 
 	_, err = s.sccSubmitter.findSignatures(
 		s.sccAddr, batchIndex, common.Big0, big.NewInt(20000), signerStakes)

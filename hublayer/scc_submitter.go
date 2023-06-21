@@ -31,9 +31,8 @@ const (
 )
 
 var (
-	errNoSignature = errors.New("no signatures")
-	minStake       = new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000))
-	mcall2Abi      *abi.ABI
+	minStake  = new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000))
+	mcall2Abi *abi.ABI
 )
 
 func init() {
@@ -293,7 +292,7 @@ func (w *SccSubmitter) findSignatures(
 	if err != nil {
 		return nil, err
 	} else if len(rows) == 0 {
-		return nil, errNoSignature
+		return rows, nil
 	}
 
 	// group by BatchRoot and Approved
@@ -397,12 +396,12 @@ func (w *SccSubmitter) getMulticallCalls(
 			totalStake,
 			signerStake,
 		)
-		if errors.Is(err, errNoSignature) {
-			w.log.Info("No signatures", cpyLogCtx...)
-			break
-		} else if err != nil {
+		if err != nil {
 			w.log.Error("Failed to find signatures", append(cpyLogCtx, "err", err)...)
 			return nil, 0, err
+		} else if len(rows) == 0 {
+			w.log.Info("No signatures", cpyLogCtx...)
+			break
 		}
 
 		// fetch the StateBatchAppended that matches the target batch index

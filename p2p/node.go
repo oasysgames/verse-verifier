@@ -436,6 +436,10 @@ func (w *Node) handleFindCommonOptimismSignature(
 	recv *pb.FindCommonOptimismSignature,
 ) {
 	remotes := recv.Locals
+	if len(remotes) == 0 {
+		return
+	}
+
 	w.log.Info("Received FindCommonOptimismSignature request",
 		"from", remotes[0].Id, "to", remotes[len(remotes)-1].Id)
 
