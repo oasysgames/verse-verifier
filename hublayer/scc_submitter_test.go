@@ -216,7 +216,9 @@ func (s *SccSubmitterTestSuite) TestFindSignatures() {
 	s.Len(rows, 0)
 	s.NoError(err)
 
-	_, err = s.sccSubmitter.findSignatures(
+	// stake amount shortage
+	rows, err = s.sccSubmitter.findSignatures(
 		s.sccAddr, batchIndex, common.Big0, big.NewInt(20000), signerStakes)
-	s.Equal("stake amount shortage, required: 0, actual: 0", err.Error())
+	s.Len(rows, 0)
+	s.NoError(err)
 }

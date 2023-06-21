@@ -324,11 +324,9 @@ func (w *SccSubmitter) findSignatures(
 	// check over half
 	required := new(big.Int).Mul(new(big.Int).Div(totalStake, big.NewInt(100)), big.NewInt(51))
 	if highestStake.Cmp(required) == -1 {
-		return nil, fmt.Errorf(
-			"stake amount shortage, required: %s, actual: %s",
-			fromWei(required).String(),
-			fromWei(highestStake).String(),
-		)
+		w.log.Info("Stake amount shortage",
+			"required", fromWei(required), "actual", fromWei(highestStake))
+		return []*database.OptimismSignature{}, nil
 	}
 
 	// sort by signer address
@@ -400,7 +398,7 @@ func (w *SccSubmitter) getMulticallCalls(
 			w.log.Error("Failed to find signatures", append(cpyLogCtx, "err", err)...)
 			return nil, 0, err
 		} else if len(rows) == 0 {
-			w.log.Info("No signatures", cpyLogCtx...)
+			w.log.Debug("No signatures", cpyLogCtx...)
 			break
 		}
 
