@@ -31,9 +31,8 @@ const (
 )
 
 var (
-	errNoSignature = errors.New("no signatures")
-	minStake       = new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000))
-	mcall2Abi      *abi.ABI
+	minStake  = new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000))
+	mcall2Abi *abi.ABI
 )
 
 func init() {
@@ -189,11 +188,11 @@ func (w *SccSubmitter) HasVerse(scc common.Address) bool {
 
 func (w *SccSubmitter) work(ctx context.Context, task *submitTask) {
 	logCtx := []interface{}{"scc", task.scc.Hex()}
-	calls, nextIndex, err := w.getMulticallCalls(ctx, logCtx, task)
+	calls, fromIndex, err := w.getMulticallCalls(ctx, logCtx, task)
 	if err != nil || len(calls) == 0 {
 		return
 	}
-	logCtx = append(logCtx, "next-index", nextIndex)
+	logCtx = append(logCtx, "from-index", fromIndex, "to-index", fromIndex+uint64(len(calls)-1))
 
 	// send transaction
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
@@ -283,17 +282,17 @@ func (w *SccSubmitter) fetchSignerStakes(ctx context.Context) (map[common.Addres
 
 func (w *SccSubmitter) findSignatures(
 	scc common.Address,
-	nextIndex uint64,
+	batchIndex uint64,
 	minStake *big.Int,
 	totalStake *big.Int,
 	signerStakes map[common.Address]*big.Int,
 ) ([]*database.OptimismSignature, error) {
 	// find signatures from database
-	rows, err := w.db.Optimism.FindSignatures(nil, nil, &scc, &nextIndex, 1000, 0)
+	rows, err := w.db.Optimism.FindSignatures(nil, nil, &scc, &batchIndex, 1000, 0)
 	if err != nil {
 		return nil, err
 	} else if len(rows) == 0 {
-		return nil, errNoSignature
+		return rows, nil
 	}
 
 	// group by BatchRoot and Approved
@@ -325,11 +324,9 @@ func (w *SccSubmitter) findSignatures(
 	// check over half
 	required := new(big.Int).Mul(new(big.Int).Div(totalStake, big.NewInt(100)), big.NewInt(51))
 	if highestStake.Cmp(required) == -1 {
-		return nil, fmt.Errorf(
-			"stake amount shortage, required: %s, actual: %s",
-			fromWei(required).String(),
-			fromWei(highestStake).String(),
-		)
+		w.log.Info("Stake amount shortage",
+			"required", fromWei(required), "actual", fromWei(highestStake))
+		return []*database.OptimismSignature{}, nil
 	}
 
 	// sort by signer address
@@ -345,8 +342,9 @@ func (w *SccSubmitter) getMulticallCalls(
 	ctx context.Context,
 	logCtx []interface{},
 	task *submitTask,
-) (calls []multicall2.Multicall2Call, nextIndex uint64, err error) {
-	scc, err := scc.NewScc(task.scc, task.hub)
+) (calls []multicall2.Multicall2Call, fromIndex uint64, err error) {
+	// construct the OasysStateCommitmentChain contract
+	sccc, err := scc.NewScc(task.scc, task.hub)
 	if err != nil {
 		log.Error(
 			"Failed to construct OasysStateCommitmentChain contract",
@@ -354,6 +352,7 @@ func (w *SccSubmitter) getMulticallCalls(
 		return nil, 0, err
 	}
 
+	// construct the OasysStateCommitmentChainVerifier contract
 	sccvaddr := common.HexToAddress(w.cfg.VerifierAddress)
 	sccv, err := sccverifier.NewSccverifier(sccvaddr, task.hub)
 	if err != nil {
@@ -363,13 +362,14 @@ func (w *SccSubmitter) getMulticallCalls(
 	}
 
 	// fetch the next index from hub-layer
-	ni, err := scc.NextIndex(&bind.CallOpts{Context: ctx})
+	ni, err := sccc.NextIndex(&bind.CallOpts{Context: ctx})
 	if err != nil {
 		w.log.Error("Failed to call the SCC.nextIndex method", append(logCtx, "err", err)...)
 		return nil, 0, err
 	}
-	nextIndex = ni.Uint64()
+	fromIndex = ni.Uint64()
 
+	// find signatures from database
 	var (
 		totalStake  = w.getTotalStake()
 		signerStake = w.getSignerStakes()
@@ -380,28 +380,41 @@ func (w *SccSubmitter) getMulticallCalls(
 	opts.GasPrice = common.Big1 // prevent `eth_gasPrice`
 	opts.GasLimit = 21_000      // prevent `eth_estimateGas`
 
-	for i := 0; i < w.cfg.BatchSize; i++ {
+	for i := uint64(0); i < uint64(w.cfg.BatchSize); i++ {
+		cpyLogCtx := make([]interface{}, len(logCtx))
+		copy(cpyLogCtx, logCtx)
+
+		batchIndex := fromIndex + i
+		cpyLogCtx = append(cpyLogCtx, "index", batchIndex)
+
 		rows, err := w.findSignatures(
 			task.scc,
-			nextIndex+uint64(i),
+			batchIndex,
 			minStake,
 			totalStake,
 			signerStake,
 		)
-		if errors.Is(err, errNoSignature) {
-			w.log.Info("No signatures", logCtx...)
-			break
-		} else if err != nil {
-			w.log.Error("Failed to find signatures", append(logCtx, "err", err)...)
+		if err != nil {
+			w.log.Error("Failed to find signatures", append(cpyLogCtx, "err", err)...)
 			return nil, 0, err
+		} else if len(rows) == 0 {
+			w.log.Debug("No signatures", cpyLogCtx...)
+			break
 		}
 
+		// fetch the StateBatchAppended that matches the target batch index
+		ev, err := findStateBatchAppendedEvent(ctx, sccc, batchIndex)
+		if err != nil {
+			w.log.Error("Failed to fetch the StateBatchAppended event",
+				append(cpyLogCtx, "err", err)...)
+			return nil, 0, err
+		}
 		batchHeader := sccverifier.Lib_OVMCodecChainBatchHeader{
-			BatchIndex:        new(big.Int).SetUint64(rows[0].BatchIndex),
-			BatchRoot:         rows[0].BatchRoot,
-			BatchSize:         new(big.Int).SetUint64(rows[0].BatchSize),
-			PrevTotalElements: new(big.Int).SetUint64(rows[0].PrevTotalElements),
-			ExtraData:         rows[0].ExtraData,
+			BatchIndex:        ev.BatchIndex,
+			BatchRoot:         ev.BatchRoot,
+			BatchSize:         ev.BatchSize,
+			PrevTotalElements: ev.PrevTotalElements,
+			ExtraData:         ev.ExtraData,
 		}
 
 		signatures := make([][]byte, len(rows))
@@ -415,12 +428,12 @@ func (w *SccSubmitter) getMulticallCalls(
 		}
 
 		if tx, err := method(opts, task.scc, batchHeader, signatures); err != nil {
-			w.log.Error("Failed to construct transaction", append(logCtx, "err", err)...)
+			w.log.Error("Failed to construct transaction", append(cpyLogCtx, "err", err)...)
 			return nil, 0, err
 		} else {
 			appended := append(calls, multicall2.Multicall2Call{Target: sccvaddr, CallData: tx.Data()})
 			if data, err := mcall2Abi.Pack("tryAggregate", true, appended); err != nil {
-				w.log.Error("Failed to pack data", "err", err)
+				w.log.Error("Failed to pack data", append(cpyLogCtx, "err", err)...)
 				return nil, 0, err
 			} else if len(data) > maxTxSize {
 				w.log.Warn("Oversized data", "size", len(data), "len", len(appended))
@@ -436,7 +449,7 @@ func (w *SccSubmitter) getMulticallCalls(
 		}
 	}
 
-	return calls, nextIndex, nil
+	return calls, fromIndex, nil
 }
 
 func (w *SccSubmitter) sendTransaction(
@@ -537,4 +550,33 @@ func (w *SccSubmitter) waitForCconfirmation(
 
 func fromWei(wei *big.Int) *big.Int {
 	return new(big.Int).Div(wei, big.NewInt(params.Ether))
+}
+
+func findStateBatchAppendedEvent(
+	ctx context.Context,
+	sccc *scc.Scc,
+	batchIndex uint64,
+) (appended *scc.SccStateBatchAppended, err error) {
+	opts := &bind.FilterOpts{Context: ctx}
+
+	iter, err := sccc.FilterStateBatchAppended(opts, []*big.Int{new(big.Int).SetUint64(batchIndex)})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	for {
+		if iter.Next() {
+			appended = iter.Event // returns the last event
+		} else if err := iter.Error(); err != nil {
+			return nil, err
+		} else {
+			break
+		}
+	}
+
+	if appended == nil {
+		err = errors.New("not found")
+	}
+	return appended, err
 }

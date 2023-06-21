@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/stretchr/testify/suite"
 )
@@ -21,7 +22,7 @@ type BlockDatabaseTestSuite struct {
 }
 
 func (s *BlockDatabaseTestSuite) SetupTest() {
-	db, err := NewDatabase(":memory:")
+	db, err := NewDatabase(&config.Database{Path: ":memory:"})
 	if err != nil {
 		panic(err)
 	}

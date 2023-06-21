@@ -425,51 +425,73 @@ func (s *OptimismDatabaseTestSuite) TestFindSignatures() {
 }
 
 func (s *OptimismDatabaseTestSuite) TestFindVerificationWaitingStates() {
-	assert := func(gots []*OptimismState, want []int) {
-		indexes := make([]int, len(gots))
+	assert := func(gots []*OptimismState, wants []*OptimismState) {
+		s.Len(gots, len(wants))
 		for i, got := range gots {
-			indexes[i] = int(got.BatchIndex)
+			s.Equal(wants[i].ID, got.ID)
 		}
-		s.Equal(want, indexes)
 	}
 
+	// Create dummy records
+	count := 10
 	signer := s.createSigner()
-	scc0 := s.createSCC()
-	scc1 := s.createSCC()
-	for _, i := range s.Shuffle(s.Range(0, 10)) {
-		s.createState(scc0, i)
-		s.createState(scc1, i)
+	scc0, scc1 := s.createSCC(), s.createSCC()
+	wants0, wants1 := make([]*OptimismState, count), make([]*OptimismState, count)
+	for _, batchIndex := range s.Shuffle(s.Range(0, count)) {
+		wants0[batchIndex] = s.createState(scc0, batchIndex)
+		wants1[batchIndex] = s.createState(scc1, batchIndex)
 	}
 
 	gots, _ := s.db.FindVerificationWaitingStates(signer.Address, scc0.Address, 0, 100)
-	assert(gots, s.Range(0, 10))
+	assert(gots, wants0)
 
 	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc1.Address, 0, 100)
-	assert(gots, s.Range(0, 10))
+	assert(gots, wants1)
 
 	// when limit is set
 	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc0.Address, 0, 2)
-	assert(gots, s.Range(0, 2))
+	assert(gots, wants0[:2])
 
 	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc1.Address, 0, 4)
-	assert(gots, s.Range(0, 4))
+	assert(gots, wants1[:4])
 
 	// when `nextIndex` is set to query
-	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc0.Address, 6, 100)
-	assert(gots, s.Range(6, 10))
+	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc0.Address, 2, 100)
+	assert(gots, wants0[2:])
 
-	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc1.Address, 8, 100)
-	assert(gots, s.Range(8, 10))
+	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc1.Address, 3, 100)
+	assert(gots, wants1[3:])
 
 	// when `nextIndex` is set to scc
-	s.db.SaveNextIndex(scc0.Address, 6)
-	s.db.SaveNextIndex(scc1.Address, 8)
+	s.db.SaveNextIndex(scc0.Address, 3)
+	s.db.SaveNextIndex(scc1.Address, 4)
 
 	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc0.Address, 0, 100)
-	assert(gots, s.Range(6, 10))
+	assert(gots, wants0[3:])
 
 	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc1.Address, 0, 100)
-	assert(gots, s.Range(8, 10))
+	assert(gots, wants1[4:])
+
+	// when several signatures exist
+	merge := func(a, b []*OptimismState) (m []*OptimismState) {
+		m = append(m, a...)
+		m = append(m, b...)
+		return m
+	}
+	s.createSignature(signer, scc0, 6)
+	s.createSignature(signer, scc1, 8)
+
+	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc0.Address, 0, 100)
+	assert(gots, merge(wants0[3:6], wants0[7:]))
+
+	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc1.Address, 0, 100)
+	assert(gots, merge(wants1[4:8], wants1[9:]))
+
+	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc0.Address, 8, 100)
+	assert(gots, wants0[8:])
+
+	gots, _ = s.db.FindVerificationWaitingStates(signer.Address, scc1.Address, 9, 100)
+	assert(gots, wants1[9:])
 }
 
 func (s *OptimismDatabaseTestSuite) TestDeleteStates() {

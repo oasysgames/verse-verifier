@@ -1,7 +1,6 @@
 package p2p
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/metrics"
@@ -23,7 +21,6 @@ import (
 	msgio "github.com/libp2p/go-msgio"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
-	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
@@ -439,6 +436,10 @@ func (w *Node) handleFindCommonOptimismSignature(
 	recv *pb.FindCommonOptimismSignature,
 ) {
 	remotes := recv.Locals
+	if len(remotes) == 0 {
+		return
+	}
+
 	w.log.Info("Received FindCommonOptimismSignature request",
 		"from", remotes[0].Id, "to", remotes[len(remotes)-1].Id)
 
@@ -694,19 +695,13 @@ func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) (bool,
 		return false, fmt.Errorf("future ulid: %s, timestamp: %d", sig.Id, id.Time())
 	}
 
-	// verify signer
 	msg := verselayer.NewSccMessage(
 		hubLayerChainID,
 		common.BytesToAddress(sig.Scc),
 		new(big.Int).SetUint64(sig.BatchIndex),
 		common.BytesToHash(sig.BatchRoot),
 		sig.Approved)
-	hash := crypto.Keccak256([]byte(msg.Eip712Msg))
-	if recoverd, err := ethutil.Ecrecover(hash, sig.Signature); err != nil {
-		return false, err
-	} else {
-		return bytes.Equal(recoverd.Bytes(), sig.Signer), nil
-	}
+	return msg.VerifySigner(sig.Signature, common.BytesToAddress(sig.Signer))
 }
 
 func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {

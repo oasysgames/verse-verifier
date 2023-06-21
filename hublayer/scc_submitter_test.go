@@ -50,6 +50,9 @@ func (s *SccSubmitterTestSuite) TestWork() {
 
 		batchIndex := uint64(i)
 		batchRoot := s.RandHash()
+		batchSize := uint64(i)
+		prevTotalElements := uint64(i + 1)
+		extraData := []byte(fmt.Sprintf("%d", i))
 		approved := i < indexes-1
 
 		// create sample signatures
@@ -60,21 +63,30 @@ func (s *SccSubmitterTestSuite) TestWork() {
 				s.sccAddr,
 				batchIndex,
 				batchRoot,
-				uint64(i),
-				uint64(i+1),
-				[]byte(fmt.Sprintf("%d", i)),
+				batchSize,
+				prevTotalElements,
+				extraData,
 				approved,
 				database.RandSignature(),
 			)
 
 			signatures[i][j] = sig
 		}
-
 		sort.Slice(signatures[i], func(x, y int) bool {
 			a := signatures[i][x].Signer.Address.Hash().Big()
 			b := signatures[i][y].Signer.Address.Hash().Big()
 			return a.Cmp(b) == -1
 		})
+
+		// emit StateBatchAppended event to the test contract
+		s.scc.EmitStateBatchAppended(
+			s.hub.TransactOpts(context.Background()),
+			new(big.Int).SetUint64(batchIndex),
+			batchRoot,
+			new(big.Int).SetUint64(batchSize),
+			new(big.Int).SetUint64(prevTotalElements),
+			extraData)
+		s.mining()
 	}
 
 	s.sccSubmitter.refreshStakes(context.Background())
@@ -199,11 +211,14 @@ func (s *SccSubmitterTestSuite) TestFindSignatures() {
 		s.Equal(want.Signature, gots[i].Signature)
 	}
 
-	_, err := s.sccSubmitter.findSignatures(
+	rows, err := s.sccSubmitter.findSignatures(
 		s.sccAddr, batchIndex+1, common.Big0, totalStake, signerStakes)
-	s.Equal("no signatures", err.Error())
+	s.Len(rows, 0)
+	s.NoError(err)
 
-	_, err = s.sccSubmitter.findSignatures(
+	// stake amount shortage
+	rows, err = s.sccSubmitter.findSignatures(
 		s.sccAddr, batchIndex, common.Big0, big.NewInt(20000), signerStakes)
-	s.Equal("stake amount shortage, required: 0, actual: 0", err.Error())
+	s.Len(rows, 0)
+	s.NoError(err)
 }

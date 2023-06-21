@@ -5,9 +5,14 @@ import "fmt"
 const (
 	Major = 0
 	Minor = 0
-	Patch = 7
+	Patch = 8
+	Meta  = ""
 )
 
 func SemVer() string {
-	return fmt.Sprintf("%d.%d.%d", Major, Minor, Patch)
+	ver := fmt.Sprintf("%d.%d.%d", Major, Minor, Patch)
+	if Meta != "" {
+		ver = ver + "-" + Meta
+	}
+	return ver
 }

@@ -32,7 +32,7 @@ type OptimismState struct {
 	OptimismScc   OptimismScc
 
 	// Value of `StateBatchAppended` event.
-	BatchIndex        uint64 `gorm:"uniqueIndex:optimism_state_idx0,priority:2"`
+	BatchIndex        uint64 `gorm:"uniqueIndex:optimism_state_idx0,priority:2;index:optimism_state_idx1"`
 	BatchRoot         common.Hash
 	BatchSize         uint64
 	PrevTotalElements uint64
@@ -40,16 +40,16 @@ type OptimismState struct {
 }
 
 type OptimismSignature struct {
-	ID         string `gorm:"primarykey"`
+	ID         string `gorm:"primarykey;index:optimism_signature_idx3,priority:2"`
 	PreviousID string
 
-	SignerID uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:1"`
+	SignerID uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:1;index:optimism_signature_idx3,priority:1"`
 	Signer   Signer
 
 	OptimismSccID uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:2"`
 	OptimismScc   OptimismScc
 
-	BatchIndex        uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:3"`
+	BatchIndex        uint64 `gorm:"uniqueIndex:optimism_signature_idx1,priority:3;index:optimism_signature_idx2"`
 	BatchRoot         common.Hash
 	BatchSize         uint64
 	PrevTotalElements uint64
