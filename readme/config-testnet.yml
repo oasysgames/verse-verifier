@@ -1,0 +1,49 @@
+# Datastore directory path
+datastore: /home/geth/.oasvlfy
+
+# Keystore directory path
+keystore: /home/geth/.ethereum/keystore
+
+wallets:
+  # Wallet used by Verifier (Usually the same address as geth)
+  signer:
+    address: '0x'
+    # password: /home/geth/.ethereum/password.txt
+
+  # Wallet used by Submitter (gas is required)
+  # submitter:
+  #   address: '0x'
+
+# Hub-Layer settings
+hub_layer:
+  chain_id: 9372
+  rpc: wss://ws.testnet.oasys.games/
+
+# Verse-Layer settings
+verse_layer:
+  discovery:
+
+    endpoint: https://cdn.testnet.oasys.games/_oasvlfy/verse-layers.v1.json
+
+# P2P node
+p2p:
+  listen: 0.0.0.0:4101
+  bootnodes:
+
+    - /ip4/34.142.254.12/tcp/4101/p2p/12D3KooWMQpbQbv9vuGj2dWQHQX6K5oHPupTTSEMNzZWJQqgsBMU
+
+# IPC server
+ipc:
+  enable: true
+
+# Verification worker
+verifier:
+  enable: true
+  wallet: signer
+
+# Signature submitting worker
+submitter:
+  enable: false  # Only enable for Verse Builder
+  targets:
+    - chain_id: 420  # Chain ID of your Verse-Layer(testnet)
+      wallet: submitter
