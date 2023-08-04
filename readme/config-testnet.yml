@@ -22,14 +22,12 @@ hub_layer:
 # Verse-Layer settings
 verse_layer:
   discovery:
-
     endpoint: https://cdn.testnet.oasys.games/_oasvlfy/verse-layers.v1.json
 
 # P2P node
 p2p:
   listen: 0.0.0.0:4101
   bootnodes:
-
     - /ip4/34.142.254.12/tcp/4101/p2p/12D3KooWMQpbQbv9vuGj2dWQHQX6K5oHPupTTSEMNzZWJQqgsBMU
 
 # IPC server
