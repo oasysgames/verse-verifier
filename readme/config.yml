@@ -46,3 +46,13 @@ submitter:
   targets:
     - chain_id: 420  # Chain ID of your Verse-Layer
       wallet: submitter
+
+# debug:
+#   pprof:
+#     enable: true
+#     listen: 0.0.0.0:6060
+#     basic_auth:
+#       username: 
+#       password: 
+#     block_profile_rate: 0
+#     mem_profile_rate: 524288

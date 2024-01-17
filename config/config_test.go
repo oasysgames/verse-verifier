@@ -88,6 +88,16 @@ func (s *ConfigTestSuite) TestParseConfig() {
 	database:
 		long_query_time: 1s
 		min_examined_row_limit: 100
+
+	debug:
+		pprof:
+			enable: true
+			listen: 0.0.0.0:12345
+			basic_auth:
+				username: my-username
+				password: my-password
+			block_profile_rate: 1
+			mem_profile_rate: 2
 	`)
 
 	got, _ := NewConfig([]byte(strings.ReplaceAll(input, "\t", "  ")))
@@ -181,6 +191,22 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		LongQueryTime:       time.Second,
 		MinExaminedRowLimit: 100,
 	}, got.Database)
+
+	s.Equal(Debug{
+		Pprof: Pprof{
+			Enable: true,
+			Listen: "0.0.0.0:12345",
+			BasicAuth: struct {
+				Username string "json:\"username\""
+				Password string "json:\"password\""
+			}{
+				Username: "my-username",
+				Password: "my-password",
+			},
+			BlockProfileRate: 1,
+			MemProfileRate:   2,
+		},
+	}, got.Debug)
 }
 
 func (s *ConfigTestSuite) TestValidate() {
@@ -290,4 +316,10 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal(200*time.Millisecond, got.Database.LongQueryTime)
 	s.Equal(10000, got.Database.MinExaminedRowLimit)
+
+	s.Equal("127.0.0.1:6060", got.Debug.Pprof.Listen)
+	s.Equal("username", got.Debug.Pprof.BasicAuth.Username)
+	s.Equal("password", got.Debug.Pprof.BasicAuth.Password)
+	s.Equal(0, got.Debug.Pprof.BlockProfileRate)
+	s.Equal(524288, got.Debug.Pprof.MemProfileRate)
 }
