@@ -39,6 +39,11 @@ var (
 		"beacon.interval":                        15 * time.Minute,
 		"database.long_query_time":               200 * time.Millisecond,
 		"database.min_examined_row_limit":        10000,
+		"debug.pprof.listen":                     "127.0.0.1:6060",
+		"debug.pprof.basic_auth.username":        "username",
+		"debug.pprof.basic_auth.password":        "password",
+		"debug.pprof.block_profile_rate":         0,
+		"debug.pprof.mem_profile_rate":           524288,
 	}
 )
 
@@ -122,6 +127,9 @@ type Config struct {
 
 	// Database configuration.
 	Database Database `json:"database" mapstructure:"database"`
+
+	// Debug configuration.
+	Debug Debug `json:"debug" mapstructure:"debug"`
 }
 
 func (c *Config) DatabasePath() string {
@@ -277,4 +285,27 @@ type Database struct {
 	// Slow query log configurations.
 	LongQueryTime       time.Duration `json:"long_query_time"        mapstructure:"long_query_time"`
 	MinExaminedRowLimit int           `json:"min_examined_row_limit" mapstructure:"min_examined_row_limit"`
+}
+
+type Debug struct {
+	Pprof Pprof `json:"pprof" validate:"dive"`
+}
+
+type Pprof struct {
+	// Whether to pprof server.
+	Enable bool `json:"enable"`
+
+	// Address and port to listen.
+	Listen string `json:"listen" validate:"hostname_port"`
+
+	BasicAuth struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	} `json:"basic_auth" mapstructure:"basic_auth"`
+
+	// Turn on block profiling with the given rate.
+	BlockProfileRate int `json:"block_profile_rate" mapstructure:"block_profile_rate"`
+
+	// Turn on memory profiling with the given rate.
+	MemProfileRate int `json:"mem_profile_rate" mapstructure:"mem_profile_rate"`
 }

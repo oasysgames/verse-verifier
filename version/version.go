@@ -5,7 +5,7 @@ import "fmt"
 const (
 	Major = 0
 	Minor = 0
-	Patch = 8
+	Patch = 9
 	Meta  = ""
 )
 
