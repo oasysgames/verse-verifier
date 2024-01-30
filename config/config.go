@@ -17,33 +17,54 @@ var (
 
 	defaults = map[string]interface{}{
 		"verse_layer.discovery.refresh_interval": time.Hour,
-		"p2p.publish_interval":                   5 * time.Minute,
-		"p2p.stream_timeout":                     15 * time.Second,
-		"verifier.interval":                      15 * time.Second,
-		"verifier.concurrency":                   50,
-		"verifier.block_limit":                   1000,
-		"verifier.event_filter_limit":            1000,
-		"verifier.state_collect_limit":           1000,
-		"verifier.state_collect_timeout":         15 * time.Second,
-		"verifier.db_optimize_interval":          time.Hour,
-		"submitter.interval":                     15 * time.Second,
-		"submitter.concurrency":                  50,
-		"submitter.confirmations":                6,
-		"submitter.gas_multiplier":               1.1,
-		"submitter.batch_size":                   20,
-		"submitter.max_gas":                      5_000_000,
-		"submitter.verifier_address":             "0x5200000000000000000000000000000000000014",
-		"submitter.multicall2_address":           "0x5200000000000000000000000000000000000022",
-		"beacon.enable":                          true,
-		"beacon.endpoint":                        "https://script.google.com/macros/s/AKfycbzJpDKyn271jbm5otk_BxGkrS2b1YdMQerVq2-XxLdTOdhUPKCZICqvagvGgByxx_nq0Q/exec",
-		"beacon.interval":                        15 * time.Minute,
-		"database.long_query_time":               200 * time.Millisecond,
-		"database.min_examined_row_limit":        10000,
-		"debug.pprof.listen":                     "127.0.0.1:6060",
-		"debug.pprof.basic_auth.username":        "username",
-		"debug.pprof.basic_auth.password":        "password",
-		"debug.pprof.block_profile_rate":         0,
-		"debug.pprof.mem_profile_rate":           524288,
+
+		"p2p.publish_interval": 5 * time.Minute,
+		"p2p.stream_timeout":   15 * time.Second,
+		"p2p.no_announce": []string{
+			"/ip4/127.0.0.1/ipcidr/8",
+			"/ip4/10.0.0.0/ipcidr/8",
+			"/ip4/172.16.0.0/ipcidr/12",
+			"/ip4/192.168.0.0/ipcidr/16",
+		},
+		"p2p.connection_filter": []string{
+			"/ip4/127.0.0.1/ipcidr/8",
+			"/ip4/10.0.0.0/ipcidr/8",
+			"/ip4/172.16.0.0/ipcidr/12",
+			"/ip4/192.168.0.0/ipcidr/16",
+		},
+		"p2p.enable_upnp":          true,
+		"p2p.enable_auto_nat":      true,
+		"p2p.enable_hole_punching": true,
+
+		"verifier.interval":              15 * time.Second,
+		"verifier.concurrency":           50,
+		"verifier.block_limit":           1000,
+		"verifier.event_filter_limit":    1000,
+		"verifier.state_collect_limit":   1000,
+		"verifier.state_collect_timeout": 15 * time.Second,
+		"verifier.db_optimize_interval":  time.Hour,
+
+		"submitter.interval":           15 * time.Second,
+		"submitter.concurrency":        50,
+		"submitter.confirmations":      6,
+		"submitter.gas_multiplier":     1.1,
+		"submitter.batch_size":         20,
+		"submitter.max_gas":            5_000_000,
+		"submitter.verifier_address":   "0x5200000000000000000000000000000000000014",
+		"submitter.multicall2_address": "0x5200000000000000000000000000000000000022",
+
+		"beacon.enable":   true,
+		"beacon.endpoint": "https://script.google.com/macros/s/AKfycbzJpDKyn271jbm5otk_BxGkrS2b1YdMQerVq2-XxLdTOdhUPKCZICqvagvGgByxx_nq0Q/exec",
+		"beacon.interval": 15 * time.Minute,
+
+		"database.long_query_time":        200 * time.Millisecond,
+		"database.min_examined_row_limit": 10000,
+
+		"debug.pprof.listen":              "127.0.0.1:6060",
+		"debug.pprof.basic_auth.username": "username",
+		"debug.pprof.basic_auth.password": "password",
+		"debug.pprof.block_profile_rate":  0,
+		"debug.pprof.mem_profile_rate":    524288,
 	}
 )
 
@@ -183,8 +204,20 @@ type verseLayer struct {
 }
 
 type P2P struct {
-	// Address and port to listen.
-	Listen string `json:"listen" validate:"hostname_port"`
+	// libp2p multi-addresses to listen.
+	Listens []string `json:"listens" mapstructure:"listens"`
+
+	// Additional multi-addresses to advertise.
+	AppendAnnounce []string `json:"append_announce" mapstructure:"append_announce"`
+
+	// Multi-addresses not advertised.
+	NoAnnounce []string `json:"no_announce" mapstructure:"no_announce"`
+
+	// Multi-addresses that filter dial or receive connections.
+	ConnectionFilter []string `json:"connection_filter" mapstructure:"connection_filter"`
+
+	// Deprecated: Address and port to listen.
+	Listen string `json:"listen" validate:"omitempty,hostname_port"`
 
 	// Interval to publish own signature status.
 	PublishInterval time.Duration `json:"publish_interval" mapstructure:"publish_interval"`
@@ -194,6 +227,49 @@ type P2P struct {
 
 	// Initial node list.
 	Bootnodes []string `json:"bootnodes"`
+
+	// Enable NAT traversal using UPnP.
+	EnableUPnP bool `json:"enable_upnp" mapstructure:"enable_upnp"`
+
+	// Enable AutoNAT service.
+	EnableAutoNAT bool `json:"enable_auto_nat" mapstructure:"enable_auto_nat"`
+
+	// Enable Circuit Relay(v2) service.
+	// Note: Public connectivity is required.
+	RelayService struct {
+		Enable bool `json:"enable"`
+
+		// DurationLimit is the limit of data relayed (on each direction) before resetting the connection.
+		DurationLimit *time.Duration `json:"duration_limit,omitempty" mapstructure:"duration_limit"`
+		// DataLimit is the time limit before resetting a relayed connection.
+		DataLimit *int64 `json:"data_limit,omitempty" mapstructure:"data_limit"`
+
+		// ReservationTTL is the duration of a new (or refreshed reservation).
+		ReservationTTL *time.Duration `json:"reservation_ttl,omitempty" mapstructure:"reservation_ttl"`
+
+		// MaxReservations is the maximum number of active relay slots.
+		MaxReservations *int `json:"max_reservations,omitempty" mapstructure:"max_reservations"`
+		// MaxCircuits is the maximum number of open relay connections for each peer; defaults to 16.
+		MaxCircuits *int `json:"max_circuits,omitempty" mapstructure:"max_circuits"`
+		// BufferSize is the size of the relayed connection buffers.
+		BufferSize *int `json:"buffer_size,omitempty" mapstructure:"buffer_size"`
+
+		// MaxReservationsPerPeer is the maximum number of reservations originating from the same peer.
+		MaxReservationsPerPeer *int `json:"max_reservations_per_peer,omitempty" mapstructure:"max_reservations_per_peer"`
+		// MaxReservationsPerIP is the maximum number of reservations originating from the same IP address.
+		MaxReservationsPerIP *int `json:"max_reservations_per_ip,omitempty" mapstructure:"max_reservations_per_ip"`
+		// MaxReservationsPerASN is the maximum number of reservations origination from the same ASN.
+		MaxReservationsPerASN *int `json:"max_reservations_per_asn,omitempty" mapstructure:"max_reservations_per_asn"`
+	} `json:"relay_service" mapstructure:"relay_service"`
+
+	// Enable Circuit Relay(v2) client.
+	RelayClient struct {
+		Enable     bool     `json:"enable"`
+		RelayNodes []string `json:"relay_nodes" mapstructure:"relay_nodes"`
+	} `json:"relay_client" mapstructure:"relay_client"`
+
+	// Enable NAT traversal using UDP hole punching.
+	EnableHolePunching bool `json:"enable_hole_punching" mapstructure:"enable_hole_punching"`
 }
 
 type ipc struct {

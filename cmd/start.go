@@ -300,29 +300,9 @@ func newP2P(
 	}
 
 	// setup p2p node
-	listens := strings.Split(c.P2P.Listen, ":")
-	host, dht, bwm, err := p2p.NewHost(ctx, listens[0], listens[1], p2pKey)
+	host, dht, bwm, err := p2p.NewHost(ctx, &c.P2P, p2pKey)
 	if err != nil {
 		log.Crit(err.Error())
-	}
-
-	// connect to bootstrap peers and setup peer discovery
-	p2p.Bootstrap(ctx, host, dht)
-	bootstrapPeers := p2p.ConvertPeers(c.P2P.Bootnodes)
-	if len(bootstrapPeers) > 0 {
-		go func() {
-			ticker := util.NewTicker(time.Minute, 1)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					p2p.ConnectPeers(ctx, host, p2p.ConvertPeers(c.P2P.Bootnodes))
-				}
-			}
-		}()
 	}
 
 	// ignore self-signed signatures

@@ -49,11 +49,32 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		enable: true
 	
 	p2p:
-		listen: 127.0.0.1:20001
+		listens:
+			- listen0
+		no_announce:
+			- noann0
+		connection_filter:
+			- connfil0
 		publish_interval: 5s
 		stream_timeout: 5s
 		bootnodes:
 			- /ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899
+		enable_upnp: true
+		enable_auto_nat: true
+		relay_service:
+			enable: true
+			duration_limit: 1m
+			data_limit: 2
+			reservation_ttl: 3m
+			max_reservations: 4
+			max_circuits: 5
+			buffer_size: 6
+			max_reservations_per_peer: 7
+			max_reservations_per_ip: 8
+			max_reservations_per_asn: 9
+		relay_client:
+			relay_nodes: ["relay-0", "relay-1"]
+		enable_hole_punching: true
 	
 	verifier:
 		enable: true
@@ -137,15 +158,52 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		},
 	}, got.VerseLayer)
 
-	s.Equal(ipc{Enable: true}, got.IPC)
-
+	durationPtr := func(d time.Duration) *time.Duration { return &d }
+	intPtr := func(d int) *int { return &d }
+	int64Ptr := func(d int64) *int64 { return &d }
 	s.Equal(P2P{
-		Listen:          "127.0.0.1:20001",
-		PublishInterval: 5 * time.Second,
-		StreamTimeout:   5 * time.Second,
+		Listens:          []string{"listen0"},
+		NoAnnounce:       []string{"noann0"},
+		ConnectionFilter: []string{"connfil0"},
+		Listen:           "",
+		PublishInterval:  5 * time.Second,
+		StreamTimeout:    5 * time.Second,
 		Bootnodes: []string{
 			"/ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899",
 		},
+		EnableUPnP:    true,
+		EnableAutoNAT: true,
+		RelayService: struct {
+			Enable                 bool           "json:\"enable\""
+			DurationLimit          *time.Duration "json:\"duration_limit,omitempty\" mapstructure:\"duration_limit\""
+			DataLimit              *int64         "json:\"data_limit,omitempty\" mapstructure:\"data_limit\""
+			ReservationTTL         *time.Duration "json:\"reservation_ttl,omitempty\" mapstructure:\"reservation_ttl\""
+			MaxReservations        *int           "json:\"max_reservations,omitempty\" mapstructure:\"max_reservations\""
+			MaxCircuits            *int           "json:\"max_circuits,omitempty\" mapstructure:\"max_circuits\""
+			BufferSize             *int           "json:\"buffer_size,omitempty\" mapstructure:\"buffer_size\""
+			MaxReservationsPerPeer *int           "json:\"max_reservations_per_peer,omitempty\" mapstructure:\"max_reservations_per_peer\""
+			MaxReservationsPerIP   *int           "json:\"max_reservations_per_ip,omitempty\" mapstructure:\"max_reservations_per_ip\""
+			MaxReservationsPerASN  *int           "json:\"max_reservations_per_asn,omitempty\" mapstructure:\"max_reservations_per_asn\""
+		}{
+			Enable:                 true,
+			DurationLimit:          durationPtr(time.Minute),
+			DataLimit:              int64Ptr(2),
+			ReservationTTL:         durationPtr(3 * time.Minute),
+			MaxReservations:        intPtr(4),
+			MaxCircuits:            intPtr(5),
+			BufferSize:             intPtr(6),
+			MaxReservationsPerPeer: intPtr(7),
+			MaxReservationsPerIP:   intPtr(8),
+			MaxReservationsPerASN:  intPtr(9),
+		},
+		RelayClient: struct {
+			Enable     bool     "json:\"enable\""
+			RelayNodes []string "json:\"relay_nodes\" mapstructure:\"relay_nodes\""
+		}{
+			Enable:     false,
+			RelayNodes: []string{"relay-0", "relay-1"},
+		},
+		EnableHolePunching: true,
 	}, got.P2P)
 
 	s.Equal(Verifier{
@@ -222,6 +280,8 @@ func (s *ConfigTestSuite) TestValidate() {
 		wallet1:
 			address: xxx
 			password: passw0rd
+	p2p:
+		listen: xxx
 	verifier:
 		enable: true
 	submitter:
@@ -287,8 +347,23 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 
+	s.Equal([]string{
+		"/ip4/127.0.0.1/ipcidr/8",
+		"/ip4/10.0.0.0/ipcidr/8",
+		"/ip4/172.16.0.0/ipcidr/12",
+		"/ip4/192.168.0.0/ipcidr/16",
+	}, got.P2P.NoAnnounce)
+	s.Equal([]string{
+		"/ip4/127.0.0.1/ipcidr/8",
+		"/ip4/10.0.0.0/ipcidr/8",
+		"/ip4/172.16.0.0/ipcidr/12",
+		"/ip4/192.168.0.0/ipcidr/16",
+	}, got.P2P.ConnectionFilter)
 	s.Equal(5*time.Minute, got.P2P.PublishInterval)
 	s.Equal(15*time.Second, got.P2P.StreamTimeout)
+	s.Equal(true, got.P2P.EnableUPnP)
+	s.Equal(true, got.P2P.EnableAutoNAT)
+	s.Equal(true, got.P2P.EnableHolePunching)
 
 	s.Equal(15*time.Second, got.Verifier.Interval)
 	s.Equal(50, got.Verifier.Concurrency)

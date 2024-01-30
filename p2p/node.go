@@ -16,7 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/metrics"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-	kaddht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p-core/routing"
 	ps "github.com/libp2p/go-libp2p-pubsub"
 	msgio "github.com/libp2p/go-msgio"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
@@ -48,7 +48,7 @@ type Node struct {
 	cfg             *config.P2P
 	db              *database.Database
 	h               host.Host
-	dht             *kaddht.IpfsDHT
+	dht             routing.Routing
 	bwm             *metrics.BandwidthCounter
 	hubLayerChainID *big.Int
 	ignoreSigners   map[common.Address]int
@@ -62,7 +62,7 @@ func NewNode(
 	cfg *config.P2P,
 	db *database.Database,
 	host host.Host,
-	dht *kaddht.IpfsDHT,
+	dht routing.Routing,
 	bwm *metrics.BandwidthCounter,
 	hubLayerChainID uint64,
 	ignoreSigners []common.Address,
@@ -117,9 +117,9 @@ func (w *Node) Start(ctx context.Context) {
 	w.log.Info("Worker stopped")
 }
 
-func (w *Node) PeerID() peer.ID {
-	return w.h.ID()
-}
+func (w *Node) PeerID() peer.ID          { return w.h.ID() }
+func (w *Node) Host() host.Host          { return w.h }
+func (w *Node) Routing() routing.Routing { return w.dht }
 
 func (w *Node) publishLoop(ctx context.Context) {
 	ticker := time.NewTicker(w.cfg.PublishInterval)

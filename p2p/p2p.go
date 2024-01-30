@@ -5,8 +5,10 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p"
@@ -15,8 +17,10 @@ import (
 	"github.com/libp2p/go-libp2p-core/metrics"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-core/routing"
+	"github.com/libp2p/go-libp2p-kad-dht/dual"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -28,28 +32,30 @@ import (
 // Create libp2p host.
 func NewHost(
 	ctx context.Context,
-	address, port string,
+	cfg *config.P2P,
 	priv crypto.PrivKey,
-) (host.Host, *kaddht.IpfsDHT, *metrics.BandwidthCounter, error) {
-	maddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", address, port))
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to parse multiaddress string: %w", err)
-	}
-
+) (host.Host, routing.Routing, *metrics.BandwidthCounter, error) {
+	// Construct libp2p host.
 	bwm := metrics.NewBandwidthCounter()
-	h, err := libp2p.New(
+	opts := []libp2p.Option{
 		libp2p.DefaultTransports,
 		libp2p.DefaultMuxers,
 		libp2p.DefaultSecurity,
-		libp2p.ListenAddrs(maddr),
 		libp2p.Identity(priv),
-		libp2p.NATPortMap(),
 		libp2p.BandwidthReporter(bwm),
-	)
+	}
+	if appends, err := userOptions(cfg); err != nil {
+		return nil, nil, nil, err
+	} else {
+		opts = append(opts, appends...)
+	}
+
+	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
+	// Add log handler for peer connection and disconnection.
 	h.Network().Notify(&network.NotifyBundle{
 		ConnectedF: func(n network.Network, c network.Conn) {
 			log.Info("Connected new peer", "peer", maToP2P(c.RemoteMultiaddr(), c.RemotePeer()))
@@ -59,49 +65,84 @@ func NewHost(
 		},
 	})
 
-	// Create DHT.
-	dht, err := kaddht.New(ctx, h, kaddht.Mode(kaddht.ModeAutoServer),
-		// in-memory thread-safe datastore.
-		kaddht.Datastore(dssync.MutexWrap(ds.NewMapDatastore())))
+	// Construct libp2p DHT.
+	dht, err := newRouting(ctx, h, append(cfg.Bootnodes, cfg.RelayClient.RelayNodes...))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create Kademlia DHT: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to construct DHT: %w", err)
 	}
 
-	// Create routed host.
-	h = rhost.Wrap(h, dht)
-
-	return h, dht, bwm, nil
-}
-
-// Setup Kademlia DHT.
-func Bootstrap(ctx context.Context, h host.Host, dht *kaddht.IpfsDHT) {
 	// Bootstrap the DHT. In the default configuration, this spawns a Background
 	// thread that will refresh the peer table every five minutes.
-	dht.Bootstrap(ctx)
+	if err = dht.Bootstrap(ctx); err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to bootstrap DHT: %w", err)
+	}
+
+	return rhost.Wrap(h, dht), dht, bwm, nil
 }
 
-// Connect to peers.
-func ConnectPeers(ctx context.Context, h host.Host, peers []peer.AddrInfo) {
-	connectedPeers := map[peer.ID]int{}
-	for _, p := range h.Network().Peers() {
-		connectedPeers[p] = 1
+func userOptions(cfg *config.P2P) (opts []libp2p.Option, err error) {
+	// Construct listening addresses.
+	listens := cfg.Listens
+	if cfg.Listen != "" {
+		s := strings.Split(cfg.Listen, ":")
+		listens = append(listens, fmt.Sprintf("/ip4/%s/tcp/%s", s[0], s[1]))
+	}
+	if len(listens) == 0 {
+		return nil, errors.New("no listening address")
+	}
+	if listenAddrs, err := convertMultiaddrs(listens); err != nil {
+		return nil, fmt.Errorf("failed to parse listening addrs: %w", err)
+	} else {
+		opts = append(opts, libp2p.ListenAddrs(listenAddrs...))
 	}
 
-	for _, p := range peers {
-		if _, ok := connectedPeers[p.ID]; ok {
-			log.Debug("Peers are already connected", "id", p.ID)
-			continue
+	// Construct address factory.
+	opt, err := AddrsFactoryOpt(cfg.AppendAnnounce, cfg.NoAnnounce)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct addrs factory: %w", err)
+	}
+	opts = append(opts, opt)
+
+	// Construct connection filter.
+	if len(cfg.ConnectionFilter) > 0 {
+		opt, err := ConnectionFilterOpt(cfg.ConnectionFilter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to construct connection filter: %w", err)
 		}
-
-		go func(p peer.AddrInfo) {
-			if err := h.Connect(ctx, p); err == nil {
-				h.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.AddressTTL)
-				log.Info("Connected to peer", "id", p.ID)
-			} else {
-				log.Error("Failed to connect to peer", "id", p.ID, "err", err)
-			}
-		}(p)
+		opts = append(opts, opt)
 	}
+
+	// Enable NAT traversal using UPnP.
+	if cfg.EnableUPnP {
+		opts = append(opts, libp2p.NATPortMap())
+	}
+
+	// Enable NAT traversal using UDP Hole Punching.
+	if cfg.EnableHolePunching {
+		opts = append(opts, libp2p.EnableHolePunching())
+	}
+
+	// Enable NAT traversal using `Circuit Relay v2`.
+	if relayOpts, err := CircuitRelayOpts(cfg); err != nil {
+		return nil, err
+	} else {
+		opts = append(opts, relayOpts...)
+	}
+
+	// Enable AutoNAT service.
+	if cfg.EnableAutoNAT {
+		opts = append(opts, libp2p.EnableNATService())
+	}
+
+	return opts, nil
+}
+
+func newRouting(ctx context.Context, h host.Host, bootstrapPeers []string) (routing.Routing, error) {
+	opts := []kaddht.Option{
+		kaddht.Datastore(dssync.MutexWrap(ds.NewMapDatastore())),
+		kaddht.BootstrapPeers(ConvertPeers(bootstrapPeers)...),
+	}
+	return dual.New(ctx, h, dual.DHTOption(opts...))
 }
 
 // Convert libp2p multi-address string to peer.AddrInfo.
@@ -116,6 +157,17 @@ func ConvertPeers(peers []string) []peer.AddrInfo {
 		pinfos[i] = *p
 	}
 	return pinfos
+}
+
+func convertMultiaddrs(in []string) (out []multiaddr.Multiaddr, err error) {
+	out = make([]multiaddr.Multiaddr, len(in))
+	for i, addr := range in {
+		out[i], err = multiaddr.NewMultiaddr(addr)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func maToP2P(ma multiaddr.Multiaddr, id peer.ID) string {
