@@ -21,6 +21,7 @@ import (
 	msgio "github.com/libp2p/go-msgio"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
@@ -39,9 +40,6 @@ const (
 
 var (
 	eom = &pb.Stream{Body: &pb.Stream_Eom{Eom: nil}}
-
-	errUnavailableStream = errors.New("unavailable stream")
-	errSelfMessage       = errors.New("self message")
 )
 
 type Node struct {
@@ -56,6 +54,23 @@ type Node struct {
 	topic *ps.Topic
 	sub   *ps.Subscription
 	log   log.Logger
+
+	meterPubsubSubscribed,
+	meterPubsubUnknownMsg,
+	meterPubsubWorkers,
+	meterStreamOpend,
+	meterStreamHandled,
+	meterStreamClosed,
+	meterStreamWrites,
+	meterStreamReads,
+	meterStreamUnknownMsg,
+	meterStreamOpenErrs,
+	meterStreamReadErrs,
+	meterStreamWriteErrs meter.Counter
+
+	meterConnections,
+	meterPeers,
+	meterPubsubJobs meter.Gauge
 }
 
 func NewNode(
@@ -83,6 +98,22 @@ func NewNode(
 		topic:           topic,
 		sub:             sub,
 		log:             log.New("worker", "p2p"),
+
+		meterPubsubSubscribed: meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "subscribed"}, ""),
+		meterPubsubUnknownMsg: meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "unknown", "messages"}, ""),
+		meterPubsubWorkers:    meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "workers"}, ""),
+		meterPubsubJobs:       meter.GetOrRegisterGauge([]string{"p2p", "pubsub", "jobs"}, ""),
+		meterStreamOpend:      meter.GetOrRegisterCounter([]string{"p2p", "stream", "opened"}, ""),
+		meterStreamHandled:    meter.GetOrRegisterCounter([]string{"p2p", "stream", "handled"}, ""),
+		meterStreamClosed:     meter.GetOrRegisterCounter([]string{"p2p", "stream", "closed"}, ""),
+		meterStreamWrites:     meter.GetOrRegisterCounter([]string{"p2p", "stream", "writes"}, ""),
+		meterStreamReads:      meter.GetOrRegisterCounter([]string{"p2p", "stream", "reads"}, ""),
+		meterStreamUnknownMsg: meter.GetOrRegisterCounter([]string{"p2p", "stream", "unknown", "messages"}, ""),
+		meterStreamOpenErrs:   meter.GetOrRegisterCounter([]string{"p2p", "stream", "open", "errors"}, ""),
+		meterStreamReadErrs:   meter.GetOrRegisterCounter([]string{"p2p", "stream", "read", "errors"}, ""),
+		meterStreamWriteErrs:  meter.GetOrRegisterCounter([]string{"p2p", "stream", "write", "errors"}, ""),
+		meterConnections:      meter.GetOrRegisterGauge([]string{"p2p", "connections"}, ""),
+		meterPeers:            meter.GetOrRegisterGauge([]string{"p2p", "peers"}, ""),
 	}
 	worker.h.SetStreamHandler(streamProtocol, worker.handleStream)
 
@@ -98,6 +129,12 @@ func (w *Node) Start(ctx context.Context) {
 	defer w.sub.Cancel()
 
 	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w.meterLoop(ctx)
+	}()
 
 	wg.Add(1)
 	go func() {
@@ -120,6 +157,21 @@ func (w *Node) Start(ctx context.Context) {
 func (w *Node) PeerID() peer.ID          { return w.h.ID() }
 func (w *Node) Host() host.Host          { return w.h }
 func (w *Node) Routing() routing.Routing { return w.dht }
+
+func (w *Node) meterLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Second * 15)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.meterConnections.Set(float64(len(w.h.Network().Conns())))
+			w.meterPeers.Set(float64(w.h.Peerstore().Peers().Len()))
+		}
+	}
+}
 
 func (w *Node) publishLoop(ctx context.Context) {
 	ticker := time.NewTicker(w.cfg.PublishInterval)
@@ -155,10 +207,12 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 			w.log.Error("Failed to subscribe", "peer", from, "err", err)
 			continue
 		}
+		w.meterPubsubSubscribed.Incr()
 
 		t := msg.GetOptimismSignatureExchange()
 		if t == nil {
 			w.log.Warn("Unsupported pubsub message", "peer", from, "err", err)
+			w.meterPubsubUnknownMsg.Incr()
 			continue
 		}
 
@@ -179,6 +233,7 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 			if !wg.Has(wname) {
 				handler := func(ctx context.Context, rname string, data interface{}) {
 					defer running.Delete(rname)
+					defer w.meterPubsubJobs.Decr()
 
 					if t, ok := data.(job); ok {
 						st := time.Now()
@@ -189,9 +244,11 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 					}
 				}
 				wg.AddWorker(ctx, wname, handler)
+				w.meterPubsubWorkers.Incr()
 			}
 
 			wg.Enqueue(wname, job{from: from, remote: remote})
+			w.meterPubsubJobs.Incr()
 
 			qlen := len(wg.Queue(wname))
 			w.log.Debug("Enqueue pubsub",
@@ -205,13 +262,14 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 }
 
 func (w *Node) handleStream(s network.Stream) {
-	defer closeStream(s)
+	defer w.closeStream(s)
+	w.meterStreamHandled.Incr()
 
 	peer := s.Conn().RemotePeer()
 	for {
-		m, err := readStreamWithTimeout(context.Background(), s, w.cfg.StreamTimeout)
-		if errors.Is(err, errUnavailableStream) {
-			w.log.Error("Failed to read stream message", "peer", peer, "err", err)
+		m, err := w.readStreamWithTimeout(context.Background(), s, w.cfg.StreamTimeout)
+		if t, ok := err.(*ReadWriteError); ok {
+			w.log.Error("Failed to read stream message", "peer", peer, "err", t)
 			return
 		} else if err != nil {
 			w.log.Error(err.Error(), "peer", peer)
@@ -230,6 +288,7 @@ func (w *Node) handleStream(s network.Stream) {
 			return
 		default:
 			w.log.Warn("Received an unknown message", "peer", peer)
+			w.meterStreamUnknownMsg.Incr()
 			return
 		}
 	}
@@ -240,14 +299,6 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	sender peer.ID,
 	remote *pb.OptimismSignature,
 ) {
-	// open stream to peer
-	s, err := w.h.NewStream(ctx, sender, streamProtocol)
-	if err != nil {
-		w.log.Error("Failed to open stream", "peer", sender, "err", err)
-		return
-	}
-	defer closeStream(s)
-
 	signer := common.BytesToAddress(remote.Signer)
 	logctx := []interface{}{
 		"peer", sender,
@@ -272,6 +323,24 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		return
 	}
 
+	// open stream to peer
+	var s network.Stream
+	defer func() {
+		if s != nil {
+			w.closeStream(s)
+		}
+	}()
+	openStream := func() error {
+		s, err = w.h.NewStream(ctx, sender, streamProtocol)
+		if err != nil {
+			w.log.Error("Failed to open stream", "peer", sender, "err", err)
+			w.meterStreamOpenErrs.Incr()
+		} else {
+			w.meterStreamOpend.Incr()
+		}
+		return err
+	}
+
 	var idAfter string
 	if len(local) == 0 {
 		w.log.Info("Request all signatures", logctx...)
@@ -279,6 +348,9 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		// fully synchronized or less than local
 		return
 	} else {
+		if openStream() != nil {
+			return
+		}
 		if found, err := w.findCommonLatestSignature(s, signer); err == nil {
 			fsigner := common.BytesToAddress(found.Signer)
 			if fsigner != signer {
@@ -317,12 +389,15 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 			},
 		},
 	}
-	if err = writeStream(s, m); err != nil {
+
+	if s == nil && openStream() != nil {
+		return
+	}
+	if err = w.writeStream(s, m); err != nil {
 		w.log.Error("Failed to send signature request", "err", err)
 		return
 	}
-
-	if err := writeStream(s, eom); err != nil {
+	if err := w.writeStream(s, eom); err != nil {
 		w.log.Error("Failed to send end-of-message", "err", err)
 		return
 	}
@@ -366,7 +441,7 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 					},
 				}}
 				// send response to peer
-				if err := writeStream(s, m); err != nil {
+				if err := w.writeStream(s, m); err != nil {
 					w.log.Error("Failed to send signatures", append(logctx, "err", err)...)
 					return
 				}
@@ -464,7 +539,7 @@ func (w *Node) handleFindCommonOptimismSignature(
 			FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{Found: found},
 		},
 	}
-	if err := writeStream(s, m); err == nil {
+	if err := w.writeStream(s, m); err == nil {
 		if found == nil {
 			w.log.Info("Sent FindCommonOptimismSignature response", "found", found != nil)
 		} else {
@@ -510,7 +585,7 @@ func (w *Node) findCommonLatestSignature(
 		}}
 
 		// send request
-		if err = writeStream(s, req); err != nil {
+		if err = w.writeStream(s, req); err != nil {
 			w.log.Error(
 				"Failed to send FindCommonOptimismSignature request",
 				append(logctx, "err", err)...)
@@ -519,7 +594,7 @@ func (w *Node) findCommonLatestSignature(
 		w.log.Info("Sent FindCommonOptimismSignature request", logctx...)
 
 		// read response
-		res, err := readStreamWithTimeout(context.Background(), s, time.Second*5)
+		res, err := w.readStreamWithTimeout(context.Background(), s, time.Second*5)
 		if errors.Is(err, context.DeadlineExceeded) {
 			w.log.Warn("Timeout or peer does not support FindCommonOptimismSignature", logctx...)
 			return nil, err
@@ -576,6 +651,48 @@ func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismS
 	w.log.Info("Publish latest signatures", "len", len(rows))
 }
 
+func (w *Node) writeStream(s network.Stream, m *pb.Stream) error {
+	err := writeStream(s, m)
+	_, isRWErr := err.(*ReadWriteError)
+	_, isEOM := m.Body.(*pb.Stream_Eom)
+	if err == nil {
+		w.meterStreamWrites.Incr()
+	} else if isRWErr && !isEOM {
+		w.meterStreamWriteErrs.Incr()
+	}
+	return err
+}
+
+func (w *Node) readStreamWithTimeout(
+	parent context.Context,
+	s network.Stream,
+	timeout time.Duration,
+) (m *pb.Stream, err error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	go func() {
+		defer cancel()
+		m, err = readStream(s)
+		if err == nil {
+			w.meterStreamReads.Incr()
+		} else if _, ok := err.(*ReadWriteError); ok {
+			w.meterStreamReadErrs.Incr()
+		}
+	}()
+	<-ctx.Done()
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil, context.DeadlineExceeded
+	}
+	return m, err
+}
+
+func (w *Node) closeStream(s network.Stream) {
+	closeStream(s)
+	w.meterStreamClosed.Incr()
+}
+
 // Write protobuf message to libp2p stream.
 func writeStream(s io.Writer, m *pb.Stream) error {
 	data, err := proto.Marshal(m)
@@ -587,8 +704,10 @@ func writeStream(s io.Writer, m *pb.Stream) error {
 	if err != nil {
 		return err
 	}
+
+	// Note: Intentionally not closing with `Close()` as it would also close the stream.
 	if err := msgio.NewWriter(s).WriteMsg(data); err != nil {
-		return errUnavailableStream
+		return &ReadWriteError{err}
 	}
 
 	return nil
@@ -597,12 +716,17 @@ func writeStream(s io.Writer, m *pb.Stream) error {
 // Read protobuf message from libp2p stream.
 // Note: Will wait forever, should cancel.
 func readStream(s io.Reader) (*pb.Stream, error) {
-	data, err := msgio.NewReader(s).ReadMsg()
+	reader := msgio.NewReader(s)
+	msg, err := reader.ReadMsg()
 	if err != nil {
-		return nil, errUnavailableStream
+		return nil, &ReadWriteError{err}
 	}
 
-	data, err = decompress(data)
+	// Note: Forgetting to call `ReleaseMsg()` can result
+	// in high memory consumption within libp2p/go-buffer-pool.
+	defer reader.ReleaseMsg(msg)
+
+	data, err := decompress(msg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decompress stream message: %w", err)
 	}
@@ -613,26 +737,6 @@ func readStream(s io.Reader) (*pb.Stream, error) {
 	}
 
 	return &m, nil
-}
-
-func readStreamWithTimeout(
-	parent context.Context,
-	s io.Reader,
-	timeout time.Duration,
-) (m *pb.Stream, err error) {
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-
-	go func() {
-		defer cancel()
-		m, err = readStream(s)
-	}()
-	<-ctx.Done()
-
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, context.DeadlineExceeded
-	}
-	return m, err
 }
 
 // Send end-of-message and close libp2p stream.

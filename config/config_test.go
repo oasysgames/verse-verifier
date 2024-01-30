@@ -110,6 +110,13 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		long_query_time: 1s
 		min_examined_row_limit: 100
 
+	metrics:
+		enable: true
+		type: testcollector
+		prefix: testprefix
+		listen: 127.0.0.1:3030
+		endpoint: /testmetrics
+
 	debug:
 		pprof:
 			enable: true
@@ -250,6 +257,14 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		MinExaminedRowLimit: 100,
 	}, got.Database)
 
+	s.Equal(Metrics{
+		Enable:   true,
+		Type:     "testcollector",
+		Prefix:   "testprefix",
+		Listen:   "127.0.0.1:3030",
+		Endpoint: "/testmetrics",
+	}, got.Metrics)
+
 	s.Equal(Debug{
 		Pprof: Pprof{
 			Enable: true,
@@ -287,6 +302,8 @@ func (s *ConfigTestSuite) TestValidate() {
 	submitter:
 		targets:
 			- xxx
+	metrics:
+		listen: xxx
 	`)
 
 	wants := map[string]string{
@@ -304,6 +321,7 @@ func (s *ConfigTestSuite) TestValidate() {
 		"Config.verifier.wallet":                           "required_if",
 		"Config.submitter.targets[0].chain_id":             "required",
 		"Config.submitter.targets[0].wallet":               "required",
+		"Config.metrics.listen":                            "hostname_port",
 	}
 
 	// parse config
@@ -391,6 +409,11 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal(200*time.Millisecond, got.Database.LongQueryTime)
 	s.Equal(10000, got.Database.MinExaminedRowLimit)
+
+	s.Equal("prometheus", got.Metrics.Type)
+	s.Equal("oasvlfy", got.Metrics.Prefix)
+	s.Equal("127.0.0.1:9200", got.Metrics.Listen)
+	s.Equal("/metrics", got.Metrics.Endpoint)
 
 	s.Equal("127.0.0.1:6060", got.Debug.Pprof.Listen)
 	s.Equal("username", got.Debug.Pprof.BasicAuth.Username)

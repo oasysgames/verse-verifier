@@ -60,6 +60,11 @@ var (
 		"database.long_query_time":        200 * time.Millisecond,
 		"database.min_examined_row_limit": 10000,
 
+		"metrics.type":     "prometheus",
+		"metrics.prefix":   "oasvlfy",
+		"metrics.listen":   "127.0.0.1:9200",
+		"metrics.endpoint": "/metrics",
+
 		"debug.pprof.listen":              "127.0.0.1:6060",
 		"debug.pprof.basic_auth.username": "username",
 		"debug.pprof.basic_auth.password": "password",
@@ -148,6 +153,9 @@ type Config struct {
 
 	// Database configuration.
 	Database Database `json:"database" mapstructure:"database"`
+
+	// Metrics configuration
+	Metrics Metrics `json:"metrics"`
 
 	// Debug configuration.
 	Debug Debug `json:"debug" mapstructure:"debug"`
@@ -361,6 +369,23 @@ type Database struct {
 	// Slow query log configurations.
 	LongQueryTime       time.Duration `json:"long_query_time"        mapstructure:"long_query_time"`
 	MinExaminedRowLimit int           `json:"min_examined_row_limit" mapstructure:"min_examined_row_limit"`
+}
+
+type Metrics struct {
+	// Whether to pprof server.
+	Enable bool `json:"enable"`
+
+	// Address and port to listen.
+	Listen string `json:"listen" validate:"hostname_port"`
+
+	// The URL used to retrieve metrics.
+	Endpoint string `json:"endpoint"`
+
+	// The type of metrics collector.
+	Type string `json:"type"`
+
+	// Metric name prefix.
+	Prefix string `json:"prefix"`
 }
 
 type Debug struct {

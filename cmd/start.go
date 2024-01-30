@@ -27,6 +27,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/ipc"
+	"github.com/oasysgames/oasys-optimism-verifier/metrics"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
@@ -99,6 +100,19 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	hub, err := ethutil.NewReadOnlyClient(conf.HubLayer.RPC)
 	if err != nil {
 		log.Crit("Failed to create hub-layer client", "err", err)
+	}
+
+	// start metrics server
+	if conf.Metrics.Enable {
+		metrics.Initialize(&conf.Metrics)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := metrics.ListenAndServe(ctx); err != nil {
+				log.Error("Failed to start metrics server", "err", err)
+			}
+		}()
 	}
 
 	// start pprof server
