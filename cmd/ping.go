@@ -26,9 +26,6 @@ var pingCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(pingCmd)
 
-	pingCmd.Flags().String(configFlag, "", "configuration file")
-	pingCmd.MarkFlagRequired(configFlag)
-
 	pingCmd.Flags().String(pingFlag, "", "Target peer id")
 	pingCmd.MarkFlagRequired(pingFlag)
 }

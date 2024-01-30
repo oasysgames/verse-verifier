@@ -147,6 +147,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	if ipc != nil {
 		ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
 		ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host()))
+		ipc.SetHandler(ipccmd.StatusCmd.NewHandler(p2p.Host()))
 	}
 
 	// start state verifier
