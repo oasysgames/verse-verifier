@@ -143,6 +143,12 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		p2p.Start(ctx)
 	}()
 
+	// set ipc handlers
+	if ipc != nil {
+		ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
+		ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host()))
+	}
+
 	// start state verifier
 	if sccVerifier != nil {
 		wg.Add(1)
@@ -282,8 +288,6 @@ func newIPC(c *config.Config, ks *wallet.KeyStore) *ipc.IPCServer {
 	if err != nil {
 		log.Crit("Failed to create ipc server", "err", err)
 	}
-
-	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
 	return ipc
 }
 

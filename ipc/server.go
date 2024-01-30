@@ -3,12 +3,17 @@ package ipc
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 	goipc "github.com/james-barrow/golang-ipc"
 )
 
-type Handler func(*goipc.Server, []byte)
+const (
+	EOM = 65536
+)
+
+type Handler func(*IPCServer, []byte)
 
 type IPCServer struct {
 	listen string
@@ -60,7 +65,7 @@ func (s *IPCServer) Start(ctx context.Context) {
 				}
 
 				if handler, ok := s.handlers.Load(msg.MsgType); ok {
-					handler.(Handler)(s.s, msg.Data)
+					handler.(Handler)(s, msg.Data)
 				}
 			}()
 		}
@@ -69,6 +74,16 @@ func (s *IPCServer) Start(ctx context.Context) {
 	s.log.Info("Worker started", "listen", s.listen)
 	<-ctx.Done()
 	s.log.Info("Worker stopped")
+}
+
+func (s *IPCServer) Write(msgType int, message []byte) error {
+	if err := s.s.Write(msgType, message); err != nil {
+		s.log.Error("Failed to write ipc message", "err", err)
+		return err
+	}
+	// If they do not sleep, clients will read messages in the wrong order.
+	time.Sleep(time.Second / 4)
+	return nil
 }
 
 func (s *IPCServer) reConnect() {
