@@ -22,9 +22,9 @@ type walletUnlockMsg struct {
 	Password string
 }
 
-func (c *walletUnlock) Run(listen, address, password string) {
+func (c *walletUnlock) Run(sockname, address, password string) {
 	// attach to ipc
-	s, err := ipc.NewClient(listen, c.handlerID)
+	s, err := ipc.NewClient(sockname, c.handlerID)
 	if err != nil {
 		util.Exit(1, "connection failure: %s\n", err)
 	}

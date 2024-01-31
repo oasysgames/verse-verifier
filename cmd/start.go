@@ -50,9 +50,6 @@ var startCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(startCmd)
-
-	startCmd.Flags().String(configFlag, "", "configuration file")
-	startCmd.MarkFlagRequired(configFlag)
 }
 
 func runStartCmd(cmd *cobra.Command, args []string) {
@@ -84,14 +81,12 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 
 	// start ipc server
 	// note: start ipc server before unlocking wallet
-	ipc := newIPC(conf, ks)
-	if ipc != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ipc.Start(ctx)
-		}()
-	}
+	ipc := newIPC(&conf.IPC, ks)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ipc.Start(ctx)
+	}()
 
 	// unlock walelts(wait forever)
 	waitForUnlockWallets(ctx, conf, ks)
@@ -158,11 +153,9 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	}()
 
 	// set ipc handlers
-	if ipc != nil {
-		ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
-		ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host()))
-		ipc.SetHandler(ipccmd.StatusCmd.NewHandler(p2p.Host()))
-	}
+	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
+	ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host()))
+	ipc.SetHandler(ipccmd.StatusCmd.NewHandler(p2p.Host()))
 
 	// start state verifier
 	if sccVerifier != nil {
@@ -294,12 +287,12 @@ func waitForUnlockWallets(ctx context.Context, c *config.Config, ks *wallet.KeyS
 	wg.Wait()
 }
 
-func newIPC(c *config.Config, ks *wallet.KeyStore) *ipc.IPCServer {
-	if !c.IPC.Enable {
-		return nil
+func newIPC(c *config.IPC, ks *wallet.KeyStore) *ipc.IPCServer {
+	if c.Sockname == "" {
+		log.Crit("IPC socket name is required")
 	}
 
-	ipc, err := ipc.NewIPCServer(commandName)
+	ipc, err := ipc.NewIPCServer(c.Sockname)
 	if err != nil {
 		log.Crit("Failed to create ipc server", "err", err)
 	}

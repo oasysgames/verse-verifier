@@ -9,12 +9,12 @@ import (
 	goipc "github.com/james-barrow/golang-ipc"
 )
 
-func NewClient(listen string, msgType int) (c *Client, err error) {
+func NewClient(sockname string, msgType int) (c *Client, err error) {
 	if msgType == EOM {
 		return nil, fmt.Errorf("message type %d is reserved as EOM", EOM)
 	}
 
-	client, err := goipc.StartClient(listen, nil)
+	client, err := goipc.StartClient(sockname, nil)
 	if err != nil {
 		return nil, err
 	}

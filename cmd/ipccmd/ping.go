@@ -21,9 +21,9 @@ type ping struct {
 	attempts  int
 }
 
-func (c *ping) Run(ctx context.Context, listen, peer string) {
+func (c *ping) Run(ctx context.Context, sockname, peer string) {
 	// attach to ipc
-	cl, err := ipc.NewClient(listen, c.handlerID)
+	cl, err := ipc.NewClient(sockname, c.handlerID)
 	if err != nil {
 		util.Exit(1, "connection failure: %s\n", err)
 	}

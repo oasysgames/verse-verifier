@@ -36,6 +36,8 @@ var (
 		"p2p.enable_auto_nat":      true,
 		"p2p.enable_hole_punching": true,
 
+		"ipc.sockname": "oasvlfy",
+
 		"verifier.interval":              15 * time.Second,
 		"verifier.concurrency":           50,
 		"verifier.block_limit":           1000,
@@ -140,7 +142,7 @@ type Config struct {
 	P2P P2P `json:"p2p"`
 
 	// IPC configuration.
-	IPC ipc `json:"ipc"`
+	IPC IPC `json:"ipc"`
 
 	// Verifier configuration.
 	Verifier Verifier `json:"verifier" mapstructure:"verifier"`
@@ -280,9 +282,9 @@ type P2P struct {
 	EnableHolePunching bool `json:"enable_hole_punching" mapstructure:"enable_hole_punching"`
 }
 
-type ipc struct {
-	// Whether to enable worker.
-	Enable bool `json:"enable"`
+type IPC struct {
+	// Socket file name, In UNIX-based OS, it is created as /tmp/{sockname}.sock.
+	Sockname string `json:"sockname"`
 }
 
 type Verifier struct {

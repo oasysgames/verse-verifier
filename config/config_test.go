@@ -44,9 +44,6 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			  rpc: http://127.0.0.1:8545/
 			  l1_contracts:
 			    StateCommitmentChain: '0x62b105FD57A11819f9E50892E18a354bd7c89937'
-
-	ipc:
-		enable: true
 	
 	p2p:
 		listens:
@@ -75,7 +72,10 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		relay_client:
 			relay_nodes: ["relay-0", "relay-1"]
 		enable_hole_punching: true
-	
+
+	ipc:
+		sockname: testsock
+
 	verifier:
 		enable: true
 		wallet: wallet1
@@ -212,6 +212,8 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		},
 		EnableHolePunching: true,
 	}, got.P2P)
+
+	s.Equal(IPC{Sockname: "testsock"}, got.IPC)
 
 	s.Equal(Verifier{
 		Enable:              true,
@@ -382,6 +384,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(true, got.P2P.EnableUPnP)
 	s.Equal(true, got.P2P.EnableAutoNAT)
 	s.Equal(true, got.P2P.EnableHolePunching)
+
+	s.Equal("oasvlfy", got.IPC.Sockname)
 
 	s.Equal(15*time.Second, got.Verifier.Interval)
 	s.Equal(50, got.Verifier.Concurrency)

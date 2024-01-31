@@ -16,21 +16,21 @@ const (
 type Handler func(*IPCServer, []byte)
 
 type IPCServer struct {
-	listen string
+	sockname string
 
 	s        *goipc.Server
 	handlers *sync.Map
 	log      log.Logger
 }
 
-func NewIPCServer(listen string) (*IPCServer, error) {
-	server, err := goipc.StartServer(listen, nil)
+func NewIPCServer(sockname string) (*IPCServer, error) {
+	server, err := goipc.StartServer(sockname, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	return &IPCServer{
-		listen:   listen,
+		sockname: sockname,
 		s:        server,
 		handlers: &sync.Map{},
 		log:      log.New("worker", "ipc"),
@@ -71,7 +71,7 @@ func (s *IPCServer) Start(ctx context.Context) {
 		}
 	}()
 
-	s.log.Info("Worker started", "listen", s.listen)
+	s.log.Info("Worker started", "sockname", s.sockname)
 	<-ctx.Done()
 	s.log.Info("Worker stopped")
 }
@@ -89,7 +89,7 @@ func (s *IPCServer) Write(msgType int, message []byte) error {
 func (s *IPCServer) reConnect() {
 	s.s.Close()
 
-	server, err := goipc.StartServer(s.listen, nil)
+	server, err := goipc.StartServer(s.sockname, nil)
 	if err != nil {
 		s.log.Error("Failed to re-connect", "err", err)
 		return

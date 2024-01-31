@@ -41,9 +41,9 @@ func (c *status) NewHandler(h host.Host) (handlerID int, handler ipc.Handler) {
 	}
 }
 
-func (c *status) Run(listen string) {
+func (c *status) Run(sockname string) {
 	// attach to ipc
-	cl, err := ipc.NewClient(listen, c.handlerID)
+	cl, err := ipc.NewClient(sockname, c.handlerID)
 	if err != nil {
 		util.Exit(1, "connection failure: %s\n", err)
 	}

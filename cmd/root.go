@@ -26,6 +26,11 @@ Version:
   %s`, commandName, version.SemVer()),
 }
 
+func init() {
+	rootCmd.PersistentFlags().String(configFlag, "", "configuration file")
+	rootCmd.MarkFlagRequired(configFlag)
+}
+
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
