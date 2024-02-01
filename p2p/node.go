@@ -19,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	ps "github.com/libp2p/go-libp2p-pubsub"
 	msgio "github.com/libp2p/go-msgio"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
@@ -48,6 +49,7 @@ type Node struct {
 	h               host.Host
 	dht             routing.Routing
 	bwm             *metrics.BandwidthCounter
+	hpHelper        HolePunchHelper
 	hubLayerChainID *big.Int
 	ignoreSigners   map[common.Address]int
 
@@ -64,6 +66,8 @@ type Node struct {
 	meterStreamWrites,
 	meterStreamReads,
 	meterStreamUnknownMsg,
+	meterHolePunchSuccess,
+	meterHolePunchErrs,
 	meterStreamOpenErrs,
 	meterStreamReadErrs,
 	meterStreamWriteErrs meter.Counter
@@ -79,6 +83,7 @@ func NewNode(
 	host host.Host,
 	dht routing.Routing,
 	bwm *metrics.BandwidthCounter,
+	hpHelper HolePunchHelper,
 	hubLayerChainID uint64,
 	ignoreSigners []common.Address,
 ) (*Node, error) {
@@ -93,6 +98,7 @@ func NewNode(
 		h:               host,
 		dht:             dht,
 		bwm:             bwm,
+		hpHelper:        hpHelper,
 		hubLayerChainID: new(big.Int).SetUint64(hubLayerChainID),
 		ignoreSigners:   map[common.Address]int{},
 		topic:           topic,
@@ -109,6 +115,8 @@ func NewNode(
 		meterStreamWrites:     meter.GetOrRegisterCounter([]string{"p2p", "stream", "writes"}, ""),
 		meterStreamReads:      meter.GetOrRegisterCounter([]string{"p2p", "stream", "reads"}, ""),
 		meterStreamUnknownMsg: meter.GetOrRegisterCounter([]string{"p2p", "stream", "unknown", "messages"}, ""),
+		meterHolePunchSuccess: meter.GetOrRegisterCounter([]string{"p2p", "holepunch", "successes"}, ""),
+		meterHolePunchErrs:    meter.GetOrRegisterCounter([]string{"p2p", "holepunch", "errors"}, ""),
 		meterStreamOpenErrs:   meter.GetOrRegisterCounter([]string{"p2p", "stream", "open", "errors"}, ""),
 		meterStreamReadErrs:   meter.GetOrRegisterCounter([]string{"p2p", "stream", "read", "errors"}, ""),
 		meterStreamWriteErrs:  meter.GetOrRegisterCounter([]string{"p2p", "stream", "write", "errors"}, ""),
@@ -154,9 +162,10 @@ func (w *Node) Start(ctx context.Context) {
 	w.log.Info("Worker stopped")
 }
 
-func (w *Node) PeerID() peer.ID          { return w.h.ID() }
-func (w *Node) Host() host.Host          { return w.h }
-func (w *Node) Routing() routing.Routing { return w.dht }
+func (w *Node) PeerID() peer.ID                  { return w.h.ID() }
+func (w *Node) Host() host.Host                  { return w.h }
+func (w *Node) Routing() routing.Routing         { return w.dht }
+func (w *Node) HolePunchHelper() HolePunchHelper { return w.hpHelper }
 
 func (w *Node) meterLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 15)
@@ -331,14 +340,12 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		}
 	}()
 	openStream := func() error {
-		s, err = w.h.NewStream(ctx, sender, streamProtocol)
-		if err != nil {
-			w.log.Error("Failed to open stream", "peer", sender, "err", err)
-			w.meterStreamOpenErrs.Incr()
+		if ss, err := w.openStream(ctx, sender); err != nil {
+			return err
 		} else {
-			w.meterStreamOpend.Incr()
+			s = ss
+			return nil
 		}
-		return err
 	}
 
 	var idAfter string
@@ -649,6 +656,30 @@ func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismS
 	}
 
 	w.log.Info("Publish latest signatures", "len", len(rows))
+}
+
+func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, error) {
+	// If holepunch and UDP/QUIC is enabled, attempt a direct connection.
+	if w.hpHelper.Enabled() && CheckAddressesProtocols(w.h.Network().ListenAddresses(),
+		[]int{multiaddr.P_UDP, multiaddr.P_QUIC}, []int{multiaddr.P_CIRCUIT}) {
+		if err := <-w.hpHelper.HolePunch(ctx, w.h, peer, DefaultHolePunchTimeout); err == nil {
+			if !errors.Is(err, ErrPeerNotSupportHolePunch) {
+				w.meterHolePunchErrs.Incr()
+			}
+		} else {
+			w.meterHolePunchSuccess.Incr()
+		}
+	}
+
+	s, err := w.h.NewStream(ctx, peer, streamProtocol)
+	if err != nil {
+		w.log.Error("Failed to open stream", "peer", peer, "err", err)
+		w.meterStreamOpenErrs.Incr()
+		return nil, err
+	}
+
+	w.meterStreamOpend.Incr()
+	return s, nil
 }
 
 func (w *Node) writeStream(s network.Stream, m *pb.Stream) error {

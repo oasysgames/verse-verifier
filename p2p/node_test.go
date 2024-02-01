@@ -549,9 +549,9 @@ func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 		PublishInterval: 0,
 		StreamTimeout:   3 * time.Second,
 	}
-	host, dht, bwm, _ := NewHost(context.Background(), cfg, priv)
+	host, dht, bwm, hpHelper, _ := NewHost(context.Background(), cfg, priv)
 
-	worker, err := NewNode(cfg, db, host, dht, bwm, s.b0.ChainID().Uint64(), []common.Address{})
+	worker, err := NewNode(cfg, db, host, dht, bwm, hpHelper, s.b0.ChainID().Uint64(), []common.Address{})
 	if err != nil {
 		s.Fail(err.Error())
 	}

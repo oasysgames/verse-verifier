@@ -7,7 +7,8 @@ import (
 )
 
 const (
-	pingFlag = "peer"
+	peerFlag           = "peer"
+	forceHolePunchFlag = "force-holepunch"
 )
 
 var pingCmd = &cobra.Command{
@@ -20,17 +21,25 @@ var pingCmd = &cobra.Command{
 			util.Exit(1, "Failed to load configuration file: %s\n", err)
 		}
 
-		peerID, err := cmd.Flags().GetString(pingFlag)
+		peerID, err := cmd.Flags().GetString(peerFlag)
 		if err != nil {
-			util.Exit(1, "Failed to read '%s' argument: %s\n", pingFlag, err)
+			util.Exit(1, "Failed to read '%s' argument: %s\n", peerFlag, err)
 		}
-		ipccmd.PingCmd.Run(cmd.Context(), conf.IPC.Sockname, peerID)
+
+		holePunch, err := cmd.Flags().GetBool(forceHolePunchFlag)
+		if err != nil {
+			util.Exit(1, "Failed to read '%s' argument: %s\n", forceHolePunchFlag, err)
+		}
+
+		ipccmd.PingCmd.Run(cmd.Context(), conf.IPC.Sockname, peerID, holePunch)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(pingCmd)
 
-	pingCmd.Flags().String(pingFlag, "", "Target peer id")
-	pingCmd.MarkFlagRequired(pingFlag)
+	pingCmd.Flags().String(peerFlag, "", "Target peer id")
+	pingCmd.MarkFlagRequired(peerFlag)
+
+	pingCmd.Flags().Bool(forceHolePunchFlag, false, "Enforce hole punching")
 }

@@ -154,7 +154,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 
 	// set ipc handlers
 	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
-	ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host()))
+	ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host(), p2p.HolePunchHelper()))
 	ipc.SetHandler(ipccmd.StatusCmd.NewHandler(p2p.Host()))
 
 	// start state verifier
@@ -312,7 +312,7 @@ func newP2P(
 	}
 
 	// setup p2p node
-	host, dht, bwm, err := p2p.NewHost(ctx, &c.P2P, p2pKey)
+	host, dht, bwm, hpHelper, err := p2p.NewHost(ctx, &c.P2P, p2pKey)
 	if err != nil {
 		log.Crit(err.Error())
 	}
@@ -323,7 +323,8 @@ func newP2P(
 		ignoreSigners = append(ignoreSigners, verifier.Signer().Signer())
 	}
 
-	node, err := p2p.NewNode(&c.P2P, db, host, dht, bwm, c.HubLayer.ChainId, ignoreSigners)
+	node, err := p2p.NewNode(&c.P2P, db, host, dht,
+		bwm, hpHelper, c.HubLayer.ChainId, ignoreSigners)
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}

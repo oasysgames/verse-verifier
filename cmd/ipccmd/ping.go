@@ -2,6 +2,7 @@ package ipccmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	p2pping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/oasysgames/oasys-optimism-verifier/ipc"
+	"github.com/oasysgames/oasys-optimism-verifier/p2p"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 )
 
@@ -21,7 +23,12 @@ type ping struct {
 	attempts  int
 }
 
-func (c *ping) Run(ctx context.Context, sockname, peer string) {
+type pingMsg struct {
+	Remote         string
+	ForceHolePunch bool
+}
+
+func (c *ping) Run(ctx context.Context, sockname, remote string, forceHolePunch bool) {
 	// attach to ipc
 	cl, err := ipc.NewClient(sockname, c.handlerID)
 	if err != nil {
@@ -30,7 +37,11 @@ func (c *ping) Run(ctx context.Context, sockname, peer string) {
 	defer cl.Close()
 
 	// send ipc message
-	if err = cl.Write([]byte(peer)); err != nil {
+	msg, err := json.Marshal(&pingMsg{remote, forceHolePunch})
+	if err == nil {
+		err = cl.Write(msg)
+	}
+	if err != nil {
 		util.Exit(1, "failed to write ipc message: %s\n", err)
 	}
 
@@ -47,11 +58,17 @@ func (c *ping) Run(ctx context.Context, sockname, peer string) {
 	}
 }
 
-func (c *ping) NewHandler(ctx context.Context, h host.Host) (handlerID int, handler ipc.Handler) {
+func (c *ping) NewHandler(ctx context.Context, h host.Host, hpHelper p2p.HolePunchHelper) (handlerID int, handler ipc.Handler) {
 	return c.handlerID, func(s *ipc.IPCServer, data []byte) {
 		defer s.Write(ipc.EOM, nil)
 
-		peerID, err := peer.Decode(string(data))
+		var msg pingMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			s.Write(c.handlerID, []byte(fmt.Sprintf("failed to unmarshal ipc message: %s", err)))
+			return
+		}
+
+		peerID, err := peer.Decode(msg.Remote)
 		if err != nil {
 			s.Write(c.handlerID, []byte(fmt.Sprintf("failed to decode peer id: %s", err)))
 			return
@@ -59,6 +76,21 @@ func (c *ping) NewHandler(ctx context.Context, h host.Host) (handlerID int, hand
 
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
+
+		if msg.ForceHolePunch {
+			if !hpHelper.Enabled() {
+				s.Write(c.handlerID, []byte("hole punching is disabled on this node"))
+				return
+			}
+
+			s.Write(c.handlerID, []byte("waiting for hole punch"))
+			err := <-hpHelper.HolePunch(ctx, h, peerID, p2p.DefaultHolePunchTimeout)
+			if err != nil {
+				s.Write(c.handlerID, []byte(fmt.Sprintf("hole punch failed: %s", err)))
+				return
+			}
+			s.Write(c.handlerID, []byte("hole punch successful"))
+		}
 
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -73,7 +105,7 @@ func (c *ping) NewHandler(ctx context.Context, h host.Host) (handlerID int, hand
 				return
 			}
 
-			data = []byte(fmt.Sprintf("Pong received: time=%s", r.RTT))
+			data = []byte(fmt.Sprintf("pong received: time=%s", r.RTT))
 			if err = s.Write(c.handlerID, data); err != nil {
 				return
 			}

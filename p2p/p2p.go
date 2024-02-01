@@ -27,6 +27,7 @@ import (
 	kaddht "github.com/libp2p/go-libp2p-kad-dht"
 	ps "github.com/libp2p/go-libp2p-pubsub"
 	rhost "github.com/libp2p/go-libp2p/p2p/host/routed"
+	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
 )
 
 // Create libp2p host.
@@ -34,7 +35,7 @@ func NewHost(
 	ctx context.Context,
 	cfg *config.P2P,
 	priv crypto.PrivKey,
-) (host.Host, routing.Routing, *metrics.BandwidthCounter, error) {
+) (host.Host, routing.Routing, *metrics.BandwidthCounter, HolePunchHelper, error) {
 	// Construct libp2p host.
 	bwm := metrics.NewBandwidthCounter()
 	opts := []libp2p.Option{
@@ -44,15 +45,17 @@ func NewHost(
 		libp2p.Identity(priv),
 		libp2p.BandwidthReporter(bwm),
 	}
-	if appends, err := userOptions(cfg); err != nil {
-		return nil, nil, nil, err
+
+	appends, hpHelper, err := userOptions(cfg)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	} else {
 		opts = append(opts, appends...)
 	}
 
 	h, err := libp2p.New(opts...)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// Add log handler for peer connection and disconnection.
@@ -68,19 +71,19 @@ func NewHost(
 	// Construct libp2p DHT.
 	dht, err := newRouting(ctx, h, append(cfg.Bootnodes, cfg.RelayClient.RelayNodes...))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to construct DHT: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to construct DHT: %w", err)
 	}
 
 	// Bootstrap the DHT. In the default configuration, this spawns a Background
 	// thread that will refresh the peer table every five minutes.
 	if err = dht.Bootstrap(ctx); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to bootstrap DHT: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to bootstrap DHT: %w", err)
 	}
 
-	return rhost.Wrap(h, dht), dht, bwm, nil
+	return rhost.Wrap(h, dht), dht, bwm, hpHelper, nil
 }
 
-func userOptions(cfg *config.P2P) (opts []libp2p.Option, err error) {
+func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelper, err error) {
 	// Construct listening addresses.
 	listens := cfg.Listens
 	if cfg.Listen != "" {
@@ -88,10 +91,10 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, err error) {
 		listens = append(listens, fmt.Sprintf("/ip4/%s/tcp/%s", s[0], s[1]))
 	}
 	if len(listens) == 0 {
-		return nil, errors.New("no listening address")
+		return nil, nil, errors.New("no listening address")
 	}
 	if listenAddrs, err := convertMultiaddrs(listens); err != nil {
-		return nil, fmt.Errorf("failed to parse listening addrs: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse listening addrs: %w", err)
 	} else {
 		opts = append(opts, libp2p.ListenAddrs(listenAddrs...))
 	}
@@ -99,7 +102,7 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, err error) {
 	// Construct address factory.
 	opt, err := AddrsFactoryOpt(cfg.AppendAnnounce, cfg.NoAnnounce)
 	if err != nil {
-		return nil, fmt.Errorf("failed to construct addrs factory: %w", err)
+		return nil, nil, fmt.Errorf("failed to construct addrs factory: %w", err)
 	}
 	opts = append(opts, opt)
 
@@ -107,7 +110,7 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, err error) {
 	if len(cfg.ConnectionFilter) > 0 {
 		opt, err := ConnectionFilterOpt(cfg.ConnectionFilter)
 		if err != nil {
-			return nil, fmt.Errorf("failed to construct connection filter: %w", err)
+			return nil, nil, fmt.Errorf("failed to construct connection filter: %w", err)
 		}
 		opts = append(opts, opt)
 	}
@@ -118,13 +121,14 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, err error) {
 	}
 
 	// Enable NAT traversal using UDP Hole Punching.
+	hpHelper = NewHolePunchHelper(cfg.EnableHolePunching)
 	if cfg.EnableHolePunching {
-		opts = append(opts, libp2p.EnableHolePunching())
+		opts = append(opts, libp2p.EnableHolePunching(holepunch.WithTracer(hpHelper)))
 	}
 
 	// Enable NAT traversal using `Circuit Relay v2`.
 	if relayOpts, err := CircuitRelayOpts(cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else {
 		opts = append(opts, relayOpts...)
 	}
@@ -134,7 +138,7 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, err error) {
 		opts = append(opts, libp2p.EnableNATService())
 	}
 
-	return opts, nil
+	return opts, hpHelper, nil
 }
 
 func newRouting(ctx context.Context, h host.Host, bootstrapPeers []string) (routing.Routing, error) {
@@ -213,6 +217,37 @@ func DecodePrivateKey(b64encodedKey string) (crypto.PrivKey, peer.ID, error) {
 	}
 
 	return priv, peerID, nil
+}
+
+// Check if a direct connection exists with the specified remote peer.
+func HasDirectConnection(host host.Host, remote peer.ID) bool {
+	for _, conn := range host.Network().ConnsToPeer(remote) {
+		_, err := conn.RemoteMultiaddr().ValueForProtocol(multiaddr.P_CIRCUIT)
+		if err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// Check if the addresses support the protocol. It can also check the local node,
+// but be aware that it will always return false for unconnected remote peer.
+func CheckAddressesProtocols(addrs []multiaddr.Multiaddr, desireds, excludeds []int) bool {
+LOOP:
+	for _, ma := range addrs {
+		for _, p := range desireds {
+			if _, err := ma.ValueForProtocol(p); err != nil {
+				continue LOOP
+			}
+		}
+		for _, p := range excludeds {
+			if _, err := ma.ValueForProtocol(p); err == nil {
+				continue LOOP
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func setupPubSub(
