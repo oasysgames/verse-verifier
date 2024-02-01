@@ -26,13 +26,14 @@ verse_layer:
 
 # P2P node
 p2p:
-  listen: 0.0.0.0:4101
+  listens:
+    - /ip4/0.0.0.0/tcp/4101
+    - /ip4/0.0.0.0/udp/4101/quic
   bootnodes:
     - /ip4/34.142.254.12/tcp/4101/p2p/12D3KooWMQpbQbv9vuGj2dWQHQX6K5oHPupTTSEMNzZWJQqgsBMU
-
-# IPC server
-ipc:
-  enable: true
+    - /ip4/34.142.254.12/udp/4101/quic/p2p/12D3KooWMQpbQbv9vuGj2dWQHQX6K5oHPupTTSEMNzZWJQqgsBMU
+  relay_client:
+    enable: true
 
 # Verification worker
 verifier:

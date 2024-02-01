@@ -135,7 +135,7 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelpe
 		if cfg.RelayClient.Enable {
 			opts = append(opts, libp2p.EnableHolePunching(holepunch.WithTracer(hpHelper)))
 		} else {
-			log.Error("Holepunch has been disabled. Please enable the relay client to use holepunch.")
+			log.Error("Holepunch has been disabled. Please enable the relay client to use holepunch")
 		}
 	}
 

@@ -3,6 +3,7 @@ package p2p
 import (
 	"errors"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
@@ -23,6 +24,10 @@ func CircuitRelayOpts(cfg *config.P2P) (opts []libp2p.Option, err error) {
 	opts = append(opts, libp2p.EnableRelay())
 	if rs.Enable {
 		// Enable Circuit Relay Service.
+		if !cfg.NAT.AutoNAT {
+			log.Warn("When enabling the relay service, it is recommended to also enable AutoNAT. Without using AutoNAT, " +
+				"there's a possibility that your node may not be able to determine its own public address")
+		}
 		opts = append(opts, circuitRelayServiceOpts(cfg))
 	} else if rc.Enable {
 		// Enable Circuit Relay Client.
@@ -73,22 +78,25 @@ func circuitRelayServiceOpts(cfg *config.P2P) libp2p.Option {
 
 func circuitRelayClientOpts(cfg *config.P2P) (libp2p.Option, error) {
 	rc := cfg.RelayClient
-	if len(rc.RelayNodes) == 0 {
-		return nil, errors.New("relay node required")
+
+	relayNodes := rc.RelayNodes
+	if len(relayNodes) == 0 {
+		log.Warn("Relay node not configured, using bootnodes as relay nodes instead")
+		relayNodes = cfg.Bootnodes
 	}
 
-	var relayNodes []peer.AddrInfo
-	for _, s := range rc.RelayNodes {
+	var relayNodeAddrs []peer.AddrInfo
+	for _, s := range relayNodes {
 		if addr, err := peer.AddrInfoFromString(s); err != nil {
 			return nil, err
 		} else {
-			relayNodes = append(relayNodes, *addr)
+			relayNodeAddrs = append(relayNodeAddrs, *addr)
 		}
 	}
 
 	relayOpts := []autorelay.Option{
 		autorelay.WithCircuitV1Support(),
-		autorelay.WithStaticRelays(relayNodes),
+		autorelay.WithStaticRelays(relayNodeAddrs),
 	}
 
 	return libp2p.EnableAutoRelay(relayOpts...), nil

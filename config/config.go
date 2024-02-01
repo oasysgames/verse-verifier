@@ -32,11 +32,12 @@ var (
 			"/ip4/172.16.0.0/ipcidr/12",
 			"/ip4/192.168.0.0/ipcidr/16",
 		},
-		"p2p.transports.tcp":  true,
-		"p2p.transports.quic": true,
-		"p2p.nat.upnp":        true,
-		"p2p.nat.autonat":     true,
-		"p2p.nat.holepunch":   true,
+		"p2p.transports.tcp":      true,
+		"p2p.transports.quic":     true,
+		"p2p.nat.upnp":            true,
+		"p2p.nat.autonat":         true,
+		"p2p.nat.holepunch":       true,
+		"p2p.relay_client.enable": true,
 
 		"ipc.sockname": "oasvlfy",
 
