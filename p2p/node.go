@@ -156,8 +156,7 @@ func (w *Node) Start(ctx context.Context) {
 		w.subscribeLoop(ctx)
 	}()
 
-	w.log.Info("Worker started", "id", w.PeerID(),
-		"publish-interval", w.cfg.PublishInterval, "stream-timeout", w.cfg.StreamTimeout)
+	showBootstrapLog(w.log, w.cfg, w.h)
 	wg.Wait()
 	w.log.Info("Worker stopped")
 }
@@ -853,4 +852,43 @@ func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {
 		Approved:          row.Approved,
 		Signature:         row.Signature[:],
 	}
+}
+
+func showBootstrapLog(log log.Logger, cfg *config.P2P, h host.Host) {
+	listens := []string{}
+	for _, ma := range h.Network().ListenAddresses() {
+		listens = append(listens, ma.String())
+	}
+	log.Info("Listening on: " + strings.Join(listens, ","))
+	log.Info("Appended announce addresses: " + strings.Join(cfg.AppendAnnounce, ","))
+	log.Info("No announce addresses: " + strings.Join(cfg.NoAnnounce, ","))
+	log.Info("Connection filter addresses: " + strings.Join(cfg.ConnectionFilter, ","))
+	if cfg.Transports.TCP {
+		log.Info("Enabled TCP transport")
+	}
+	if cfg.Transports.QUIC {
+		log.Info("Enabled QUIC transport")
+	}
+	log.Info("Bootnodes: " + strings.Join(cfg.Bootnodes, ","))
+	nats := []string{}
+	if cfg.NAT.UPnP {
+		nats = append(nats, "upnp")
+	}
+	if cfg.NAT.AutoNAT {
+		nats = append(nats, "autonat")
+	}
+	if cfg.NAT.HolePunch {
+		nats = append(nats, "holepunch")
+	}
+	log.Info("Enabled NAT Travasal features: " + strings.Join(nats, ","))
+	if cfg.RelayService.Enable {
+		log.Info("Enabled circuit relay service")
+	}
+	if cfg.RelayClient.Enable {
+		log.Info("Enabled circuit relay client, relay nodes: " + strings.Join(cfg.RelayClient.RelayNodes, ","))
+	}
+	log.Info("Worker started", "id", h.ID(),
+		"publish-interval", cfg.PublishInterval,
+		"stream-timeout", cfg.StreamTimeout,
+	)
 }

@@ -32,9 +32,11 @@ var (
 			"/ip4/172.16.0.0/ipcidr/12",
 			"/ip4/192.168.0.0/ipcidr/16",
 		},
-		"p2p.enable_upnp":          true,
-		"p2p.enable_auto_nat":      true,
-		"p2p.enable_hole_punching": true,
+		"p2p.transports.tcp":  true,
+		"p2p.transports.quic": true,
+		"p2p.nat.upnp":        true,
+		"p2p.nat.autonat":     true,
+		"p2p.nat.holepunch":   true,
 
 		"ipc.sockname": "oasvlfy",
 
@@ -226,6 +228,12 @@ type P2P struct {
 	// Multi-addresses that filter dial or receive connections.
 	ConnectionFilter []string `json:"connection_filter" mapstructure:"connection_filter"`
 
+	// Enabled transport protocols.
+	Transports struct {
+		TCP  bool `json:"tcp"`
+		QUIC bool `json:"quic"`
+	} `json:"transports"`
+
 	// Deprecated: Address and port to listen.
 	Listen string `json:"listen" validate:"omitempty,hostname_port"`
 
@@ -238,11 +246,12 @@ type P2P struct {
 	// Initial node list.
 	Bootnodes []string `json:"bootnodes"`
 
-	// Enable NAT traversal using UPnP.
-	EnableUPnP bool `json:"enable_upnp" mapstructure:"enable_upnp"`
-
-	// Enable AutoNAT service.
-	EnableAutoNAT bool `json:"enable_auto_nat" mapstructure:"enable_auto_nat"`
+	// Enabled NAT Travasal features.
+	NAT struct {
+		UPnP      bool `json:"upnp" mapstructure:"upnp"`
+		AutoNAT   bool `json:"autonat" mapstructure:"autonat"`
+		HolePunch bool `json:"holepunch" mapstructure:"holepunch"`
+	} `json:"nat"`
 
 	// Enable Circuit Relay(v2) service.
 	// Note: Public connectivity is required.
@@ -277,9 +286,6 @@ type P2P struct {
 		Enable     bool     `json:"enable"`
 		RelayNodes []string `json:"relay_nodes" mapstructure:"relay_nodes"`
 	} `json:"relay_client" mapstructure:"relay_client"`
-
-	// Enable NAT traversal using UDP hole punching.
-	EnableHolePunching bool `json:"enable_hole_punching" mapstructure:"enable_hole_punching"`
 }
 
 type IPC struct {

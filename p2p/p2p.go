@@ -28,6 +28,8 @@ import (
 	ps "github.com/libp2p/go-libp2p-pubsub"
 	rhost "github.com/libp2p/go-libp2p/p2p/host/routed"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
+	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 )
 
 // Create libp2p host.
@@ -39,7 +41,6 @@ func NewHost(
 	// Construct libp2p host.
 	bwm := metrics.NewBandwidthCounter()
 	opts := []libp2p.Option{
-		libp2p.DefaultTransports,
 		libp2p.DefaultMuxers,
 		libp2p.DefaultSecurity,
 		libp2p.Identity(priv),
@@ -89,11 +90,11 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelpe
 	if cfg.Listen != "" {
 		s := strings.Split(cfg.Listen, ":")
 		listens = append(listens, fmt.Sprintf("/ip4/%s/tcp/%s", s[0], s[1]))
+		listens = append(listens, fmt.Sprintf("/ip4/%s/udp/%s/quic", s[0], s[1]))
 	}
 	if len(listens) == 0 {
 		return nil, nil, errors.New("no listening address")
-	}
-	if listenAddrs, err := convertMultiaddrs(listens); err != nil {
+	} else if listenAddrs, err := convertMultiaddrs(listens); err != nil {
 		return nil, nil, fmt.Errorf("failed to parse listening addrs: %w", err)
 	} else {
 		opts = append(opts, libp2p.ListenAddrs(listenAddrs...))
@@ -115,14 +116,22 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelpe
 		opts = append(opts, opt)
 	}
 
+	// Enable transport protocols.
+	if cfg.Transports.TCP {
+		opts = append(opts, libp2p.Transport(tcp.NewTCPTransport))
+	}
+	if cfg.Transports.QUIC {
+		opts = append(opts, libp2p.Transport(quic.NewTransport))
+	}
+
 	// Enable NAT traversal using UPnP.
-	if cfg.EnableUPnP {
+	if cfg.NAT.UPnP {
 		opts = append(opts, libp2p.NATPortMap())
 	}
 
 	// Enable NAT traversal using UDP Hole Punching.
-	hpHelper = NewHolePunchHelper(cfg.EnableHolePunching)
-	if cfg.EnableHolePunching {
+	hpHelper = NewHolePunchHelper(cfg.NAT.HolePunch)
+	if cfg.NAT.HolePunch {
 		opts = append(opts, libp2p.EnableHolePunching(holepunch.WithTracer(hpHelper)))
 	}
 
@@ -134,7 +143,7 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelpe
 	}
 
 	// Enable AutoNAT service.
-	if cfg.EnableAutoNAT {
+	if cfg.NAT.AutoNAT {
 		opts = append(opts, libp2p.EnableNATService())
 	}
 

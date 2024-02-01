@@ -56,8 +56,6 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		stream_timeout: 5s
 		bootnodes:
 			- /ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899
-		enable_upnp: true
-		enable_auto_nat: true
 		relay_service:
 			enable: true
 			duration_limit: 1m
@@ -172,14 +170,28 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		Listens:          []string{"listen0"},
 		NoAnnounce:       []string{"noann0"},
 		ConnectionFilter: []string{"connfil0"},
-		Listen:           "",
-		PublishInterval:  5 * time.Second,
-		StreamTimeout:    5 * time.Second,
+		Transports: struct {
+			TCP  bool "json:\"tcp\""
+			QUIC bool "json:\"quic\""
+		}{
+			TCP:  true,
+			QUIC: true,
+		},
+		Listen:          "",
+		PublishInterval: 5 * time.Second,
+		StreamTimeout:   5 * time.Second,
 		Bootnodes: []string{
 			"/ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899",
 		},
-		EnableUPnP:    true,
-		EnableAutoNAT: true,
+		NAT: struct {
+			UPnP      bool "json:\"upnp\" mapstructure:\"upnp\""
+			AutoNAT   bool "json:\"autonat\" mapstructure:\"autonat\""
+			HolePunch bool "json:\"holepunch\" mapstructure:\"holepunch\""
+		}{
+			UPnP:      true,
+			AutoNAT:   true,
+			HolePunch: true,
+		},
 		RelayService: struct {
 			Enable                 bool           "json:\"enable\""
 			DurationLimit          *time.Duration "json:\"duration_limit,omitempty\" mapstructure:\"duration_limit\""
@@ -210,7 +222,6 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			Enable:     false,
 			RelayNodes: []string{"relay-0", "relay-1"},
 		},
-		EnableHolePunching: true,
 	}, got.P2P)
 
 	s.Equal(IPC{Sockname: "testsock"}, got.IPC)
@@ -379,11 +390,13 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 		"/ip4/172.16.0.0/ipcidr/12",
 		"/ip4/192.168.0.0/ipcidr/16",
 	}, got.P2P.ConnectionFilter)
+	s.Equal(true, got.P2P.Transports.TCP)
+	s.Equal(true, got.P2P.Transports.QUIC)
 	s.Equal(5*time.Minute, got.P2P.PublishInterval)
 	s.Equal(15*time.Second, got.P2P.StreamTimeout)
-	s.Equal(true, got.P2P.EnableUPnP)
-	s.Equal(true, got.P2P.EnableAutoNAT)
-	s.Equal(true, got.P2P.EnableHolePunching)
+	s.Equal(true, got.P2P.NAT.UPnP)
+	s.Equal(true, got.P2P.NAT.AutoNAT)
+	s.Equal(true, got.P2P.NAT.HolePunch)
 
 	s.Equal("oasvlfy", got.IPC.Sockname)
 
