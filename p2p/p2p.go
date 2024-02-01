@@ -129,10 +129,14 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelpe
 		opts = append(opts, libp2p.NATPortMap())
 	}
 
-	// Enable NAT traversal using UDP Hole Punching.
-	hpHelper = NewHolePunchHelper(cfg.NAT.HolePunch)
+	// Enable NAT traversal using Hole Punching.
+	hpHelper = NewHolePunchHelper(cfg.NAT.HolePunch && cfg.RelayClient.Enable)
 	if cfg.NAT.HolePunch {
-		opts = append(opts, libp2p.EnableHolePunching(holepunch.WithTracer(hpHelper)))
+		if cfg.RelayClient.Enable {
+			opts = append(opts, libp2p.EnableHolePunching(holepunch.WithTracer(hpHelper)))
+		} else {
+			log.Error("Holepunch has been disabled. Please enable the relay client to use holepunch.")
+		}
 	}
 
 	// Enable NAT traversal using `Circuit Relay v2`.
