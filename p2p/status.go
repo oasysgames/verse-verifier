@@ -6,12 +6,25 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	relayproto "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/proto"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
+type peerStream struct {
+	ID        string `json:"id"`
+	Opened    string `json:"opened"`
+	Direction string `json:"direction"`
+	Protocol  string `json:"protocol"`
+}
+
 type peerConn struct {
-	Peer    string `json:"peer"`
-	Address string `json:"address"`
-	Streams int    `json:"streams"`
+	ID            string        `json:"id"`
+	Opened        string        `json:"opened"`
+	Direction     string        `json:"direction"`
+	Peer          string        `json:"peer"`
+	LocalAddress  string        `json:"local_address"`
+	RemoteAddress string        `json:"remote_address"`
+	Streams       []*peerStream `json:"streams"`
 }
 
 type peerStatus struct {
@@ -56,10 +69,26 @@ func NewHostStatus(h host.Host) (*HostStatus, error) {
 
 	// set `Connections`
 	for _, conn := range h.Network().Conns() {
+		streams := []*peerStream{}
+		for _, st := range conn.GetStreams() {
+			stat := st.Stat()
+			streams = append(streams, &peerStream{
+				ID:        st.ID(),
+				Opened:    stat.Opened.UTC().Format("2006-01-02T15:04:05+00:00"),
+				Protocol:  string(st.Protocol()),
+				Direction: stat.Direction.String(),
+			})
+		}
+
+		stat := conn.Stat()
 		s.Connections = append(s.Connections, &peerConn{
-			Peer:    conn.RemotePeer().String(),
-			Address: conn.RemoteMultiaddr().String(),
-			Streams: len(conn.GetStreams()),
+			ID:            conn.ID(),
+			Opened:        stat.Opened.UTC().Format("2006-01-02T15:04:05+00:00"),
+			Direction:     stat.Direction.String(),
+			Peer:          conn.RemotePeer().String(),
+			LocalAddress:  conn.LocalMultiaddr().String(),
+			RemoteAddress: conn.RemoteMultiaddr().String(),
+			Streams:       streams,
 		})
 	}
 
@@ -91,4 +120,42 @@ func NewHostStatus(h host.Host) (*HostStatus, error) {
 	})
 
 	return s, nil
+}
+
+type networkStat struct {
+	connections struct {
+		tcp, udp, relay int
+	}
+	streams struct {
+		hop, stop, verifier int
+	}
+}
+
+func newNetworkStatus(h host.Host) *networkStat {
+	var s networkStat
+	for _, conn := range h.Network().Conns() {
+		local := []ma.Multiaddr{conn.LocalMultiaddr()}
+		if CheckAddressesProtocols(local, []int{ma.P_TCP}, nil) {
+			s.connections.tcp++
+		} else if CheckAddressesProtocols(local, []int{ma.P_UDP}, nil) {
+			s.connections.udp++
+		}
+
+		remote := []ma.Multiaddr{conn.RemoteMultiaddr()}
+		if CheckAddressesProtocols(remote, []int{ma.P_CIRCUIT}, nil) {
+			s.connections.relay++
+		}
+
+		for _, st := range conn.GetStreams() {
+			switch st.Protocol() {
+			case relayproto.ProtoIDv2Hop:
+				s.streams.hop++
+			case relayproto.ProtoIDv2Stop:
+				s.streams.stop++
+			case streamProtocol:
+				s.streams.verifier++
+			}
+		}
+	}
+	return &s
 }

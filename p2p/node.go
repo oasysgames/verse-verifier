@@ -72,8 +72,13 @@ type Node struct {
 	meterStreamReadErrs,
 	meterStreamWriteErrs meter.Counter
 
-	meterConnections,
 	meterPeers,
+	meterTCPConnections,
+	meterUDPConnections,
+	meterRelayConnections,
+	meterRelayHopStreams,
+	meterRelayStopStreams,
+	meterVerifierStreams,
 	meterPubsubJobs meter.Gauge
 }
 
@@ -120,8 +125,13 @@ func NewNode(
 		meterStreamOpenErrs:   meter.GetOrRegisterCounter([]string{"p2p", "stream", "open", "errors"}, ""),
 		meterStreamReadErrs:   meter.GetOrRegisterCounter([]string{"p2p", "stream", "read", "errors"}, ""),
 		meterStreamWriteErrs:  meter.GetOrRegisterCounter([]string{"p2p", "stream", "write", "errors"}, ""),
-		meterConnections:      meter.GetOrRegisterGauge([]string{"p2p", "connections"}, ""),
 		meterPeers:            meter.GetOrRegisterGauge([]string{"p2p", "peers"}, ""),
+		meterTCPConnections:   meter.GetOrRegisterGauge([]string{"p2p", "tcp", "connections"}, ""),
+		meterUDPConnections:   meter.GetOrRegisterGauge([]string{"p2p", "udp", "connections"}, ""),
+		meterRelayConnections: meter.GetOrRegisterGauge([]string{"p2p", "relay", "connections"}, ""),
+		meterRelayHopStreams:  meter.GetOrRegisterGauge([]string{"p2p", "relayhop", "streams"}, ""),
+		meterRelayStopStreams: meter.GetOrRegisterGauge([]string{"p2p", "relaystop", "streams"}, ""),
+		meterVerifierStreams:  meter.GetOrRegisterGauge([]string{"p2p", "verifier", "streams"}, ""),
 	}
 	worker.h.SetStreamHandler(streamProtocol, worker.handleStream)
 
@@ -175,7 +185,13 @@ func (w *Node) meterLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			w.meterConnections.Set(float64(len(w.h.Network().Conns())))
+			nwstat := newNetworkStatus(w.h)
+			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
+			w.meterUDPConnections.Set(float64(nwstat.connections.udp))
+			w.meterRelayConnections.Set(float64(nwstat.connections.relay))
+			w.meterRelayHopStreams.Set(float64(nwstat.streams.hop))
+			w.meterRelayStopStreams.Set(float64(nwstat.streams.stop))
+			w.meterVerifierStreams.Set(float64(nwstat.streams.verifier))
 			w.meterPeers.Set(float64(w.h.Peerstore().Peers().Len()))
 		}
 	}
