@@ -28,6 +28,7 @@ import (
 	ps "github.com/libp2p/go-libp2p-pubsub"
 	rhost "github.com/libp2p/go-libp2p/p2p/host/routed"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
+	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 )
@@ -150,6 +151,11 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelpe
 	if cfg.NAT.AutoNAT {
 		opts = append(opts, libp2p.EnableNATService())
 	}
+
+	// Lower the minimum number of connections to external nodes required
+	// for the identity/ObservedAddrManager to check the public IP of its
+	// own node because the number of nodes is small.
+	identify.OverrideUnsafe(identify.Override{ActivationThresh: 2})
 
 	return opts, hpHelper, nil
 }
