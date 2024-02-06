@@ -25,9 +25,6 @@ var unlockCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(unlockCmd)
 
-	unlockCmd.Flags().String(configFlag, "", "configuration file")
-	unlockCmd.MarkFlagRequired(configFlag)
-
 	unlockCmd.Flags().String(nameFlag, "", "wallet name")
 	unlockCmd.MarkFlagRequired(nameFlag)
 

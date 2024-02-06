@@ -6,16 +6,15 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	goipc "github.com/james-barrow/golang-ipc"
 	"github.com/oasysgames/oasys-optimism-verifier/ipc"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/wallet"
 )
 
-var WalletUnlockCmd = &walletUnlock{WALLET_UNLOCK}
+var WalletUnlockCmd = &walletUnlock{handlerID: WALLET_UNLOCK}
 
 type walletUnlock struct {
-	id int
+	handlerID int
 }
 
 type walletUnlockMsg struct {
@@ -23,9 +22,9 @@ type walletUnlockMsg struct {
 	Password string
 }
 
-func (c *walletUnlock) Run(listen, address, password string) {
+func (c *walletUnlock) Run(sockname, address, password string) {
 	// attach to ipc
-	s, err := ipc.NewClient(listen, c.id)
+	s, err := ipc.NewClient(sockname, c.handlerID)
 	if err != nil {
 		util.Exit(1, "connection failure: %s\n", err)
 	}
@@ -43,7 +42,7 @@ func (c *walletUnlock) Run(listen, address, password string) {
 	if err != nil {
 		util.Exit(1, "failed to create message: %s\n", err)
 	}
-	err = s.Write(c.id, data)
+	err = s.Write(data)
 	if err != nil {
 		util.Exit(1, "failed to write message: %s\n", err)
 	}
@@ -61,26 +60,26 @@ func (c *walletUnlock) read(s *ipc.Client) {
 }
 
 func (c *walletUnlock) NewHandler(ks *wallet.KeyStore) (int, ipc.Handler) {
-	return c.id, func(s *goipc.Server, data []byte) {
+	return c.handlerID, func(s *ipc.IPCServer, data []byte) {
 		var m walletUnlockMsg
 		err := json.Unmarshal(data, &m)
 		if err != nil {
-			s.Write(c.id, []byte(err.Error()))
+			s.Write(c.handlerID, []byte(err.Error()))
 			return
 		}
 
 		_, account, err := ks.FindWallet(common.HexToAddress(m.Address))
 		if err != nil {
-			s.Write(c.id, []byte(err.Error()))
+			s.Write(c.handlerID, []byte(err.Error()))
 			return
 		}
 
 		err = ks.Unlock(*account, m.Password)
 		if err != nil {
-			s.Write(c.id, []byte(err.Error()))
+			s.Write(c.handlerID, []byte(err.Error()))
 			return
 		}
 
-		s.Write(c.id, []byte("success!"))
+		s.Write(c.handlerID, []byte("success!"))
 	}
 }

@@ -61,19 +61,11 @@ func (s *NodeTestSuite) SetupTest() {
 	s.scc2 = s.RandAddress()
 	s.sigs = map[common.Address]map[common.Address][]*database.OptimismSignature{}
 
-	s.bootnode = s.newWorker()
-	s.node1 = s.newWorker()
-	s.node2 = s.newWorker()
-
 	// setup libp2p
-	ctx := context.Background()
-	bootstrapPeers := ConvertPeers([]string{
-		maToP2P(s.bootnode.h.Addrs()[0], s.bootnode.h.ID()),
-	})
-	Bootstrap(ctx, s.node1.h, s.node1.dht)
-	Bootstrap(ctx, s.node2.h, s.node2.dht)
-	ConnectPeers(ctx, s.node1.h, bootstrapPeers)
-	ConnectPeers(ctx, s.node2.h, bootstrapPeers)
+	s.bootnode = s.newWorker([]string{})
+	bootnodes := []string{s.bootnode.cfg.Listens[0] + "/p2p/" + s.bootnode.h.ID().String()}
+	s.node1 = s.newWorker(bootnodes)
+	s.node2 = s.newWorker(bootnodes)
 
 	// create sample records
 	for _, node := range []*Node{s.node1, s.node2} {
@@ -545,17 +537,21 @@ func (s *NodeTestSuite) TestPublishLatestSignatures() {
 	s.Equal(uint64(199), got.sigs[1].BatchIndex)
 }
 
-func (s *NodeTestSuite) newWorker() *Node {
+func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 	// Setup database.
 	db, _ := database.NewDatabase(&config.Database{Path: ":memory:"})
 
 	// Setup libp2p.
 	priv, _, _, _ := GenerateKeyPair()
-	host, dht, bwm, _ := NewHost(context.Background(), "127.0.0.1", s.findPort(5), priv)
+	cfg := &config.P2P{
+		Listens:         []string{"/ip4/127.0.0.1/tcp/" + s.findPort(5)},
+		Bootnodes:       bootnodes,
+		PublishInterval: 0,
+		StreamTimeout:   3 * time.Second,
+	}
+	host, dht, bwm, hpHelper, _ := NewHost(context.Background(), cfg, priv)
 
-	worker, err := NewNode(
-		&config.P2P{PublishInterval: 0, StreamTimeout: 3 * time.Second},
-		db, host, dht, bwm, s.b0.ChainID().Uint64(), []common.Address{})
+	worker, err := NewNode(cfg, db, host, dht, bwm, hpHelper, s.b0.ChainID().Uint64(), []common.Address{})
 	if err != nil {
 		s.Fail(err.Error())
 	}

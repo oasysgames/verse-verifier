@@ -2,20 +2,24 @@ package ipc
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"time"
 
 	goipc "github.com/james-barrow/golang-ipc"
 )
 
-type ReaderFunc func(*goipc.Client, []byte)
+func NewClient(sockname string, msgType int) (c *Client, err error) {
+	if msgType == EOM {
+		return nil, fmt.Errorf("message type %d is reserved as EOM", EOM)
+	}
 
-func NewClient(listen string, id int) (*Client, error) {
-	client, err := goipc.StartClient(listen, nil)
+	client, err := goipc.StartClient(sockname, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	c := &Client{Client: client, id: id}
+	c = &Client{client, msgType}
 	if !c.ready() {
 		return nil, errors.New("IPC is not ready")
 	}
@@ -24,15 +28,14 @@ func NewClient(listen string, id int) (*Client, error) {
 }
 
 type Client struct {
-	*goipc.Client
-
-	id int
+	client  *goipc.Client
+	msgType int
 }
 
 func (c *Client) ready() bool {
 	for i := 0; i < 10; i++ {
-		c.Client.Read()
-		if c.Client.Status() == "Connected" {
+		c.client.Read()
+		if c.client.Status() == "Connected" {
 			return true
 		}
 		time.Sleep(time.Second / 4)
@@ -42,22 +45,31 @@ func (c *Client) ready() bool {
 
 func (c *Client) Read() ([]byte, error) {
 	for {
-		msg, err := c.Client.Read()
+		msg, err := c.client.Read()
 		if err != nil {
 			return nil, err
 		}
 
-		if msg.MsgType == -1 {
-			// changed server status
-			continue
-		}
-
-		if msg.MsgType == -2 {
+		switch msg.MsgType {
+		case -1:
+			continue // changed server status
+		case -2:
 			return nil, errors.New("error on server")
-		}
-
-		if msg.MsgType == c.id {
+		case EOM:
+			return nil, io.EOF
+		case c.msgType:
 			return msg.Data, nil
+		default:
+			return nil, fmt.Errorf("%d is unknown message type", msg.MsgType)
 		}
 	}
+}
+
+func (c *Client) Write(message []byte) error {
+	return c.client.Write(c.msgType, message)
+}
+
+func (c *Client) Close() error {
+	c.client.Close()
+	return nil
 }

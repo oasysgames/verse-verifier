@@ -44,17 +44,36 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			  rpc: http://127.0.0.1:8545/
 			  l1_contracts:
 			    StateCommitmentChain: '0x62b105FD57A11819f9E50892E18a354bd7c89937'
-
-	ipc:
-		enable: true
 	
 	p2p:
-		listen: 127.0.0.1:20001
+		listens:
+			- listen0
+		no_announce:
+			- noann0
+		connection_filter:
+			- connfil0
 		publish_interval: 5s
 		stream_timeout: 5s
 		bootnodes:
 			- /ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899
-	
+		relay_service:
+			enable: true
+			duration_limit: 1m
+			data_limit: 2
+			reservation_ttl: 3m
+			max_reservations: 4
+			max_circuits: 5
+			buffer_size: 6
+			max_reservations_per_peer: 7
+			max_reservations_per_ip: 8
+			max_reservations_per_asn: 9
+		relay_client:
+			relay_nodes: ["relay-0", "relay-1"]
+		enable_hole_punching: true
+
+	ipc:
+		sockname: testsock
+
 	verifier:
 		enable: true
 		wallet: wallet1
@@ -88,6 +107,13 @@ func (s *ConfigTestSuite) TestParseConfig() {
 	database:
 		long_query_time: 1s
 		min_examined_row_limit: 100
+
+	metrics:
+		enable: true
+		type: testcollector
+		prefix: testprefix
+		listen: 127.0.0.1:3030
+		endpoint: /testmetrics
 
 	debug:
 		pprof:
@@ -137,16 +163,68 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		},
 	}, got.VerseLayer)
 
-	s.Equal(ipc{Enable: true}, got.IPC)
-
+	durationPtr := func(d time.Duration) *time.Duration { return &d }
+	intPtr := func(d int) *int { return &d }
+	int64Ptr := func(d int64) *int64 { return &d }
 	s.Equal(P2P{
-		Listen:          "127.0.0.1:20001",
+		Listens:          []string{"listen0"},
+		NoAnnounce:       []string{"noann0"},
+		ConnectionFilter: []string{"connfil0"},
+		Transports: struct {
+			TCP  bool "json:\"tcp\""
+			QUIC bool "json:\"quic\""
+		}{
+			TCP:  true,
+			QUIC: true,
+		},
+		Listen:          "",
 		PublishInterval: 5 * time.Second,
 		StreamTimeout:   5 * time.Second,
 		Bootnodes: []string{
 			"/ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899",
 		},
+		NAT: struct {
+			UPnP      bool "json:\"upnp\" mapstructure:\"upnp\""
+			AutoNAT   bool "json:\"autonat\" mapstructure:\"autonat\""
+			HolePunch bool "json:\"holepunch\" mapstructure:\"holepunch\""
+		}{
+			UPnP:      true,
+			AutoNAT:   true,
+			HolePunch: true,
+		},
+		RelayService: struct {
+			Enable                 bool           "json:\"enable\""
+			DurationLimit          *time.Duration "json:\"duration_limit,omitempty\" mapstructure:\"duration_limit\""
+			DataLimit              *int64         "json:\"data_limit,omitempty\" mapstructure:\"data_limit\""
+			ReservationTTL         *time.Duration "json:\"reservation_ttl,omitempty\" mapstructure:\"reservation_ttl\""
+			MaxReservations        *int           "json:\"max_reservations,omitempty\" mapstructure:\"max_reservations\""
+			MaxCircuits            *int           "json:\"max_circuits,omitempty\" mapstructure:\"max_circuits\""
+			BufferSize             *int           "json:\"buffer_size,omitempty\" mapstructure:\"buffer_size\""
+			MaxReservationsPerPeer *int           "json:\"max_reservations_per_peer,omitempty\" mapstructure:\"max_reservations_per_peer\""
+			MaxReservationsPerIP   *int           "json:\"max_reservations_per_ip,omitempty\" mapstructure:\"max_reservations_per_ip\""
+			MaxReservationsPerASN  *int           "json:\"max_reservations_per_asn,omitempty\" mapstructure:\"max_reservations_per_asn\""
+		}{
+			Enable:                 true,
+			DurationLimit:          durationPtr(time.Minute),
+			DataLimit:              int64Ptr(2),
+			ReservationTTL:         durationPtr(3 * time.Minute),
+			MaxReservations:        intPtr(4),
+			MaxCircuits:            intPtr(5),
+			BufferSize:             intPtr(6),
+			MaxReservationsPerPeer: intPtr(7),
+			MaxReservationsPerIP:   intPtr(8),
+			MaxReservationsPerASN:  intPtr(9),
+		},
+		RelayClient: struct {
+			Enable     bool     "json:\"enable\""
+			RelayNodes []string "json:\"relay_nodes\" mapstructure:\"relay_nodes\""
+		}{
+			Enable:     true,
+			RelayNodes: []string{"relay-0", "relay-1"},
+		},
 	}, got.P2P)
+
+	s.Equal(IPC{Sockname: "testsock"}, got.IPC)
 
 	s.Equal(Verifier{
 		Enable:              true,
@@ -192,6 +270,14 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		MinExaminedRowLimit: 100,
 	}, got.Database)
 
+	s.Equal(Metrics{
+		Enable:   true,
+		Type:     "testcollector",
+		Prefix:   "testprefix",
+		Listen:   "127.0.0.1:3030",
+		Endpoint: "/testmetrics",
+	}, got.Metrics)
+
 	s.Equal(Debug{
 		Pprof: Pprof{
 			Enable: true,
@@ -222,11 +308,15 @@ func (s *ConfigTestSuite) TestValidate() {
 		wallet1:
 			address: xxx
 			password: passw0rd
+	p2p:
+		listen: xxx
 	verifier:
 		enable: true
 	submitter:
 		targets:
 			- xxx
+	metrics:
+		listen: xxx
 	`)
 
 	wants := map[string]string{
@@ -244,6 +334,7 @@ func (s *ConfigTestSuite) TestValidate() {
 		"Config.verifier.wallet":                           "required_if",
 		"Config.submitter.targets[0].chain_id":             "required",
 		"Config.submitter.targets[0].wallet":               "required",
+		"Config.metrics.listen":                            "hostname_port",
 	}
 
 	// parse config
@@ -287,8 +378,27 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 
+	s.Equal([]string{
+		"/ip4/127.0.0.1/ipcidr/8",
+		"/ip4/10.0.0.0/ipcidr/8",
+		"/ip4/172.16.0.0/ipcidr/12",
+		"/ip4/192.168.0.0/ipcidr/16",
+	}, got.P2P.NoAnnounce)
+	s.Equal([]string{
+		"/ip4/127.0.0.1/ipcidr/8",
+		"/ip4/10.0.0.0/ipcidr/8",
+		"/ip4/172.16.0.0/ipcidr/12",
+		"/ip4/192.168.0.0/ipcidr/16",
+	}, got.P2P.ConnectionFilter)
+	s.Equal(true, got.P2P.Transports.TCP)
+	s.Equal(true, got.P2P.Transports.QUIC)
 	s.Equal(5*time.Minute, got.P2P.PublishInterval)
 	s.Equal(15*time.Second, got.P2P.StreamTimeout)
+	s.Equal(true, got.P2P.NAT.UPnP)
+	s.Equal(true, got.P2P.NAT.AutoNAT)
+	s.Equal(true, got.P2P.NAT.HolePunch)
+
+	s.Equal("oasvlfy", got.IPC.Sockname)
 
 	s.Equal(15*time.Second, got.Verifier.Interval)
 	s.Equal(50, got.Verifier.Concurrency)
@@ -316,6 +426,11 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal(200*time.Millisecond, got.Database.LongQueryTime)
 	s.Equal(10000, got.Database.MinExaminedRowLimit)
+
+	s.Equal("prometheus", got.Metrics.Type)
+	s.Equal("oasvlfy", got.Metrics.Prefix)
+	s.Equal("127.0.0.1:9200", got.Metrics.Listen)
+	s.Equal("/metrics", got.Metrics.Endpoint)
 
 	s.Equal("127.0.0.1:6060", got.Debug.Pprof.Listen)
 	s.Equal("username", got.Debug.Pprof.BasicAuth.Username)

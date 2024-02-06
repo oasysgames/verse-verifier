@@ -27,6 +27,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/ipc"
+	"github.com/oasysgames/oasys-optimism-verifier/metrics"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
@@ -49,9 +50,6 @@ var startCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(startCmd)
-
-	startCmd.Flags().String(configFlag, "", "configuration file")
-	startCmd.MarkFlagRequired(configFlag)
 }
 
 func runStartCmd(cmd *cobra.Command, args []string) {
@@ -83,14 +81,12 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 
 	// start ipc server
 	// note: start ipc server before unlocking wallet
-	ipc := newIPC(conf, ks)
-	if ipc != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ipc.Start(ctx)
-		}()
-	}
+	ipc := newIPC(&conf.IPC, ks)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ipc.Start(ctx)
+	}()
 
 	// unlock walelts(wait forever)
 	waitForUnlockWallets(ctx, conf, ks)
@@ -99,6 +95,19 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	hub, err := ethutil.NewReadOnlyClient(conf.HubLayer.RPC)
 	if err != nil {
 		log.Crit("Failed to create hub-layer client", "err", err)
+	}
+
+	// start metrics server
+	if conf.Metrics.Enable {
+		metrics.Initialize(&conf.Metrics)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := metrics.ListenAndServe(ctx); err != nil {
+				log.Error("Failed to start metrics server", "err", err)
+			}
+		}()
 	}
 
 	// start pprof server
@@ -142,6 +151,11 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		defer wg.Done()
 		p2p.Start(ctx)
 	}()
+
+	// set ipc handlers
+	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
+	ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host(), p2p.HolePunchHelper()))
+	ipc.SetHandler(ipccmd.StatusCmd.NewHandler(p2p.Host()))
 
 	// start state verifier
 	if sccVerifier != nil {
@@ -273,17 +287,15 @@ func waitForUnlockWallets(ctx context.Context, c *config.Config, ks *wallet.KeyS
 	wg.Wait()
 }
 
-func newIPC(c *config.Config, ks *wallet.KeyStore) *ipc.IPCServer {
-	if !c.IPC.Enable {
-		return nil
+func newIPC(c *config.IPC, ks *wallet.KeyStore) *ipc.IPCServer {
+	if c.Sockname == "" {
+		log.Crit("IPC socket name is required")
 	}
 
-	ipc, err := ipc.NewIPCServer(commandName)
+	ipc, err := ipc.NewIPCServer(c.Sockname)
 	if err != nil {
 		log.Crit("Failed to create ipc server", "err", err)
 	}
-
-	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
 	return ipc
 }
 
@@ -300,29 +312,9 @@ func newP2P(
 	}
 
 	// setup p2p node
-	listens := strings.Split(c.P2P.Listen, ":")
-	host, dht, bwm, err := p2p.NewHost(ctx, listens[0], listens[1], p2pKey)
+	host, dht, bwm, hpHelper, err := p2p.NewHost(ctx, &c.P2P, p2pKey)
 	if err != nil {
 		log.Crit(err.Error())
-	}
-
-	// connect to bootstrap peers and setup peer discovery
-	p2p.Bootstrap(ctx, host, dht)
-	bootstrapPeers := p2p.ConvertPeers(c.P2P.Bootnodes)
-	if len(bootstrapPeers) > 0 {
-		go func() {
-			ticker := util.NewTicker(time.Minute, 1)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					p2p.ConnectPeers(ctx, host, p2p.ConvertPeers(c.P2P.Bootnodes))
-				}
-			}
-		}()
 	}
 
 	// ignore self-signed signatures
@@ -331,7 +323,8 @@ func newP2P(
 		ignoreSigners = append(ignoreSigners, verifier.Signer().Signer())
 	}
 
-	node, err := p2p.NewNode(&c.P2P, db, host, dht, bwm, c.HubLayer.ChainId, ignoreSigners)
+	node, err := p2p.NewNode(&c.P2P, db, host, dht,
+		bwm, hpHelper, c.HubLayer.ChainId, ignoreSigners)
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}
@@ -555,12 +548,26 @@ func startSccVerifier(
 		sub := verifier.SubscribeNewSignature(ctx)
 		defer sub.Cancel()
 
+		debounce := time.NewTicker(time.Second * 5)
+		defer debounce.Stop()
+
+		var sigBySigners sync.Map
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case sig := <-sub.Next():
-				p2p.PublishSignatures(ctx, []*database.OptimismSignature{sig})
+				sigBySigners.Store(sig.Signer.Address, sig)
+			case <-debounce.C:
+				var pubs []*database.OptimismSignature
+				sigBySigners.Range(func(_, value any) bool {
+					pubs = append(pubs, value.(*database.OptimismSignature))
+					return true
+				})
+				sigBySigners = sync.Map{}
+				if len(pubs) > 0 {
+					p2p.PublishSignatures(ctx, pubs)
+				}
 			}
 		}
 	}()
