@@ -19,7 +19,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/routing"
 	ps "github.com/libp2p/go-libp2p-pubsub"
 	msgio "github.com/libp2p/go-msgio"
-	"github.com/multiformats/go-multiaddr"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
@@ -674,10 +673,9 @@ func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismS
 }
 
 func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, error) {
-	// If holepunch and UDP/QUIC is enabled, attempt a direct connection.
-	if w.hpHelper.Enabled() && CheckAddressesProtocols(w.h.Network().ListenAddresses(),
-		[]int{multiaddr.P_UDP, multiaddr.P_QUIC}, []int{multiaddr.P_CIRCUIT}) {
-		if err := <-w.hpHelper.HolePunch(ctx, w.h, peer, DefaultHolePunchTimeout); err == nil {
+	// If holepunch is available, attempt a direct connection.
+	if !HasDirectConnection(w.h, peer) && w.hpHelper.Available(w.h) {
+		if err := <-w.hpHelper.HolePunch(ctx, w.h, peer, DefaultHolePunchTimeout); err != nil {
 			if !errors.Is(err, ErrPeerNotSupportHolePunch) {
 				w.meterHolePunchErrs.Incr()
 			}
@@ -686,7 +684,8 @@ func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, er
 		}
 	}
 
-	s, err := w.h.NewStream(ctx, peer, streamProtocol)
+	// Note: `WithUseTransient` is required to open a stream via circuit relay.
+	s, err := w.h.NewStream(network.WithUseTransient(ctx, streamProtocol), peer, streamProtocol)
 	if err != nil {
 		w.log.Error("Failed to open stream", "peer", peer, "err", err)
 		w.meterStreamOpenErrs.Incr()

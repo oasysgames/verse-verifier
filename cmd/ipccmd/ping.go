@@ -78,8 +78,8 @@ func (c *ping) NewHandler(ctx context.Context, h host.Host, hpHelper p2p.HolePun
 		defer cancel()
 
 		if msg.ForceHolePunch {
-			if !hpHelper.Enabled() {
-				s.Write(c.handlerID, []byte("hole punching is disabled on this node"))
+			if !hpHelper.Available(h) {
+				s.Write(c.handlerID, []byte("hole punch is not available on this node"))
 				return
 			}
 

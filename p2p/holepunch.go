@@ -35,6 +35,9 @@ type HolePunchHelper interface {
 	// Return whether hole punch service is enabled at this node.
 	Enabled() bool
 
+	// Returns whether the hole punching protocol is actually available on this node.
+	Available(host host.Host) bool
+
 	// Attempting direct connection with peer using libp2p hole punching.
 	// If the direct connection is successful, the channel will return nil.
 	// Note that even if an error is returned from the channel, there may
@@ -63,7 +66,20 @@ type holePunchHelper struct {
 }
 
 func (ht *holePunchHelper) Trace(evt *holepunch.Event) { ht.topic.Publish(evt) }
-func (ht *holePunchHelper) Enabled() bool              { return ht.enabled }
+
+func (ht *holePunchHelper) Enabled() bool { return ht.enabled }
+
+func (ht *holePunchHelper) Available(host host.Host) bool {
+	if !ht.enabled {
+		return false
+	}
+	for _, p := range host.Mux().Protocols() {
+		if p == string(holepunch.Protocol) {
+			return true
+		}
+	}
+	return false
+}
 
 func (ht *holePunchHelper) HolePunch(
 	ctx context.Context,
