@@ -219,7 +219,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			Enable     bool     "json:\"enable\""
 			RelayNodes []string "json:\"relay_nodes\" mapstructure:\"relay_nodes\""
 		}{
-			Enable:     false,
+			Enable:     true,
 			RelayNodes: []string{"relay-0", "relay-1"},
 		},
 	}, got.P2P)
