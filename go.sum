@@ -454,6 +454,10 @@ github.com/ipfs/go-log/v2 v2.5.1/go.mod h1:prSpmC1Gpllc9UYWxDiZDreBYw7zp4Iqp1kOL
 github.com/ipld/go-ipld-prime v0.9.0/go.mod h1:KvBLMr4PX1gWptgkzRjVZCrLmSGcZCb/jioOQwCqZN8=
 github.com/ipld/go-ipld-prime v0.16.0 h1:RS5hhjB/mcpeEPJvfyj0qbOj/QL+/j05heZ0qa97dVo=
 github.com/ipld/go-ipld-prime v0.16.0/go.mod h1:axSCuOCBPqrH+gvXr2w9uAOulJqBPhHPT2PjoiiU1qA=
+github.com/ironbeer/go-libp2p v0.20.3-2024020501 h1:g1yIVrbiBaJ+iGt66AlvmwsYev881xTP1Wogmoo1JIM=
+github.com/ironbeer/go-libp2p v0.20.3-2024020501/go.mod h1:I+vndVanE/p/SjFbnA+BEmmfAUEpWxrdXZeyQ1Dus5c=
+github.com/ironbeer/go-libp2p v0.20.3-2024020502 h1:R7aKF31/E49HrNm2O31rxiKVTvjNo6hGCbHmmnAUe0w=
+github.com/ironbeer/go-libp2p v0.20.3-2024020502/go.mod h1:I+vndVanE/p/SjFbnA+BEmmfAUEpWxrdXZeyQ1Dus5c=
 github.com/jackpal/go-nat-pmp v1.0.2 h1:KzKSgb7qkJvOUTqYl9/Hg/me3pWgBmERKrTGD7BdWus=
 github.com/jackpal/go-nat-pmp v1.0.2/go.mod h1:QPH045xvCAeXUZOxsnwmrtiCoxIr9eob+4orBN1SBKc=
 github.com/james-barrow/golang-ipc v1.0.0 h1:ZOZtmgQMC8WE4pm1pvTQQzeo+G+FGUt3PsJiDSPdKPA=

@@ -12,11 +12,14 @@ require (
 	github.com/libp2p/go-libp2p-kad-dht v0.16.0
 	github.com/libp2p/go-libp2p-pubsub v0.7.1
 	github.com/libp2p/go-msgio v0.2.0
+	github.com/lmittmann/w3 v0.10.0
 	github.com/multiformats/go-multiaddr v0.5.0
 	github.com/oklog/ulid/v2 v2.1.0
+	github.com/prometheus/client_golang v1.12.1
 	github.com/spf13/cobra v1.5.0
 	github.com/spf13/viper v1.12.0
 	github.com/stretchr/testify v1.8.0
+	github.com/whyrusleeping/multiaddr-filter v0.0.0-20160516205228-e903e4adabd7
 	golang.org/x/net v0.0.0-20220607020251-c690dde0001d
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/term v0.0.0-20220919170432-7a66f970e087
@@ -100,7 +103,6 @@ require (
 	github.com/libp2p/go-openssl v0.0.7 // indirect
 	github.com/libp2p/go-reuseport v0.2.0 // indirect
 	github.com/libp2p/go-yamux/v3 v3.1.2 // indirect
-	github.com/lmittmann/w3 v0.10.0 // indirect
 	github.com/lucas-clemente/quic-go v0.27.1 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/marten-seemann/qtls-go1-16 v0.1.5 // indirect
@@ -139,7 +141,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/polydawn/refmt v0.0.0-20201211092308-30ac6d18308e // indirect
-	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.32.1 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
@@ -159,7 +160,6 @@ require (
 	github.com/tklauser/go-sysconf v0.3.5 // indirect
 	github.com/tklauser/numcpus v0.2.2 // indirect
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1 // indirect
-	github.com/whyrusleeping/multiaddr-filter v0.0.0-20160516205228-e903e4adabd7 // indirect
 	github.com/whyrusleeping/timecache v0.0.0-20160911033111-cfcb2f1abfee // indirect
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
@@ -178,3 +178,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.1.7 // indirect
 )
+
+replace github.com/libp2p/go-libp2p v0.20.3 => github.com/ironbeer/go-libp2p v0.20.3-2024020502
