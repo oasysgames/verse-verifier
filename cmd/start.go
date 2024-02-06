@@ -548,12 +548,26 @@ func startSccVerifier(
 		sub := verifier.SubscribeNewSignature(ctx)
 		defer sub.Cancel()
 
+		debounce := time.NewTicker(time.Second * 5)
+		defer debounce.Stop()
+
+		var sigBySigners sync.Map
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case sig := <-sub.Next():
-				p2p.PublishSignatures(ctx, []*database.OptimismSignature{sig})
+				sigBySigners.Store(sig.Signer.Address, sig)
+			case <-debounce.C:
+				var pubs []*database.OptimismSignature
+				sigBySigners.Range(func(_, value any) bool {
+					pubs = append(pubs, value.(*database.OptimismSignature))
+					return true
+				})
+				sigBySigners = sync.Map{}
+				if len(pubs) > 0 {
+					p2p.PublishSignatures(ctx, pubs)
+				}
 			}
 		}
 	}()
