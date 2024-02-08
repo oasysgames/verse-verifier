@@ -393,7 +393,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(true, got.P2P.Transports.TCP)
 	s.Equal(true, got.P2P.Transports.QUIC)
 	s.Equal(5*time.Minute, got.P2P.PublishInterval)
-	s.Equal(15*time.Second, got.P2P.StreamTimeout)
+	s.Equal(10*time.Second, got.P2P.StreamTimeout)
 	s.Equal(true, got.P2P.NAT.UPnP)
 	s.Equal(true, got.P2P.NAT.AutoNAT)
 	s.Equal(true, got.P2P.NAT.HolePunch)

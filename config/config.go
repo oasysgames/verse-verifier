@@ -19,7 +19,7 @@ var (
 		"verse_layer.discovery.refresh_interval": time.Hour,
 
 		"p2p.publish_interval": 5 * time.Minute,
-		"p2p.stream_timeout":   15 * time.Second,
+		"p2p.stream_timeout":   10 * time.Second,
 		"p2p.no_announce": []string{
 			"/ip4/127.0.0.1/ipcidr/8",
 			"/ip4/10.0.0.0/ipcidr/8",

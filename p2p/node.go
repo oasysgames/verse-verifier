@@ -290,7 +290,7 @@ func (w *Node) handleStream(s network.Stream) {
 
 	peer := s.Conn().RemotePeer()
 	for {
-		m, err := w.readStreamWithTimeout(context.Background(), s, w.cfg.StreamTimeout)
+		m, err := w.readStream(s)
 		if t, ok := err.(*ReadWriteError); ok {
 			w.log.Error("Failed to read stream message", "peer", peer, "err", t)
 			return
@@ -435,7 +435,10 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 		// received signature exchange request
 		for _, req := range recv.Requests {
 			signer := common.BytesToAddress(req.Signer)
-			logctx := []interface{}{"signer", signer, "id-after", req.IdAfter}
+			logctx := []interface{}{
+				"peer", s.Conn().RemotePeer().String(),
+				"signer", signer, "id-after", req.IdAfter,
+			}
 			w.log.Info("Received signature request", logctx...)
 
 			limit, offset := 1000, 0
@@ -461,13 +464,14 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 						Responses: responses,
 					},
 				}}
+
 				// send response to peer
 				if err := w.writeStream(s, m); err != nil {
 					w.log.Error("Failed to send signatures", append(logctx, "err", err)...)
 					return
 				}
 
-				w.log.Info("Sent signatures", "len", len(responses))
+				w.log.Info("Sent signatures", append(logctx, "len", len(responses))...)
 			}
 		}
 	} else if len(recv.Responses) > 0 {
@@ -476,6 +480,7 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 			signer := common.BytesToAddress(res.Signer)
 			scc := common.BytesToAddress(res.Scc)
 			logctx := []interface{}{
+				"peer", s.Conn().RemotePeer().String(),
 				"signer", signer, "id", res.Id,
 				"scc", scc.Hex(), "index", res.BatchIndex,
 			}
@@ -615,11 +620,8 @@ func (w *Node) findCommonLatestSignature(
 		w.log.Info("Sent FindCommonOptimismSignature request", logctx...)
 
 		// read response
-		res, err := w.readStreamWithTimeout(context.Background(), s, time.Second*5)
-		if errors.Is(err, context.DeadlineExceeded) {
-			w.log.Warn("Timeout or peer does not support FindCommonOptimismSignature", logctx...)
-			return nil, err
-		} else if err != nil {
+		res, err := w.readStream(s)
+		if err != nil {
 			w.log.Error("Failed to read stream message", append(logctx, "err", err)...)
 			return nil, err
 		}
@@ -697,6 +699,11 @@ func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, er
 }
 
 func (w *Node) writeStream(s network.Stream, m *pb.Stream) error {
+	if w.cfg.StreamTimeout > 0 {
+		s.SetWriteDeadline(time.Now().Add(w.cfg.StreamTimeout))
+		defer s.SetWriteDeadline(time.Time{})
+	}
+
 	err := writeStream(s, m)
 	_, isRWErr := err.(*ReadWriteError)
 	_, isEOM := m.Body.(*pb.Stream_Eom)
@@ -708,29 +715,20 @@ func (w *Node) writeStream(s network.Stream, m *pb.Stream) error {
 	return err
 }
 
-func (w *Node) readStreamWithTimeout(
-	parent context.Context,
-	s network.Stream,
-	timeout time.Duration,
-) (m *pb.Stream, err error) {
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-
-	go func() {
-		defer cancel()
-		m, err = readStream(s)
-		if err == nil {
-			w.meterStreamReads.Incr()
-		} else if _, ok := err.(*ReadWriteError); ok {
-			w.meterStreamReadErrs.Incr()
-		}
-	}()
-	<-ctx.Done()
-
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, context.DeadlineExceeded
+func (w *Node) readStream(s network.Stream) (m *pb.Stream, err error) {
+	if w.cfg.StreamTimeout > 0 {
+		s.SetReadDeadline(time.Now().Add(w.cfg.StreamTimeout))
+		defer s.SetReadDeadline(time.Time{})
 	}
-	return m, err
+
+	m, err = readStream(s)
+	if err == nil {
+		w.meterStreamReads.Incr()
+		return m, nil
+	} else if _, ok := err.(*ReadWriteError); ok {
+		w.meterStreamReadErrs.Incr()
+	}
+	return nil, err
 }
 
 func (w *Node) closeStream(s network.Stream) {
@@ -743,26 +741,26 @@ func (w *Node) showBootstrapLog() {
 	for _, ma := range w.h.Network().ListenAddresses() {
 		listens = append(listens, ma.String())
 	}
-	log.Info("Listening on: " + strings.Join(listens, ","))
-	log.Info("Appended announce addresses: " + strings.Join(w.cfg.AppendAnnounce, ","))
-	log.Info("No announce addresses: " + strings.Join(w.cfg.NoAnnounce, ","))
-	log.Info("Connection filter addresses: " + strings.Join(w.cfg.ConnectionFilter, ","))
+	w.log.Info("Listening on: " + strings.Join(listens, ","))
+	w.log.Info("Appended announce addresses: " + strings.Join(w.cfg.AppendAnnounce, ","))
+	w.log.Info("No announce addresses: " + strings.Join(w.cfg.NoAnnounce, ","))
+	w.log.Info("Connection filter addresses: " + strings.Join(w.cfg.ConnectionFilter, ","))
 	if w.cfg.Transports.TCP {
-		log.Info("Enabled TCP transport")
+		w.log.Info("Enabled TCP transport")
 	}
 	if w.cfg.Transports.QUIC {
-		log.Info("Enabled QUIC transport")
+		w.log.Info("Enabled QUIC transport")
 	}
-	log.Info("Bootnodes: " + strings.Join(w.cfg.Bootnodes, ","))
-	log.Info("Enabled NAT Travasal features",
+	w.log.Info("Bootnodes: " + strings.Join(w.cfg.Bootnodes, ","))
+	w.log.Info("Enabled NAT Travasal features",
 		"upnp", w.cfg.NAT.UPnP, "autonat", w.cfg.NAT.AutoNAT, "holepunch", w.hpHelper.Enabled())
 	if w.cfg.RelayService.Enable {
-		log.Info("Enabled circuit relay service")
+		w.log.Info("Enabled circuit relay service")
 	}
 	if w.cfg.RelayClient.Enable {
-		log.Info("Enabled circuit relay client, relay nodes: " + strings.Join(w.cfg.RelayClient.RelayNodes, ","))
+		w.log.Info("Enabled circuit relay client, relay nodes: " + strings.Join(w.cfg.RelayClient.RelayNodes, ","))
 	}
-	log.Info("Worker started", "id", w.h.ID(),
+	w.log.Info("Worker started", "id", w.h.ID(),
 		"publish-interval", w.cfg.PublishInterval,
 		"stream-timeout", w.cfg.StreamTimeout,
 	)
@@ -816,6 +814,9 @@ func readStream(s io.Reader) (*pb.Stream, error) {
 
 // Send end-of-message and close libp2p stream.
 func closeStream(s network.Stream) {
+	s.SetWriteDeadline(time.Now().Add(time.Second / 2))
+	defer s.SetWriteDeadline(time.Time{})
+
 	writeStream(s, eom)
 	s.Close()
 }
