@@ -8,41 +8,41 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type OptimismDatabase struct {
 	db *gorm.DB
 }
 
-func (db *OptimismDatabase) FindOrCreateSigner(signer common.Address) (*Signer, error) {
-	row := &Signer{Address: signer}
-	tx := db.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "address"}},
-	}).Create(row)
-	if tx.Error != nil {
-		return nil, tx.Error
+func (db *OptimismDatabase) FindOrCreateSigner(signer common.Address) (row *Signer, err error) {
+	err = db.db.Transaction(func(txdb *gorm.DB) error {
+		tx := txdb.Debug().Where("address = ?", signer).First(&row)
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			row.Address = signer
+			return txdb.Create(&row).Error
+		}
+		return tx.Error
+	})
+	if err != nil {
+		return nil, err
 	}
 	return row, nil
 }
 
-func (db *OptimismDatabase) FindOrCreateSCC(scc common.Address) (*OptimismScc, error) {
-	var row OptimismScc
-	tx := db.db.Where("address = ?", scc).First(&row)
-
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		row.Address = scc
-		row.NextIndex = 0
-
-		tx = db.db.Create(&row)
-		if tx.Error != nil {
-			return nil, tx.Error
+func (db *OptimismDatabase) FindOrCreateSCC(scc common.Address) (row *OptimismScc, err error) {
+	err = db.db.Transaction(func(txdb *gorm.DB) error {
+		tx := txdb.Debug().Where("address = ?", scc).First(&row)
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			row.Address = scc
+			row.NextIndex = 0
+			return txdb.Create(&row).Error
 		}
-	} else if tx.Error != nil {
-		return nil, tx.Error
+		return tx.Error
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	return &row, nil
+	return row, nil
 }
 
 func (db *OptimismDatabase) FindSCCs() ([]*OptimismScc, error) {
@@ -59,7 +59,7 @@ func (db *OptimismDatabase) FindState(
 	scc common.Address,
 	batchIndex uint64,
 ) (*OptimismState, error) {
-	sub, err := db.sccIdSub(scc)
+	_scc, err := db.FindOrCreateSCC(scc)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (db *OptimismDatabase) FindState(
 	var row OptimismState
 	tx := db.db.
 		Joins("OptimismScc").
-		Where("optimism_states.optimism_scc_id = (?)", sub).
+		Where("optimism_states.optimism_scc_id = ?", _scc.ID).
 		Where("optimism_states.batch_index = ?", batchIndex).
 		First(&row)
 
@@ -84,7 +84,7 @@ func (db *OptimismDatabase) FindVerificationWaitingStates(
 	nextIndex uint64,
 	limit int,
 ) ([]*OptimismState, error) {
-	signerSub, err := db.signerIdSub(signer)
+	_signer, err := db.FindOrCreateSigner(signer)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (db *OptimismDatabase) FindVerificationWaitingStates(
 
 	sub := db.db.Model(&OptimismSignature{}).
 		Select("batch_index").
-		Where("optimism_scc_id = ? AND signer_id = (?)", _scc.ID, signerSub).
+		Where("optimism_scc_id = ? AND signer_id = ?", _scc.ID, _signer.ID).
 		Where("batch_index >= ?", nextIndex)
 	if sub.Error != nil {
 		return nil, sub.Error
@@ -267,7 +267,7 @@ func (db *OptimismDatabase) FindLatestSignaturesBySigner(
 	signer common.Address,
 	limit, offset int,
 ) ([]*OptimismSignature, error) {
-	sub, err := db.signerIdSub(signer)
+	_signer, err := db.FindOrCreateSigner(signer)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func (db *OptimismDatabase) FindLatestSignaturesBySigner(
 	tx := db.db.
 		Joins("Signer").
 		Joins("OptimismScc").
-		Where("optimism_signatures.signer_id = (?)", sub).
+		Where("optimism_signatures.signer_id = ?", _signer.ID).
 		Order("optimism_signatures.id DESC").
 		Limit(limit).
 		Offset(offset).
@@ -320,18 +320,18 @@ func (db *OptimismDatabase) FindSignatures(
 		tx = tx.Where("optimism_signatures.id >= ?", *idAfter)
 	}
 	if signer != nil {
-		if sub, err := db.signerIdSub(*signer); err != nil {
+		_signer, err := db.FindOrCreateSigner(*signer)
+		if err != nil {
 			return nil, err
-		} else {
-			tx = tx.Where("optimism_signatures.signer_id = (?)", sub)
 		}
+		tx = tx.Where("optimism_signatures.signer_id = ?", _signer.ID)
 	}
 	if scc != nil {
-		if sub, err := db.sccIdSub(*scc); err != nil {
+		_scc, err := db.FindOrCreateSCC(*scc)
+		if err != nil {
 			return nil, err
-		} else {
-			tx = tx.Where("optimism_signatures.optimism_scc_id = (?)", sub)
 		}
+		tx = tx.Where("optimism_signatures.optimism_scc_id = ?", _scc.ID)
 	}
 	if index != nil {
 		tx = tx.Where("optimism_signatures.batch_index = ?", *index)
@@ -408,24 +408,4 @@ func (db *OptimismDatabase) DeleteSignatures(
 	}
 
 	return affected, nil
-}
-
-func (db *OptimismDatabase) signerIdSub(signer common.Address) (*gorm.DB, error) {
-	sub := db.db.Model(&Signer{}).
-		Select("id").
-		Where("address = ?", signer)
-	if sub.Error != nil {
-		return nil, sub.Error
-	}
-	return sub, nil
-}
-
-func (db *OptimismDatabase) sccIdSub(scc common.Address) (*gorm.DB, error) {
-	sub := db.db.Model(&OptimismScc{}).
-		Select("id").
-		Where("address = ?", scc)
-	if sub.Error != nil {
-		return nil, sub.Error
-	}
-	return sub, nil
 }
