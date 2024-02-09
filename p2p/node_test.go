@@ -549,12 +549,14 @@ func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 		PublishInterval: 0,
 		StreamTimeout:   3 * time.Second,
 	}
+	cfg.Experimental.SigSendThrottling = 500
 	host, dht, bwm, hpHelper, _ := NewHost(context.Background(), cfg, priv)
 
 	worker, err := NewNode(cfg, db, host, dht, bwm, hpHelper, s.b0.ChainID().Uint64(), []common.Address{})
 	if err != nil {
 		s.Fail(err.Error())
 	}
+	worker.sigSendTh = newPeerThrottling(1000)
 
 	return worker
 }
@@ -586,12 +588,6 @@ func (s *NodeTestSuite) genStateRoot(scc []byte, batchIndex int) common.Hash {
 	b := new(big.Int).SetBytes(scc)
 	b.Add(b, big.NewInt(int64(batchIndex)))
 	return common.BigToHash(b)
-}
-
-func (s *NodeTestSuite) genSignature(signer, scc []byte, batchIndex int) database.Signature {
-	b := new(big.Int).Xor(new(big.Int).SetBytes(signer), new(big.Int).SetBytes(scc))
-	b.Add(b, big.NewInt(int64(batchIndex)))
-	return database.BytesSignature(b.Bytes())
 }
 
 func (s *NodeTestSuite) readsStream(st network.Stream) []*pb.Stream {

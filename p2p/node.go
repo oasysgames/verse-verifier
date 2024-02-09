@@ -52,9 +52,10 @@ type Node struct {
 	hubLayerChainID *big.Int
 	ignoreSigners   map[common.Address]int
 
-	topic *ps.Topic
-	sub   *ps.Subscription
-	log   log.Logger
+	sigSendTh *peerThrottling
+	topic     *ps.Topic
+	sub       *ps.Subscription
+	log       log.Logger
 
 	meterPubsubSubscribed,
 	meterPubsubUnknownMsg,
@@ -105,6 +106,7 @@ func NewNode(
 		hpHelper:        hpHelper,
 		hubLayerChainID: new(big.Int).SetUint64(hubLayerChainID),
 		ignoreSigners:   map[common.Address]int{},
+		sigSendTh:       newPeerThrottling(cfg.Experimental.SigSendThrottling),
 		topic:           topic,
 		sub:             sub,
 		log:             log.New("worker", "p2p"),
@@ -293,16 +295,17 @@ func (w *Node) handleStream(s network.Stream) {
 		m, err := w.readStream(s)
 		if t, ok := err.(*ReadWriteError); ok {
 			w.log.Error("Failed to read stream message", "peer", peer, "err", t)
-			return
+			break
 		} else if err != nil {
 			w.log.Error(err.Error(), "peer", peer)
 			continue
 		}
 
+		var disconnect bool
 		switch t := m.Body.(type) {
 		case *pb.Stream_OptimismSignatureExchange:
 			// received signature exchange request or response
-			w.handleOptimismSignatureExchangeFromStream(s, t.OptimismSignatureExchange)
+			disconnect = w.handleOptimismSignatureExchangeFromStream(s, t.OptimismSignatureExchange)
 		case *pb.Stream_FindCommonOptimismSignature:
 			// received FindCommonOptimismSignature request
 			w.handleFindCommonOptimismSignature(s, t.FindCommonOptimismSignature)
@@ -313,6 +316,10 @@ func (w *Node) handleStream(s network.Stream) {
 			w.log.Warn("Received an unknown message", "peer", peer)
 			w.meterStreamUnknownMsg.Incr()
 			return
+		}
+
+		if disconnect {
+			break
 		}
 	}
 }
@@ -430,32 +437,36 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 func (w *Node) handleOptimismSignatureExchangeFromStream(
 	s network.Stream,
 	recv *pb.OptimismSignatureExchange,
-) {
+) (disconnect bool) {
+	peerID := s.Conn().RemotePeer()
+	logctx := []interface{}{"peer", strOmission(peerID.String(), 8, 8)}
+
 	if len(recv.Requests) > 0 {
 		// received signature exchange request
+		limit := w.cfg.Experimental.SigSendThrottling
 		for _, req := range recv.Requests {
 			signer := common.BytesToAddress(req.Signer)
-			logctx := []interface{}{
-				"peer", s.Conn().RemotePeer().String(),
-				"signer", signer, "id-after", req.IdAfter,
-			}
+			logctx := append(logctx, "signer", strOmission(signer.Hex(), 6, 6), "id-after", req.IdAfter)
 			w.log.Info("Received signature request", logctx...)
 
-			limit, offset := 1000, 0
-			for {
+			for offset := 0; ; offset += limit {
 				// get latest signatures for each requested signer
 				sigs, err := w.db.Optimism.FindSignatures(
 					&req.IdAfter, &signer, nil, nil, limit, offset)
-				offset += limit
 				if err != nil {
 					w.log.Error("Failed to find requested signatures",
 						append(logctx, "err", err)...)
 					break
-				} else if len(sigs) == 0 {
-					break
 				}
 
-				responses := make([]*pb.OptimismSignature, len(sigs))
+				sigLen := len(sigs)
+				if sigLen == 0 {
+					break // reached the last
+				}
+				w.sigSendThrottling(peerID, sigLen,
+					append(logctx, "in", "handleOptimismSignatureExchange", "offset", offset)...)
+
+				responses := make([]*pb.OptimismSignature, sigLen)
 				for i, sig := range sigs {
 					responses[i] = toProtoBufSig(sig)
 				}
@@ -468,10 +479,10 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 				// send response to peer
 				if err := w.writeStream(s, m); err != nil {
 					w.log.Error("Failed to send signatures", append(logctx, "err", err)...)
-					return
+					return true
 				}
 
-				w.log.Info("Sent signatures", append(logctx, "len", len(responses))...)
+				w.log.Info("Sent signatures", append(logctx, "sents", sigLen)...)
 			}
 		}
 	} else if len(recv.Responses) > 0 {
@@ -479,11 +490,11 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 		for _, res := range recv.Responses {
 			signer := common.BytesToAddress(res.Signer)
 			scc := common.BytesToAddress(res.Scc)
-			logctx := []interface{}{
-				"peer", s.Conn().RemotePeer().String(),
-				"signer", signer, "id", res.Id,
-				"scc", scc.Hex(), "index", res.BatchIndex,
-			}
+			logctx := append(logctx,
+				"signer", strOmission(signer.Hex(), 6, 6),
+				"id", res.Id,
+				"scc", strOmission(scc.Hex(), 6, 6),
+				"index", res.BatchIndex)
 
 			if ok, err := verifySignature(w.hubLayerChainID, res); !ok || err != nil {
 				w.log.Error("Invalid signature",
@@ -530,6 +541,8 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 			w.log.Info("Received new signature", logctx...)
 		}
 	}
+
+	return false
 }
 
 func (w *Node) handleFindCommonOptimismSignature(
@@ -582,24 +595,32 @@ func (w *Node) findCommonLatestSignature(
 	s network.Stream,
 	signer common.Address,
 ) (*pb.OptimismSignature, error) {
-	limit, offset := 100, 0
-	for {
-		logctx := []interface{}{"signer", signer}
+	peerID := s.Conn().RemotePeer()
+	logctx := []interface{}{
+		"peer", strOmission(peerID.String(), 8, 8),
+		"signer", strOmission(signer.Hex(), 6, 6),
+	}
+	limit := w.cfg.Experimental.SigSendThrottling / 5
 
+	for offset := 0; ; offset += limit {
 		// find local latest signatures (order by: id desc)
 		sigs, err := w.db.Optimism.FindLatestSignaturesBySigner(signer, limit, offset)
 		if err != nil {
 			w.log.Error("Failed to find latest signatures", append(logctx, "err", err)...)
 			return nil, err
 		}
-		if len(sigs) == 0 {
-			// reached the last
-			break
+
+		sigLen := len(sigs)
+		if sigLen == 0 {
+			break // reached the last
 		}
-		logctx = append(logctx, "from", sigs[0].ID, "to", sigs[len(sigs)-1].ID)
+		w.sigSendThrottling(peerID, sigLen,
+			append(logctx, "in", "findCommonLatestSignature", "offset", offset)...)
+
+		logctx = append(logctx, "from", sigs[0].ID, "to", sigs[sigLen-1].ID)
 
 		// construct protobuf message
-		locals := make([]*pb.FindCommonOptimismSignature_Local, len(sigs))
+		locals := make([]*pb.FindCommonOptimismSignature_Local, sigLen)
 		for i, sig := range sigs {
 			locals[i] = &pb.FindCommonOptimismSignature_Local{
 				Id:         sig.ID,
@@ -635,8 +656,6 @@ func (w *Node) findCommonLatestSignature(
 			// found!
 			return t.Found, nil
 		}
-
-		offset += limit
 	}
 
 	w.log.Warn("Common signature not found", "signer", signer)
@@ -763,7 +782,18 @@ func (w *Node) showBootstrapLog() {
 	w.log.Info("Worker started", "id", w.h.ID(),
 		"publish-interval", w.cfg.PublishInterval,
 		"stream-timeout", w.cfg.StreamTimeout,
+		"sig-send-throttling", w.sigSendTh.limit,
 	)
+}
+
+func (w *Node) sigSendThrottling(peer peer.ID, num int, logCtx ...any) {
+	sleep, err := w.sigSendTh.delay(peer, num, w.cfg.StreamTimeout)
+	if err != nil {
+		w.log.Error("Failed to throttling", append(logCtx, "err", err)...)
+	} else if sleep > 0 {
+		w.log.Info("Throttling", append(logCtx, "sleep", sleep)...)
+		time.Sleep(sleep)
+	}
 }
 
 // Write protobuf message to libp2p stream.
@@ -898,4 +928,11 @@ func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {
 		Approved:          row.Approved,
 		Signature:         row.Signature[:],
 	}
+}
+
+func strOmission(s string, leading, trailing int) string {
+	if len(s) <= leading+trailing {
+		return s
+	}
+	return fmt.Sprintf("%s...%s", s[:leading], s[len(s)-trailing:])
 }

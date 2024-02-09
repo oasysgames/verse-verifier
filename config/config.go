@@ -32,12 +32,13 @@ var (
 			"/ip4/172.16.0.0/ipcidr/12",
 			"/ip4/192.168.0.0/ipcidr/16",
 		},
-		"p2p.transports.tcp":      true,
-		"p2p.transports.quic":     true,
-		"p2p.nat.upnp":            true,
-		"p2p.nat.autonat":         true,
-		"p2p.nat.holepunch":       true,
-		"p2p.relay_client.enable": true,
+		"p2p.transports.tcp":                   true,
+		"p2p.transports.quic":                  true,
+		"p2p.nat.upnp":                         true,
+		"p2p.nat.autonat":                      true,
+		"p2p.nat.holepunch":                    true,
+		"p2p.relay_client.enable":              true,
+		"p2p.experimental.sig_send_throttling": 1000,
 
 		"ipc.sockname": "oasvlfy",
 
@@ -287,6 +288,11 @@ type P2P struct {
 		Enable     bool     `json:"enable"`
 		RelayNodes []string `json:"relay_nodes" mapstructure:"relay_nodes"`
 	} `json:"relay_client" mapstructure:"relay_client"`
+
+	// Configuration for experimental features.
+	Experimental struct {
+		SigSendThrottling int `json:"sig_send_throttling" mapstructure:"sig_send_throttling"`
+	} `json:"experimental"`
 }
 
 type IPC struct {

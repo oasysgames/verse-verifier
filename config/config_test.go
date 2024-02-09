@@ -222,6 +222,11 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			Enable:     true,
 			RelayNodes: []string{"relay-0", "relay-1"},
 		},
+		Experimental: struct {
+			SigSendThrottling int "json:\"sig_send_throttling\" mapstructure:\"sig_send_throttling\""
+		}{
+			SigSendThrottling: 1000,
+		},
 	}, got.P2P)
 
 	s.Equal(IPC{Sockname: "testsock"}, got.IPC)
@@ -397,6 +402,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(true, got.P2P.NAT.UPnP)
 	s.Equal(true, got.P2P.NAT.AutoNAT)
 	s.Equal(true, got.P2P.NAT.HolePunch)
+	s.Equal(1000, got.P2P.Experimental.SigSendThrottling)
 
 	s.Equal("oasvlfy", got.IPC.Sockname)
 
