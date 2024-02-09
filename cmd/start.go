@@ -439,10 +439,10 @@ func startVerseDiscovery(
 					}
 
 					// add verse to SccVerifier
-					if c.Verifier.Enable {
+					if c.Verifier.Enable && !verifier.HasVerse(verse.RPC, scc) {
 						if client, err := ethutil.NewReadOnlyClient(verse.RPC); err != nil {
 							log.Error("Failed to create verse-layer client", "err", err)
-						} else if !verifier.HasVerse(scc, client) {
+						} else {
 							verifier.AddVerse(scc, client)
 						}
 					}

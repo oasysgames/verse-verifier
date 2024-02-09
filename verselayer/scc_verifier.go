@@ -148,12 +148,12 @@ func (w *SccVerifier) RemoveVerse(scc common.Address) {
 	w.verses.Delete(scc)
 }
 
-func (w *SccVerifier) HasVerse(scc common.Address, verse ethutil.ReadOnlyClient) bool {
+func (w *SccVerifier) HasVerse(rpc string, scc common.Address) bool {
 	if value, ok := w.verses.Load(scc); !ok {
 		return false
 	} else {
 		t, _ := value.(ethutil.ReadOnlyClient)
-		return t.URL() == verse.URL()
+		return t.URL() == rpc
 	}
 }
 
