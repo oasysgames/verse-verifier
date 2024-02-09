@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/metrics"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -21,6 +22,7 @@ import (
 	msgio "github.com/libp2p/go-msgio"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
@@ -39,7 +41,8 @@ const (
 )
 
 var (
-	eom = &pb.Stream{Body: &pb.Stream_Eom{Eom: nil}}
+	eom             = &pb.Stream{Body: &pb.Stream_Eom{Eom: nil}}
+	tenMillionEther = new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000))
 )
 
 type Node struct {
@@ -51,6 +54,7 @@ type Node struct {
 	hpHelper        HolePunchHelper
 	hubLayerChainID *big.Int
 	ignoreSigners   map[common.Address]int
+	stakemanager    *stakemanager.Cache
 
 	sigSendTh *peerThrottling
 	topic     *ps.Topic
@@ -91,6 +95,7 @@ func NewNode(
 	hpHelper HolePunchHelper,
 	hubLayerChainID uint64,
 	ignoreSigners []common.Address,
+	stakemanager *stakemanager.Cache,
 ) (*Node, error) {
 	_, topic, sub, err := setupPubSub(context.Background(), host, pubsubTopic)
 	if err != nil {
@@ -106,6 +111,7 @@ func NewNode(
 		hpHelper:        hpHelper,
 		hubLayerChainID: new(big.Int).SetUint64(hubLayerChainID),
 		ignoreSigners:   map[common.Address]int{},
+		stakemanager:    stakemanager,
 		sigSendTh:       newPeerThrottling(cfg.Experimental.SigSendThrottling),
 		topic:           topic,
 		sub:             sub,
@@ -242,9 +248,13 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 		}
 
 		for _, remote := range t.Latests {
-			wname := common.BytesToAddress(remote.Signer).Hex()
+			signer := common.BytesToAddress(remote.Signer)
+			if w.stakemanager.StakeBySigner(signer).Cmp(tenMillionEther) == -1 {
+				continue
+			}
 
 			// skip if older than the ID being processed
+			wname := signer.Hex()
 			if proc, ok := running.Load(wname); ok &&
 				strings.Compare(remote.Id, proc.(string)) < 1 {
 				w.log.Debug("Skip pubsub",
@@ -446,6 +456,10 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 		limit := w.cfg.Experimental.SigSendThrottling
 		for _, req := range recv.Requests {
 			signer := common.BytesToAddress(req.Signer)
+			if w.stakemanager.StakeBySigner(signer).Cmp(tenMillionEther) == -1 {
+				continue
+			}
+
 			logctx := append(logctx, "signer", strOmission(signer.Hex(), 6, 6), "id-after", req.IdAfter)
 			w.log.Info("Received signature request", logctx...)
 
@@ -668,10 +682,15 @@ func (w *Node) publishLatestSignatures(ctx context.Context) {
 		w.log.Error("Failed to find latest signatures", "err", err)
 		return
 	}
-	if len(latests) == 0 {
-		return
+	filterd := []*database.OptimismSignature{}
+	for _, sig := range latests {
+		if w.stakemanager.StakeBySigner(sig.Signer.Address).Cmp(tenMillionEther) >= 0 {
+			filterd = append(filterd, sig)
+		}
 	}
-	w.PublishSignatures(ctx, latests)
+	if len(filterd) > 0 {
+		w.PublishSignatures(ctx, filterd)
+	}
 }
 
 func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismSignature) {
@@ -791,7 +810,7 @@ func (w *Node) sigSendThrottling(peer peer.ID, num int, logCtx ...any) {
 	if err != nil {
 		w.log.Error("Failed to throttling", append(logCtx, "err", err)...)
 	} else if sleep > 0 {
-		w.log.Info("Throttling", append(logCtx, "sleep", sleep)...)
+		w.log.Debug("Throttling", append(logCtx, "sleep", sleep)...)
 		time.Sleep(sleep)
 	}
 }

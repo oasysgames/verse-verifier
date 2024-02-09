@@ -21,6 +21,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/multicall2"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/sccverifier"
+	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"golang.org/x/net/context"
 )
@@ -61,35 +62,27 @@ type submitTask struct {
 }
 
 type SccSubmitter struct {
-	cfg *config.Submitter
-	db  *database.Database
-	sm  stakeManager
+	cfg          *config.Submitter
+	db           *database.Database
+	stakemanager *stakemanager.Cache
 
-	hubs   *sync.Map
-	stakes *sync.Map
-	log    log.Logger
+	hubs *sync.Map
+	log  log.Logger
 }
 
-func NewSccSubmitter(cfg *config.Submitter, db *database.Database, sm stakeManager) *SccSubmitter {
+func NewSccSubmitter(cfg *config.Submitter, db *database.Database, stakemanager *stakemanager.Cache) *SccSubmitter {
 	return &SccSubmitter{
-		cfg:    cfg,
-		db:     db,
-		sm:     sm,
-		hubs:   &sync.Map{},
-		stakes: &sync.Map{},
-		log:    log.New("worker", "scc-submitter"),
+		cfg:          cfg,
+		db:           db,
+		stakemanager: stakemanager,
+		hubs:         &sync.Map{},
+		log:          log.New("worker", "scc-submitter"),
 	}
 }
 
 func (w *SccSubmitter) Start(ctx context.Context) {
 	wg := &sync.WaitGroup{}
 	queue := make(chan *submitTask)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.stakeRefreshLoop(ctx)
-	}()
 
 	wg.Add(1)
 	go func() {
@@ -109,22 +102,6 @@ func (w *SccSubmitter) Start(ctx context.Context) {
 
 	wg.Wait()
 	w.log.Info("Worker stopped")
-}
-
-func (w *SccSubmitter) stakeRefreshLoop(ctx context.Context) {
-	w.refreshStakes(ctx)
-
-	tick := time.NewTicker(time.Hour)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			w.refreshStakes(ctx)
-		}
-	}
 }
 
 func (w *SccSubmitter) workLoop(ctx context.Context, queue chan<- *submitTask) {
@@ -204,80 +181,6 @@ func (w *SccSubmitter) work(ctx context.Context, task *submitTask) {
 	}
 
 	w.waitForCconfirmation(ctx, append(logCtx, "tx", tx.Hash().String()), task, tx)
-}
-
-func (w *SccSubmitter) refreshStakes(ctx context.Context) {
-	tot, err := w.fetchTotalStake(ctx)
-	if err != nil {
-		return
-	}
-
-	signerStakes, err := w.fetchSignerStakes(ctx)
-	if err != nil {
-		return
-	}
-
-	w.stakes.Store(common.Address{}, tot)
-	for addr, stake := range signerStakes {
-		w.stakes.Store(addr, stake)
-	}
-}
-
-func (w *SccSubmitter) getTotalStake() *big.Int {
-	if tot, ok := w.stakes.Load(common.Address{}); !ok {
-		return big.NewInt(0)
-	} else {
-		return tot.(*big.Int)
-	}
-}
-
-func (w SccSubmitter) getSignerStakes() map[common.Address]*big.Int {
-	cpy := map[common.Address]*big.Int{}
-	w.stakes.Range(func(key, value any) bool {
-		addr := key.(common.Address)
-		stake := value.(*big.Int)
-		if addr != (common.Address{}) {
-			cpy[addr] = stake
-		}
-		return true
-	})
-	return cpy
-}
-
-func (w *SccSubmitter) fetchTotalStake(ctx context.Context) (*big.Int, error) {
-	tot, err := w.sm.GetTotalStake(&bind.CallOpts{Context: ctx}, common.Big0)
-	if err != nil {
-		w.log.Error("Failed to call StakeManager.totalStake method", "err", err)
-		return nil, err
-	}
-	return tot, nil
-}
-
-func (w *SccSubmitter) fetchSignerStakes(ctx context.Context) (map[common.Address]*big.Int, error) {
-	stakes := map[common.Address]*big.Int{}
-	cursor := big.NewInt(0)
-	howMany := big.NewInt(250)
-	for {
-		result, err := w.sm.GetValidators(
-			&bind.CallOpts{Context: ctx},
-			common.Big0,
-			cursor,
-			howMany,
-		)
-		if err != nil {
-			w.log.Error("Failed to call StakeManager.getValidators method", "err", err)
-			return nil, err
-		} else if len(result.Owners) == 0 {
-			break
-		}
-
-		for i, operator := range result.Operators {
-			stakes[operator] = result.Stakes[i]
-		}
-		cursor = result.NewCursor
-	}
-
-	return stakes, nil
 }
 
 func (w *SccSubmitter) findSignatures(
@@ -371,9 +274,9 @@ func (w *SccSubmitter) getMulticallCalls(
 
 	// find signatures from database
 	var (
-		totalStake  = w.getTotalStake()
-		signerStake = w.getSignerStakes()
-		opts        = task.hub.TransactOpts(ctx)
+		totalStake   = w.stakemanager.TotalStake()
+		signerStakes = w.stakemanager.SignerStakes()
+		opts         = task.hub.TransactOpts(ctx)
 	)
 	opts.NoSend = true
 	opts.Nonce = common.Big1    // prevent `eth_getNonce`
@@ -392,7 +295,7 @@ func (w *SccSubmitter) getMulticallCalls(
 			batchIndex,
 			minStake,
 			totalStake,
-			signerStake,
+			signerStakes,
 		)
 		if err != nil {
 			w.log.Error("Failed to find signatures", append(cpyLogCtx, "err", err)...)

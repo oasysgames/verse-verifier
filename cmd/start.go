@@ -97,6 +97,19 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		log.Crit("Failed to create hub-layer client", "err", err)
 	}
 
+	// create stakemanager cache
+	sm, err := stakemanager.NewStakemanagerCaller(common.HexToAddress(StakeManagerAddress), hub)
+	if err != nil {
+		log.Crit("Failed to create StakeManager", "err", err)
+	}
+	cache := stakemanager.NewCache(sm)
+	cache.Refresh(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cache.RefreshLoop(ctx, time.Hour)
+	}()
+
 	// start metrics server
 	if conf.Metrics.Enable {
 		metrics.Initialize(&conf.Metrics)
@@ -145,7 +158,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	sccVerifier := newSccVerifier(ctx, conf, ks, db)
 
 	//  start p2p
-	p2p := newP2P(ctx, conf, db, sccVerifier)
+	p2p := newP2P(ctx, conf, db, sccVerifier, cache)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -185,7 +198,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	}
 
 	// start signature submitter
-	sccSubmitter := newSccSubmitter(ctx, conf, ks, db, hub)
+	sccSubmitter := newSccSubmitter(conf, db, cache)
 	if sccSubmitter != nil {
 		wg.Add(1)
 		go func() {
@@ -304,6 +317,7 @@ func newP2P(
 	c *config.Config,
 	db *database.Database,
 	verifier *verselayer.SccVerifier,
+	cache *stakemanager.Cache,
 ) *p2p.Node {
 	// get p2p private key
 	p2pKey, err := getOrCreateP2PKey(c.P2PKeyPath())
@@ -324,7 +338,7 @@ func newP2P(
 	}
 
 	node, err := p2p.NewNode(&c.P2P, db, host, dht,
-		bwm, hpHelper, c.HubLayer.ChainId, ignoreSigners)
+		bwm, hpHelper, c.HubLayer.ChainId, ignoreSigners, cache)
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}
@@ -386,22 +400,15 @@ func newSccVerifier(
 }
 
 func newSccSubmitter(
-	ctx context.Context,
 	c *config.Config,
-	ks *wallet.KeyStore,
 	db *database.Database,
-	hub ethutil.ReadOnlyClient,
+	cache *stakemanager.Cache,
 ) *hublayer.SccSubmitter {
 	if !c.Submitter.Enable {
 		return nil
 	}
 
-	sm, err := stakemanager.NewStakemanager(common.HexToAddress(StakeManagerAddress), hub)
-	if err != nil {
-		log.Crit("Failed to create StakeManager", "err", err)
-	}
-
-	return hublayer.NewSccSubmitter(&c.Submitter, db, sm)
+	return hublayer.NewSccSubmitter(&c.Submitter, db, cache)
 }
 
 func startVerseDiscovery(
