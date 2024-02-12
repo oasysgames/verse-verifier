@@ -2,6 +2,7 @@ package database
 
 import (
 	"math/rand"
+	"time"
 
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
@@ -56,6 +57,9 @@ func (s *DatabaseTestSuite) createSignature(
 	scc *OptimismScc,
 	index int,
 ) *OptimismSignature {
+	// avoiding duplication of ULID
+	time.Sleep(time.Millisecond)
+
 	sig := &OptimismSignature{
 		ID:          util.ULID(nil).String(),
 		PreviousID:  util.ULID(nil).String(),

@@ -241,24 +241,34 @@ func (db *OptimismDatabase) SaveSignature(
 }
 
 func (db *OptimismDatabase) FindLatestSignaturePerSigners() ([]*OptimismSignature, error) {
-	var maxIds []string
-	tx := db.db.Model(&OptimismSignature{}).
-		Select("MAX(id)").
-		Group("signer_id").
-		Find(&maxIds)
+	// search foolishly because group by is slow
+	var signers []uint64
+	tx := db.db.Model(&Signer{}).
+		Select("id").
+		Find(&signers)
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
 
 	var rows []*OptimismSignature
-	tx = db.db.
-		Joins("Signer").
-		Joins("OptimismScc").
-		Where("optimism_signatures.id IN (?)", maxIds).
-		Find(&rows)
+	for _, signer := range signers {
+		sub := db.db.
+			Table("optimism_signatures").
+			Select("MAX(id)").
+			Where("signer_id = ?", signer)
 
-	if tx.Error != nil {
-		return nil, tx.Error
+		var row OptimismSignature
+		tx := db.db.
+			Joins("Signer").
+			Joins("OptimismScc").
+			Where("optimism_signatures.id = (?)", sub).
+			First(&row)
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			continue
+		} else if tx.Error != nil {
+			return nil, tx.Error
+		}
+		rows = append(rows, &row)
 	}
 	return rows, nil
 }
@@ -408,4 +418,36 @@ func (db *OptimismDatabase) DeleteSignatures(
 	}
 
 	return affected, nil
+}
+
+// for debug
+func (db *OptimismDatabase) SequentialSignaturesFinder(startPrevID string) func() ([]*OptimismSignature, error) {
+	var prevRows []*OptimismSignature
+	return func() ([]*OptimismSignature, error) {
+		var prevIDs []string
+		if prevRows == nil {
+			prevIDs = append(prevIDs, startPrevID)
+		} else {
+			prevIDs = make([]string, len(prevRows))
+			for i, row := range prevRows {
+				prevIDs[i] = row.ID
+			}
+		}
+		if len(prevIDs) == 0 {
+			return nil, nil // reached the head
+		}
+
+		var rows []*OptimismSignature
+		tx := db.db.
+			Joins("Signer").
+			Joins("OptimismScc").
+			Where("optimism_signatures.previous_id IN (?)", prevIDs).
+			Find(&rows)
+		if tx.Error != nil {
+			return nil, tx.Error
+		}
+
+		prevRows = rows
+		return rows, nil
+	}
 }

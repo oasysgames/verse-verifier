@@ -44,18 +44,6 @@ func init() {
 	}
 }
 
-type stakeManager interface {
-	GetTotalStake(callOpts *bind.CallOpts, epoch *big.Int) (*big.Int, error)
-
-	GetValidators(callOpts *bind.CallOpts, epoch, cursol, howMany *big.Int) (struct {
-		Owners     []common.Address
-		Operators  []common.Address
-		Stakes     []*big.Int
-		Candidates []bool
-		NewCursor  *big.Int
-	}, error)
-}
-
 type submitTask struct {
 	scc common.Address
 	hub ethutil.WritableClient

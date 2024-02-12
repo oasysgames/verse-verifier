@@ -28,16 +28,13 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
 	"github.com/oklog/ulid/v2"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
 	pubsubTopic    = "/oasys-optimism-verifier/pubsub/1.0.0"
 	streamProtocol = "/oasys-optimism-verifier/stream/1.0.0"
-)
-
-const (
-	warnQueueLen = 30
 )
 
 var (
@@ -56,10 +53,10 @@ type Node struct {
 	ignoreSigners   map[common.Address]int
 	stakemanager    *stakemanager.Cache
 
-	sigSendTh *peerThrottling
-	topic     *ps.Topic
-	sub       *ps.Subscription
-	log       log.Logger
+	throttling *rate.Limiter
+	topic      *ps.Topic
+	sub        *ps.Subscription
+	log        log.Logger
 
 	meterPubsubSubscribed,
 	meterPubsubUnknownMsg,
@@ -112,10 +109,11 @@ func NewNode(
 		hubLayerChainID: new(big.Int).SetUint64(hubLayerChainID),
 		ignoreSigners:   map[common.Address]int{},
 		stakemanager:    stakemanager,
-		sigSendTh:       newPeerThrottling(cfg.Experimental.SigSendThrottling),
-		topic:           topic,
-		sub:             sub,
-		log:             log.New("worker", "p2p"),
+		throttling: rate.NewLimiter(rate.Limit(
+			cfg.Experimental.SigSendThrottling), cfg.Experimental.SigSendThrottling),
+		topic: topic,
+		sub:   sub,
+		log:   log.New("worker", "p2p"),
 
 		meterPubsubSubscribed: meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "subscribed"}, ""),
 		meterPubsubUnknownMsg: meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "unknown", "messages"}, ""),
@@ -224,8 +222,10 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 		remote *pb.OptimismSignature
 	}
 
-	wg := util.NewWorkerGroup(100) // each signer address
-	running := &sync.Map{}         // stores IDs in process for each signer
+	// each signer address
+	wg := util.NewWorkerGroup(w.cfg.Experimental.Concurrency)
+	// stores IDs in process for each signer
+	running := &sync.Map{}
 
 	for {
 		from, msg, err := subscribe(ctx, w.sub, w.h.ID())
@@ -289,7 +289,7 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 			w.log.Debug("Enqueue pubsub",
 				"peer", from, "signer", wname,
 				"remote-id", remote.Id, "queue-len", qlen)
-			if qlen >= warnQueueLen {
+			if qlen >= w.cfg.Experimental.Concurrency*30 {
 				w.log.Warn("Long queue", "signer", wname, "queue-len", qlen)
 			}
 		}
@@ -343,13 +343,13 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	logctx := []interface{}{
 		"peer", sender,
 		"signer", signer,
-		"remote-id", remote.Id,
-		"remote-previous-id", remote.PreviousId,
-		"index", remote.BatchIndex,
+		"remote-latest-id", remote.Id,
+		"remote-latest-previous-id", remote.PreviousId,
+		"remote-latest-index", remote.BatchIndex,
 	}
 
-	if ok, err := verifySignature(w.hubLayerChainID, remote); !ok || err != nil {
-		w.log.Error("Invalid signature", append(logctx, "verify", ok, "err", err)...)
+	if err := verifySignature(w.hubLayerChainID, remote); err != nil {
+		w.log.Error("Invalid signature", append(logctx, "err", err)...)
 		return
 	}
 	if _, ok := w.ignoreSigners[signer]; ok {
@@ -449,21 +449,21 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 	recv *pb.OptimismSignatureExchange,
 ) (disconnect bool) {
 	peerID := s.Conn().RemotePeer()
-	logctx := []interface{}{"peer", strOmission(peerID.String(), 8, 8)}
+	logctx := []interface{}{"peer", peerID}
 
 	if len(recv.Requests) > 0 {
 		// received signature exchange request
-		limit := w.cfg.Experimental.SigSendThrottling
+		limit := w.cfg.Experimental.SigSendThrottling / w.cfg.Experimental.Concurrency
 		for _, req := range recv.Requests {
 			signer := common.BytesToAddress(req.Signer)
 			if w.stakemanager.StakeBySigner(signer).Cmp(tenMillionEther) == -1 {
 				continue
 			}
 
-			logctx := append(logctx, "signer", strOmission(signer.Hex(), 6, 6), "id-after", req.IdAfter)
+			logctx := append(logctx, "signer", signer, "id-after", req.IdAfter)
 			w.log.Info("Received signature request", logctx...)
 
-			for offset := 0; ; offset += limit {
+			for offset := 0; offset < limit*10; offset += limit {
 				// get latest signatures for each requested signer
 				sigs, err := w.db.Optimism.FindSignatures(
 					&req.IdAfter, &signer, nil, nil, limit, offset)
@@ -477,8 +477,7 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 				if sigLen == 0 {
 					break // reached the last
 				}
-				w.sigSendThrottling(peerID, sigLen,
-					append(logctx, "in", "handleOptimismSignatureExchange", "offset", offset)...)
+				w.sigSendThrottling(sigLen, "in", "handleOptimismSignatureExchange", "peerID", peerID)
 
 				responses := make([]*pb.OptimismSignature, sigLen)
 				for i, sig := range sigs {
@@ -505,14 +504,13 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 			signer := common.BytesToAddress(res.Signer)
 			scc := common.BytesToAddress(res.Scc)
 			logctx := append(logctx,
-				"signer", strOmission(signer.Hex(), 6, 6),
-				"id", res.Id,
-				"scc", strOmission(scc.Hex(), 6, 6),
+				"signer", signer,
+				"id", res.Id, "previous-id", res.PreviousId,
+				"scc", scc,
 				"index", res.BatchIndex)
 
-			if ok, err := verifySignature(w.hubLayerChainID, res); !ok || err != nil {
-				w.log.Error("Invalid signature",
-					append(logctx, "verify", ok, "err", err)...)
+			if err := verifySignature(w.hubLayerChainID, res); err != nil {
+				w.log.Error("Invalid signature", append(logctx, "err", err)...)
 				return
 			}
 			if _, ok := w.ignoreSigners[signer]; ok {
@@ -525,11 +523,18 @@ func (w *Node) handleOptimismSignatureExchangeFromStream(
 				continue
 			}
 
+			// local is newer
+			if local, err := w.db.Optimism.FindSignatures(nil, &signer, &scc, &res.BatchIndex, 1, 0); err != nil {
+				w.log.Error("Failed to find local signature", append(logctx, "err", err)...)
+				return
+			} else if len(local) > 0 && strings.Compare(local[0].ID, res.Id) == 1 {
+				continue
+			}
+
 			if res.PreviousId != "" {
 				_, err := w.db.Optimism.FindSignatureByID(res.PreviousId)
 				if errors.Is(err, database.ErrNotFound) {
 					w.log.Warn("Previous ID does not exist", logctx...)
-					return
 				} else if err != nil {
 					w.log.Error("Failed to find previous signature", append(logctx, "err", err)...)
 					return
@@ -610,11 +615,8 @@ func (w *Node) findCommonLatestSignature(
 	signer common.Address,
 ) (*pb.OptimismSignature, error) {
 	peerID := s.Conn().RemotePeer()
-	logctx := []interface{}{
-		"peer", strOmission(peerID.String(), 8, 8),
-		"signer", strOmission(signer.Hex(), 6, 6),
-	}
-	limit := w.cfg.Experimental.SigSendThrottling / 5
+	logctx := []interface{}{"peer", peerID, "signer", signer}
+	limit := w.cfg.Experimental.SigSendThrottling / w.cfg.Experimental.Concurrency
 
 	for offset := 0; ; offset += limit {
 		// find local latest signatures (order by: id desc)
@@ -628,8 +630,7 @@ func (w *Node) findCommonLatestSignature(
 		if sigLen == 0 {
 			break // reached the last
 		}
-		w.sigSendThrottling(peerID, sigLen,
-			append(logctx, "in", "findCommonLatestSignature", "offset", offset)...)
+		w.sigSendThrottling(sigLen, "in", "findCommonLatestSignature", "peerID", peerID)
 
 		logctx = append(logctx, "from", sigs[0].ID, "to", sigs[sigLen-1].ID)
 
@@ -801,16 +802,20 @@ func (w *Node) showBootstrapLog() {
 	w.log.Info("Worker started", "id", w.h.ID(),
 		"publish-interval", w.cfg.PublishInterval,
 		"stream-timeout", w.cfg.StreamTimeout,
-		"sig-send-throttling", w.sigSendTh.limit,
+		"sig-send-throttling", w.cfg.Experimental.SigSendThrottling,
 	)
 }
 
-func (w *Node) sigSendThrottling(peer peer.ID, num int, logCtx ...any) {
-	sleep, err := w.sigSendTh.delay(peer, num, w.cfg.StreamTimeout)
-	if err != nil {
-		w.log.Error("Failed to throttling", append(logCtx, "err", err)...)
-	} else if sleep > 0 {
-		w.log.Debug("Throttling", append(logCtx, "sleep", sleep)...)
+func (w *Node) sigSendThrottling(num int, logCtx ...any) {
+	rsv := w.throttling.ReserveN(time.Now(), num)
+	if !rsv.OK() {
+		w.log.Error("num is greater than burst", logCtx...)
+		return
+	}
+
+	sleep := rsv.Delay()
+	if sleep > 0 {
+		w.log.Warn("Throttling", append(logCtx, "sleep", sleep)...)
 		time.Sleep(sleep)
 	}
 }
@@ -916,21 +921,30 @@ func subscribe(
 	return recv.GetFrom(), &m, nil
 }
 
-func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) (bool, error) {
+func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error {
 	// verify ulid
 	if id, err := ulid.ParseStrict(sig.Id); err != nil {
-		return false, err
+		return err
 	} else if id.Time() > uint64(time.Now().UnixMilli()) {
-		return false, fmt.Errorf("future ulid: %s, timestamp: %d", sig.Id, id.Time())
+		return fmt.Errorf("future ulid: %s, timestamp: %d", sig.Id, id.Time())
 	}
 
-	msg := verselayer.NewSccMessage(
-		hubLayerChainID,
-		common.BytesToAddress(sig.Scc),
-		new(big.Int).SetUint64(sig.BatchIndex),
-		common.BytesToHash(sig.BatchRoot),
-		sig.Approved)
-	return msg.VerifySigner(sig.Signature, common.BytesToAddress(sig.Signer))
+	signer := common.BytesToAddress(sig.Signer)
+	scc := common.BytesToAddress(sig.Scc)
+	batchIndex := new(big.Int).SetUint64(sig.BatchIndex)
+	batchRoot := common.BytesToHash(sig.BatchRoot)
+
+	msg := verselayer.NewSccMessage(hubLayerChainID, scc, batchIndex, batchRoot, sig.Approved)
+	err := msg.VerifySigner(sig.Signature, signer)
+
+	// possibly an old signature with an approved bug
+	if _, ok := err.(*verselayer.SignerMismatchError); ok {
+		msg = verselayer.NewSCCMessageWithApprovedBug(
+			hubLayerChainID, scc, batchIndex, batchRoot, sig.Approved)
+		err = msg.VerifySigner(sig.Signature, signer)
+	}
+
+	return err
 }
 
 func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {
@@ -947,11 +961,4 @@ func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {
 		Approved:          row.Approved,
 		Signature:         row.Signature[:],
 	}
-}
-
-func strOmission(s string, leading, trailing int) string {
-	if len(s) <= leading+trailing {
-		return s
-	}
-	return fmt.Sprintf("%s...%s", s[:leading], s[len(s)-trailing:])
 }

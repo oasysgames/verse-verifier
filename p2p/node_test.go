@@ -16,6 +16,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
@@ -31,17 +32,18 @@ func TestNode(t *testing.T) {
 type NodeTestSuite struct {
 	testhelper.Suite
 
-	baseTime time.Time
-	b0       *testhelper.TestBackend
-	b1       *testhelper.TestBackend
-	b2       *testhelper.TestBackend
-	signer0  common.Address
-	signer1  common.Address
-	signer2  common.Address
-	scc0     common.Address
-	scc1     common.Address
-	scc2     common.Address
-	sigs     map[common.Address]map[common.Address][]*database.OptimismSignature
+	baseTime     time.Time
+	b0           *testhelper.TestBackend
+	b1           *testhelper.TestBackend
+	b2           *testhelper.TestBackend
+	stakemanager *stakemanager.Cache
+	signer0      common.Address
+	signer1      common.Address
+	signer2      common.Address
+	scc0         common.Address
+	scc1         common.Address
+	scc2         common.Address
+	sigs         map[common.Address]map[common.Address][]*database.OptimismSignature
 
 	bootnode *Node
 	node1    *Node
@@ -61,6 +63,22 @@ func (s *NodeTestSuite) SetupTest() {
 	s.scc2 = s.RandAddress()
 	s.sigs = map[common.Address]map[common.Address][]*database.OptimismSignature{}
 
+	backends := []*testhelper.TestBackend{s.b0, s.b1, s.b2}
+	signers := []common.Address{s.signer0, s.signer1}
+	sccs := []common.Address{s.scc0, s.scc1}
+
+	// setup stakemanager mock
+	sm := &testhelper.StakeManagerMock{}
+	s.stakemanager = stakemanager.NewCache(sm)
+	for _, signer := range signers {
+		sm.Owners = append(sm.Owners, s.RandAddress())
+		sm.Operators = append(sm.Operators, signer)
+		sm.Stakes = append(sm.Stakes, tenMillionEther)
+		sm.Candidates = append(sm.Candidates, true)
+		sm.NewCursor = big.NewInt(0)
+	}
+	s.stakemanager.Refresh(context.Background())
+
 	// setup libp2p
 	s.bootnode = s.newWorker([]string{})
 	bootnodes := []string{s.bootnode.cfg.Listens[0] + "/p2p/" + s.bootnode.h.ID().String()}
@@ -77,11 +95,16 @@ func (s *NodeTestSuite) SetupTest() {
 		node.db.Optimism.FindOrCreateSCC(s.scc2)
 	}
 
-	backends := []*testhelper.TestBackend{s.b0, s.b1, s.b2}
-	signers := []common.Address{s.signer0, s.signer1}
-	sccs := []common.Address{s.scc0, s.scc1}
-	sizes := [][]int{{50, 100}, {150, 200}}
-
+	sizes := [][]int{
+		{
+			50,  // signer0, scc0
+			100, // signer0, scc1
+		},
+		{
+			150, // signer1, scc0
+			200, // signer1, scc1
+		},
+	}
 	for i, signer := range signers {
 		backend := backends[i]
 		s.sigs[signer] = map[common.Address][]*database.OptimismSignature{}
@@ -278,7 +301,10 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
 	}{
 		{
 			{s.signer0, s.scc0, s.Range(0, 50)},
-			{s.signer0, s.scc1, s.Range(0, 100)},
+			{s.signer0, s.scc1, s.Range(0, 50)},
+		},
+		{
+			{s.signer0, s.scc1, s.Range(50, 100)},
 		},
 		{
 			{s.signer1, s.scc1, s.Range(100, 200)},
@@ -549,14 +575,15 @@ func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 		PublishInterval: 0,
 		StreamTimeout:   3 * time.Second,
 	}
-	cfg.Experimental.SigSendThrottling = 500
+	cfg.Experimental.Concurrency = 10
+	cfg.Experimental.SigSendThrottling = 1000
 	host, dht, bwm, hpHelper, _ := NewHost(context.Background(), cfg, priv)
 
-	worker, err := NewNode(cfg, db, host, dht, bwm, hpHelper, s.b0.ChainID().Uint64(), []common.Address{})
+	worker, err := NewNode(cfg, db, host, dht, bwm, hpHelper,
+		s.b0.ChainID().Uint64(), []common.Address{}, s.stakemanager)
 	if err != nil {
 		s.Fail(err.Error())
 	}
-	worker.sigSendTh = newPeerThrottling(1000)
 
 	return worker
 }

@@ -38,6 +38,7 @@ var (
 		"p2p.nat.autonat":                      true,
 		"p2p.nat.holepunch":                    true,
 		"p2p.relay_client.enable":              true,
+		"p2p.experimental.concurrency":         10,
 		"p2p.experimental.sig_send_throttling": 1000,
 
 		"ipc.sockname": "oasvlfy",
@@ -291,6 +292,10 @@ type P2P struct {
 
 	// Configuration for experimental features.
 	Experimental struct {
+		// Number of concurrent executions.
+		Concurrency int `json:"concurrency"`
+
+		// Number of signatures that can be sent per second.
 		SigSendThrottling int `json:"sig_send_throttling" mapstructure:"sig_send_throttling"`
 	} `json:"experimental"`
 }
