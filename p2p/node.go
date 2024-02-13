@@ -218,80 +218,83 @@ func (w *Node) publishLoop(ctx context.Context) {
 
 func (w *Node) subscribeLoop(ctx context.Context) {
 	type job struct {
-		from   peer.ID
+		ctx    context.Context
+		cancel context.CancelFunc
+		peer   peer.ID
 		remote *pb.OptimismSignature
+		logctx []any
 	}
 
-	// each signer address
-	wg := util.NewWorkerGroup(w.cfg.Experimental.Concurrency)
-	// stores IDs in process for each signer
-	running := &sync.Map{}
+	// Storing workers and jobs.
+	// The maximum number of elements is equal to the number of signers.
+	workers := util.NewWorkerGroup(w.cfg.Experimental.Concurrency)
+	procs := &sync.Map{}
 
 	for {
-		from, msg, err := subscribe(ctx, w.sub, w.h.ID())
+		peer, msg, err := subscribe(ctx, w.sub, w.h.ID())
 		if errors.Is(err, context.Canceled) {
 			// worker stopped
 			return
 		} else if errors.Is(err, errSelfMessage) {
 			continue
 		} else if err != nil {
-			w.log.Error("Failed to subscribe", "peer", from, "err", err)
+			w.log.Error("Failed to subscribe", "peer", peer, "err", err)
 			continue
 		}
 		w.meterPubsubSubscribed.Incr()
 
 		t := msg.GetOptimismSignatureExchange()
 		if t == nil {
-			w.log.Warn("Unsupported pubsub message", "peer", from, "err", err)
+			w.log.Warn("Unsupported pubsub message", "peer", peer, "err", err)
 			w.meterPubsubUnknownMsg.Incr()
 			continue
 		}
 
 		for _, remote := range t.Latests {
 			signer := common.BytesToAddress(remote.Signer)
-			if w.stakemanager.StakeBySigner(signer).Cmp(tenMillionEther) == -1 {
+			if _, ok := w.ignoreSigners[signer]; ok {
+				continue
+			} else if w.stakemanager.StakeBySigner(signer).Cmp(tenMillionEther) == -1 {
 				continue
 			}
-
-			// skip if older than the ID being processed
-			wname := signer.Hex()
-			if proc, ok := running.Load(wname); ok &&
-				strings.Compare(remote.Id, proc.(string)) < 1 {
-				w.log.Debug("Skip pubsub",
-					"peer", from, "signer", wname,
-					"processed-id", proc, "remote-id", remote.Id)
-				continue
-			}
-			running.Store(wname, remote.Id)
 
 			// add new worker
-			if !wg.Has(wname) {
-				handler := func(ctx context.Context, rname string, data interface{}) {
-					defer running.Delete(rname)
-					defer w.meterPubsubJobs.Decr()
+			wname := signer.Hex()
+			if !workers.Has(wname) {
+				workers.AddWorker(ctx, wname, func(_ context.Context, rname string, data interface{}) {
+					job := data.(*job)
+					defer job.cancel()
 
-					if t, ok := data.(job); ok {
-						st := time.Now()
-						w.handleOptimismSignatureExchangeFromPubSub(ctx, t.from, t.remote)
-						w.log.Debug("Worked pubsub",
-							"peer", from, "signer", rname,
-							"elapsed", time.Since(st), "remote-id", t.remote.Id)
-					}
-				}
-				wg.AddWorker(ctx, wname, handler)
+					procs.Store(rname, job)
+					defer procs.Delete(rname)
+
+					w.handleOptimismSignatureExchangeFromPubSub(job.ctx, job.peer, job.remote)
+					w.meterPubsubJobs.Decr()
+				})
 				w.meterPubsubWorkers.Incr()
 			}
 
-			wg.Enqueue(wname, job{from: from, remote: remote})
-			w.meterPubsubJobs.Incr()
+			if data, ok := procs.Load(wname); ok {
+				proc := data.(*job)
+				if strings.Compare(remote.Id, proc.remote.Id) < 1 {
+					w.log.Debug("Skipped old signature",
+						append(proc.logctx, "skipped-peer", peer, "skipped-id", remote.Id)...)
+					continue
+				}
 
-			qlen := len(wg.Queue(wname))
-			w.log.Debug("Enqueue pubsub",
-				"peer", from, "signer", wname,
-				"remote-id", remote.Id, "queue-len", qlen)
-			if qlen >= w.cfg.Experimental.Concurrency*30 {
-				w.log.Warn("Long queue", "signer", wname, "queue-len", qlen)
+				w.log.Info("Worker canceled because newer signature were received",
+					append(proc.logctx, "newer-peer", peer, "newer-id", remote.Id)...)
+				proc.cancel()
 			}
+
+			ctx, cancel := context.WithCancel(ctx)
+			job := &job{
+				ctx: ctx, cancel: cancel,
+				peer: peer, remote: remote,
+				logctx: []any{"peer", peer, "signer", wname, "remote-id", remote.Id},
+			}
+			workers.Enqueue(wname, job)
+			w.meterPubsubJobs.Incr()
 		}
 	}
 }
@@ -352,10 +355,6 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		w.log.Error("Invalid signature", append(logctx, "err", err)...)
 		return
 	}
-	if _, ok := w.ignoreSigners[signer]; ok {
-		w.log.Info("Ignored", logctx...)
-		return
-	}
 
 	local, err := w.db.Optimism.FindLatestSignaturesBySigner(signer, 1, 0)
 	if err != nil {
@@ -365,11 +364,6 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 
 	// open stream to peer
 	var s network.Stream
-	defer func() {
-		if s != nil {
-			w.closeStream(s)
-		}
-	}()
 	openStream := func() error {
 		if ss, err := w.openStream(ctx, sender); err != nil {
 			return err
@@ -378,6 +372,12 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 			return nil
 		}
 	}
+	go func() {
+		<-ctx.Done()
+		if s != nil {
+			w.closeStream(s)
+		}
+	}()
 
 	var idAfter string
 	if len(local) == 0 {

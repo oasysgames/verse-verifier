@@ -38,8 +38,8 @@ var (
 		"p2p.nat.autonat":                      true,
 		"p2p.nat.holepunch":                    true,
 		"p2p.relay_client.enable":              true,
-		"p2p.experimental.concurrency":         10,
-		"p2p.experimental.sig_send_throttling": 1000,
+		"p2p.experimental.concurrency":         40,
+		"p2p.experimental.sig_send_throttling": 2000,
 
 		"ipc.sockname": "oasvlfy",
 

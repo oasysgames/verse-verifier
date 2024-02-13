@@ -226,8 +226,8 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			Concurrency       int "json:\"concurrency\""
 			SigSendThrottling int "json:\"sig_send_throttling\" mapstructure:\"sig_send_throttling\""
 		}{
-			Concurrency:       10,
-			SigSendThrottling: 1000,
+			Concurrency:       40,
+			SigSendThrottling: 2000,
 		},
 	}, got.P2P)
 
@@ -404,8 +404,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(true, got.P2P.NAT.UPnP)
 	s.Equal(true, got.P2P.NAT.AutoNAT)
 	s.Equal(true, got.P2P.NAT.HolePunch)
-	s.Equal(10, got.P2P.Experimental.Concurrency)
-	s.Equal(1000, got.P2P.Experimental.SigSendThrottling)
+	s.Equal(40, got.P2P.Experimental.Concurrency)
+	s.Equal(2000, got.P2P.Experimental.SigSendThrottling)
 
 	s.Equal("oasvlfy", got.IPC.Sockname)
 
