@@ -16,7 +16,7 @@ type OptimismDatabase struct {
 
 func (db *OptimismDatabase) FindOrCreateSigner(signer common.Address) (row *Signer, err error) {
 	err = db.db.Transaction(func(txdb *gorm.DB) error {
-		tx := txdb.Debug().Where("address = ?", signer).First(&row)
+		tx := txdb.Where("address = ?", signer).First(&row)
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 			row.Address = signer
 			return txdb.Create(&row).Error
@@ -31,7 +31,7 @@ func (db *OptimismDatabase) FindOrCreateSigner(signer common.Address) (row *Sign
 
 func (db *OptimismDatabase) FindOrCreateSCC(scc common.Address) (row *OptimismScc, err error) {
 	err = db.db.Transaction(func(txdb *gorm.DB) error {
-		tx := txdb.Debug().Where("address = ?", scc).First(&row)
+		tx := txdb.Where("address = ?", scc).First(&row)
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
 			row.Address = scc
 			row.NextIndex = 0

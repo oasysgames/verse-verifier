@@ -9,7 +9,7 @@ type Block struct {
 
 	Number       uint64 `gorm:"uniqueIndex"`
 	Hash         common.Hash
-	LogCollected bool
+	LogCollected bool // Deprecated
 }
 
 type Signer struct {
@@ -57,4 +57,9 @@ type OptimismSignature struct {
 
 	Approved  bool
 	Signature Signature
+}
+
+type Misc struct {
+	ID    string `gorm:"primarykey"`
+	Value []byte
 }
