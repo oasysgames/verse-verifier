@@ -154,7 +154,10 @@ func (w *SccSubmitter) HasVerse(scc common.Address) bool {
 func (w *SccSubmitter) work(ctx context.Context, task *submitTask) {
 	logCtx := []interface{}{"scc", task.scc.Hex()}
 	calls, fromIndex, err := w.getMulticallCalls(ctx, logCtx, task)
-	if err != nil || len(calls) == 0 {
+	if err != nil {
+		return
+	} else if len(calls) == 0 {
+		w.log.Info("No calldata", logCtx...)
 		return
 	}
 	logCtx = append(logCtx, "from-index", fromIndex, "to-index", fromIndex+uint64(len(calls)-1))
@@ -237,7 +240,7 @@ func (w *SccSubmitter) getMulticallCalls(
 	// construct the OasysStateCommitmentChain contract
 	sccc, err := scc.NewScc(task.scc, task.hub)
 	if err != nil {
-		log.Error(
+		w.log.Error(
 			"Failed to construct OasysStateCommitmentChain contract",
 			append(logCtx, "err", err)...)
 		return nil, 0, err
@@ -247,7 +250,7 @@ func (w *SccSubmitter) getMulticallCalls(
 	sccvaddr := common.HexToAddress(w.cfg.VerifierAddress)
 	sccv, err := sccverifier.NewSccverifier(sccvaddr, task.hub)
 	if err != nil {
-		log.Error("Failed to construct OasysStateCommitmentChainVerifier contract",
+		w.log.Error("Failed to construct OasysStateCommitmentChainVerifier contract",
 			append(logCtx, "err", err)...)
 		return nil, 0, err
 	}
