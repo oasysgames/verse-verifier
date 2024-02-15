@@ -553,3 +553,54 @@ func (s *OptimismDatabaseTestSuite) TestDeleteSignatures() {
 	assert(signer0, scc0, s.Range(0, 3))
 	assert(signer1, scc1, s.Range(0, 6))
 }
+
+func (s *OptimismDatabaseTestSuite) TestSequentialSignaturesFinder() {
+	signer := s.createSigner()
+	scc := s.createSCC()
+
+	var sigtree [5][]*OptimismSignature
+	for _, depth := range s.Range(0, len(sigtree)) {
+		sigtree[depth] = []*OptimismSignature{}
+
+		var prevID string
+		for i := 0; i <= depth; i++ {
+			if depth > 0 && i < len(sigtree[depth-1]) {
+				prevID = sigtree[depth-1][i].ID
+			}
+
+			sig := s.createSignature(signer, scc, (depth*10)+i)
+			sig.PreviousID = prevID
+			s.NoDBError(s.db.db.Save(sig))
+
+			sigtree[depth] = append(sigtree[depth], sig)
+
+			// one signature at last depth
+			if depth == len(sigtree)-1 {
+				break
+			}
+		}
+	}
+
+	assert := func(gots, wants []*OptimismSignature) {
+		s.Len(gots, len(wants))
+		for i, want := range wants {
+			s.Equal(want.ID, gots[i].ID, i)
+			s.Equal(want.PreviousID, gots[i].PreviousID, i)
+		}
+	}
+
+	finder := s.db.SequentialSignaturesFinder("")
+	gots0, _ := finder()
+	gots1, _ := finder()
+	gots2, _ := finder()
+	gots3, _ := finder()
+	gots4, _ := finder()
+	gots5, _ := finder()
+
+	assert(gots0, sigtree[0])
+	assert(gots1, sigtree[1])
+	assert(gots2, sigtree[2])
+	assert(gots3, sigtree[3])
+	assert(gots4, sigtree[4])
+	assert(gots5, []*OptimismSignature{})
+}

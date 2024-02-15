@@ -18,6 +18,7 @@ var (
 		&OptimismScc{},
 		&OptimismState{},
 		&OptimismSignature{},
+		&Misc{},
 	}
 )
 

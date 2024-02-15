@@ -52,8 +52,6 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			- noann0
 		connection_filter:
 			- connfil0
-		publish_interval: 5s
-		stream_timeout: 5s
 		bootnodes:
 			- /ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899
 		relay_service:
@@ -69,7 +67,6 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			max_reservations_per_asn: 9
 		relay_client:
 			relay_nodes: ["relay-0", "relay-1"]
-		enable_hole_punching: true
 
 	ipc:
 		sockname: testsock
@@ -177,9 +174,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			TCP:  true,
 			QUIC: true,
 		},
-		Listen:          "",
-		PublishInterval: 5 * time.Second,
-		StreamTimeout:   5 * time.Second,
+		Listen: "",
 		Bootnodes: []string{
 			"/ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899",
 		},
@@ -221,6 +216,24 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		}{
 			Enable:     true,
 			RelayNodes: []string{"relay-0", "relay-1"},
+		},
+		PublishInterval: 5 * time.Minute,
+		StreamTimeout:   10 * time.Second,
+		OutboundLimits: struct {
+			Concurrency int "json:\"concurrency\""
+			Throttling  int "json:\"throttling\""
+		}{
+			Concurrency: 10,
+			Throttling:  500,
+		},
+		InboundLimits: struct {
+			Concurrency int           "json:\"concurrency\""
+			Throttling  int           "json:\"throttling\""
+			MaxSendTime time.Duration "json:\"max_send_time\" mapstructure:\"max_send_time\""
+		}{
+			Concurrency: 10,
+			Throttling:  500,
+			MaxSendTime: 30 * time.Second,
 		},
 	}, got.P2P)
 
@@ -392,11 +405,16 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	}, got.P2P.ConnectionFilter)
 	s.Equal(true, got.P2P.Transports.TCP)
 	s.Equal(true, got.P2P.Transports.QUIC)
-	s.Equal(5*time.Minute, got.P2P.PublishInterval)
-	s.Equal(15*time.Second, got.P2P.StreamTimeout)
 	s.Equal(true, got.P2P.NAT.UPnP)
 	s.Equal(true, got.P2P.NAT.AutoNAT)
 	s.Equal(true, got.P2P.NAT.HolePunch)
+	s.Equal(5*time.Minute, got.P2P.PublishInterval)
+	s.Equal(10*time.Second, got.P2P.StreamTimeout)
+	s.Equal(10, got.P2P.OutboundLimits.Concurrency)
+	s.Equal(500, got.P2P.OutboundLimits.Throttling)
+	s.Equal(10, got.P2P.InboundLimits.Concurrency)
+	s.Equal(500, got.P2P.InboundLimits.Throttling)
+	s.Equal(30*time.Second, got.P2P.InboundLimits.MaxSendTime)
 
 	s.Equal("oasvlfy", got.IPC.Sockname)
 

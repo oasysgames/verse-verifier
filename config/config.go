@@ -18,8 +18,6 @@ var (
 	defaults = map[string]interface{}{
 		"verse_layer.discovery.refresh_interval": time.Hour,
 
-		"p2p.publish_interval": 5 * time.Minute,
-		"p2p.stream_timeout":   15 * time.Second,
 		"p2p.no_announce": []string{
 			"/ip4/127.0.0.1/ipcidr/8",
 			"/ip4/10.0.0.0/ipcidr/8",
@@ -32,12 +30,19 @@ var (
 			"/ip4/172.16.0.0/ipcidr/12",
 			"/ip4/192.168.0.0/ipcidr/16",
 		},
-		"p2p.transports.tcp":      true,
-		"p2p.transports.quic":     true,
-		"p2p.nat.upnp":            true,
-		"p2p.nat.autonat":         true,
-		"p2p.nat.holepunch":       true,
-		"p2p.relay_client.enable": true,
+		"p2p.transports.tcp":               true,
+		"p2p.transports.quic":              true,
+		"p2p.nat.upnp":                     true,
+		"p2p.nat.autonat":                  true,
+		"p2p.nat.holepunch":                true,
+		"p2p.relay_client.enable":          true,
+		"p2p.publish_interval":             5 * time.Minute,
+		"p2p.stream_timeout":               10 * time.Second,
+		"p2p.outbound_limits.concurrency":  10,
+		"p2p.outbound_limits.throttling":   500,
+		"p2p.inbound_limits.concurrency":   10,
+		"p2p.inbound_limits.throttling":    500,
+		"p2p.inbound_limits.max_send_time": 30 * time.Second,
 
 		"ipc.sockname": "oasvlfy",
 
@@ -238,12 +243,6 @@ type P2P struct {
 	// Deprecated: Address and port to listen.
 	Listen string `json:"listen" validate:"omitempty,hostname_port"`
 
-	// Interval to publish own signature status.
-	PublishInterval time.Duration `json:"publish_interval" mapstructure:"publish_interval"`
-
-	// Timeout for P2P stream communication.
-	StreamTimeout time.Duration `json:"stream_timeout" mapstructure:"stream_timeout"`
-
 	// Initial node list.
 	Bootnodes []string `json:"bootnodes"`
 
@@ -287,6 +286,31 @@ type P2P struct {
 		Enable     bool     `json:"enable"`
 		RelayNodes []string `json:"relay_nodes" mapstructure:"relay_nodes"`
 	} `json:"relay_client" mapstructure:"relay_client"`
+
+	// Interval to publish own signature status.
+	PublishInterval time.Duration `json:"publish_interval" mapstructure:"publish_interval"`
+
+	// Timeout for P2P stream communication.
+	StreamTimeout time.Duration `json:"stream_timeout" mapstructure:"stream_timeout"`
+
+	OutboundLimits struct {
+		// Maximum number of concurrent signature requests from oneself to peers.
+		Concurrency int `json:"concurrency"`
+
+		// The number of signatures that can be sent to peers per second.
+		Throttling int `json:"throttling"`
+	} `json:"outbound_limits" mapstructure:"outbound_limits"`
+
+	InboundLimits struct {
+		// Maximum number of concurrent signature requests from peers to oneself.
+		Concurrency int `json:"concurrency"`
+
+		// The number of signatures that can be sent to peers per second.
+		Throttling int `json:"throttling"`
+
+		// Maximum time to send signatures to a peer.
+		MaxSendTime time.Duration `json:"max_send_time" mapstructure:"max_send_time"`
+	} `json:"inbound_limits" mapstructure:"inbound_limits"`
 }
 
 type IPC struct {

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"testing"
 
 	"gorm.io/gorm"
@@ -71,16 +72,36 @@ func (s *BlockDatabaseTestSuite) TestFindUncollecteds() {
 	gots, _ = s.db.FindUncollecteds(100)
 	assertGots(gots, s.Range(1, 50+1))
 
-	s.rawdb.Model(&Block{}).
-		Where("number <= 25").Update("log_collected", true)
+	s.db.db.Transaction(func(txdb *gorm.DB) error {
+		db := newDB(txdb)
+		db.db.Model(&Block{}).
+			Where("number <= 25").Update("log_collected", true)
 
-	// limit = 10
-	gots, _ = s.db.FindUncollecteds(10)
-	assertGots(gots, s.Range(26, 35+1))
+		// limit = 10
+		gots, _ = db.Block.FindUncollecteds(10)
+		assertGots(gots, s.Range(26, 35+1))
 
-	// limit = 100
-	gots, _ = s.db.FindUncollecteds(100)
-	assertGots(gots, s.Range(26, 50+1))
+		// limit = 100
+		gots, _ = db.Block.FindUncollecteds(100)
+		assertGots(gots, s.Range(26, 50+1))
+
+		return errors.New("ROLLBACK")
+	})
+
+	s.db.db.Transaction(func(tx *gorm.DB) error {
+		db := newDB(tx)
+		db.Block.SaveLogCollected(25)
+
+		// limit = 10
+		gots, _ = db.Block.FindUncollecteds(10)
+		assertGots(gots, s.Range(26, 35+1))
+
+		// limit = 100
+		gots, _ = db.Block.FindUncollecteds(100)
+		assertGots(gots, s.Range(26, 50+1))
+
+		return errors.New("ROLLBACK")
+	})
 }
 
 func (s *BlockDatabaseTestSuite) TestSave() {
@@ -95,19 +116,16 @@ func (s *BlockDatabaseTestSuite) TestSave() {
 }
 
 func (s *BlockDatabaseTestSuite) TestSaveLogCollected() {
-	number := uint64(10)
+	var misc Misc
+	tx := s.db.db.Where("id = ?", MISC_COLLECTED_BLOCK)
 
-	got, _ := s.db.Find(number)
-	s.Equal(number, got.Number)
-	s.Equal(s.ItoHash(int(number)), got.Hash)
-	s.Equal(false, got.LogCollected)
+	s.NoError(s.db.SaveLogCollected(10))
+	tx.First(&misc)
+	s.Equal([]byte{10}, misc.Value)
 
-	s.db.SaveLogCollected(got.Number)
-
-	got, _ = s.db.Find(number)
-	s.Equal(number, got.Number)
-	s.Equal(s.ItoHash(int(number)), got.Hash)
-	s.Equal(true, got.LogCollected)
+	s.NoError(s.db.SaveLogCollected(20))
+	tx.First(&misc)
+	s.Equal([]byte{20}, misc.Value)
 }
 
 func (s *BlockDatabaseTestSuite) TestDelete() {

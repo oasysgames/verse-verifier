@@ -148,12 +148,12 @@ func (w *SccVerifier) RemoveVerse(scc common.Address) {
 	w.verses.Delete(scc)
 }
 
-func (w *SccVerifier) HasVerse(scc common.Address, verse ethutil.ReadOnlyClient) bool {
+func (w *SccVerifier) HasVerse(rpc string, scc common.Address) bool {
 	if value, ok := w.verses.Load(scc); !ok {
 		return false
 	} else {
 		t, _ := value.(ethutil.ReadOnlyClient)
-		return t.URL() == verse.URL()
+		return t.URL() == rpc
 	}
 }
 
@@ -322,10 +322,10 @@ func (w *SccVerifier) deleteInvalidSignature(scc common.Address, nextIndex uint6
 		new(big.Int).SetUint64(sigs[0].BatchIndex),
 		sigs[0].BatchRoot,
 		sigs[0].Approved)
-	if match, err := msg.VerifySigner(sigs[0].Signature[:], signer); err == nil && match {
+	if err := msg.VerifySigner(sigs[0].Signature[:], signer); err == nil {
 		w.log.Debug("No invalid signature", logCtx...)
 		return
-	} else if err != nil {
+	} else {
 		w.log.Error("Unable to verify signature", append(logCtx, "err", err)...)
 	}
 

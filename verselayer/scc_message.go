@@ -2,6 +2,7 @@ package verselayer
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts"
@@ -9,6 +10,14 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 )
+
+type SignerMismatchError struct {
+	Actual, Recoverd common.Address
+}
+
+func (e *SignerMismatchError) Error() string {
+	return fmt.Sprintf("signer mismatch: actual: %s, recoverd: %s", e.Actual, e.Recoverd)
+}
 
 type SccMessage struct {
 	AbiPacked []byte
@@ -61,10 +70,41 @@ func (m *SccMessage) Ecrecover(signature []byte) (common.Address, error) {
 	return ethutil.Ecrecover(hash, signature)
 }
 
-func (m *SccMessage) VerifySigner(signature []byte, signer common.Address) (bool, error) {
+func (m *SccMessage) VerifySigner(signature []byte, signer common.Address) error {
 	if recoverd, err := m.Ecrecover(signature); err != nil {
-		return false, err
-	} else {
-		return bytes.Equal(recoverd.Bytes(), signer.Bytes()), nil
+		return err
+	} else if !bytes.Equal(recoverd.Bytes(), signer.Bytes()) {
+		return &SignerMismatchError{Actual: signer, Recoverd: recoverd}
+	}
+	return nil
+}
+
+// Deprecated: This is a signature with a bug in the boolean type abi-encode.
+// It is retained for verification purposes because there are peers still
+// sending signatures containing the bug.
+func NewSCCMessageWithApprovedBug(
+	hubChainID *big.Int,
+	scc common.Address,
+	batchIndex *big.Int,
+	batchRoot [32]byte,
+	approved bool,
+) *SccMessage {
+	b := common.Big0
+	if approved {
+		b = common.Big1
+	}
+
+	abiPacked := bytes.Join([][]byte{
+		common.LeftPadBytes(hubChainID.Bytes(), 32),
+		scc[:],
+		common.LeftPadBytes(batchIndex.Bytes(), 32),
+		batchRoot[:],
+		b.Bytes(),
+	}, nil)
+	_, msg := accounts.TextAndHash(crypto.Keccak256(abiPacked))
+
+	return &SccMessage{
+		AbiPacked: abiPacked,
+		Eip712Msg: msg,
 	}
 }

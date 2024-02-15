@@ -89,7 +89,7 @@ func (s *SccSubmitterTestSuite) TestWork() {
 		s.mining()
 	}
 
-	s.sccSubmitter.refreshStakes(context.Background())
+	s.sccSubmitter.stakemanager.Refresh(context.Background())
 
 	for range s.Range(0, indexes/s.sccSubmitter.cfg.BatchSize+1) {
 		go func() {
@@ -121,28 +121,6 @@ func (s *SccSubmitterTestSuite) TestWork() {
 		}
 
 		s.Equal(i < indexes-1, got.Approve)
-	}
-}
-
-func (s *SccSubmitterTestSuite) TestRefreshStakes() {
-	s.Equal(common.Big0, s.sccSubmitter.getTotalStake())
-	s.Equal(map[common.Address]*big.Int{}, s.sccSubmitter.getSignerStakes())
-
-	for i := range s.Range(0, 1000) {
-		s.sm.Owners = append(s.sm.Owners, s.RandAddress())
-		s.sm.Operators = append(s.sm.Operators, s.RandAddress())
-		s.sm.Stakes = append(s.sm.Stakes, big.NewInt(int64(i)))
-		s.sm.Candidates = append(s.sm.Candidates, true)
-		s.sm.NewCursor = big.NewInt(0)
-	}
-	s.sccSubmitter.refreshStakes(context.Background())
-
-	s.Equal(int64(499500), s.sccSubmitter.getTotalStake().Int64())
-
-	signerStakes := s.sccSubmitter.getSignerStakes()
-	s.Len(signerStakes, 1000)
-	for i := range s.Range(0, 1000) {
-		s.Equal(int64(i), signerStakes[s.sm.Operators[i]].Int64())
 	}
 }
 

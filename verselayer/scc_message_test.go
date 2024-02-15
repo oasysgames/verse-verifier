@@ -108,20 +108,20 @@ func (s *SccSigTestSuite) TestEcrecover() {
 }
 
 func (s *SccSigTestSuite) TestVerifySigner() {
-	got1, _ := s.approveMsg.VerifySigner(
+	got1 := s.approveMsg.VerifySigner(
 		hexutil.MustDecode(
 			"0x1718cfc352e84bf50ced8b0aaf8a8955fb038389223b289cca33bdd1bd72b7d0"+
 				"29b5f6ebf983f38ddc85086b58d48b16637b8bf8929230eec38ab05595504a5b1c"), s.b.Signer())
-	got2, _ := s.rejectMsg.VerifySigner(
+	got2 := s.rejectMsg.VerifySigner(
 		hexutil.MustDecode(
 			"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729"+
 				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef1b"), s.b.Signer())
-	got3, _ := s.rejectMsg.VerifySigner(
+	got3 := s.rejectMsg.VerifySigner(
 		hexutil.MustDecode(
 			"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729"+
 				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef10"), s.b.Signer())
 
-	s.True(got1)
-	s.True(got2)
-	s.False(got3)
+	s.Nil(got1)
+	s.Nil(got2)
+	s.Error(got3)
 }

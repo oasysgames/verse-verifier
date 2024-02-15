@@ -1,11 +1,8 @@
 package database
 
 import (
-	"errors"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	"gorm.io/gorm"
 )
 
 func (db *OptimismDatabase) RepairPreviousID(signer common.Address) {
@@ -59,18 +56,20 @@ func (db *OptimismDatabase) repairPrevID(row *OptimismSignature, reason string) 
 		"id", row.ID, "old-previous-id", row.PreviousID,
 	}
 
-	var prevRow *OptimismSignature
+	var prevRow []*OptimismSignature
 	tx := db.db.
 		Where("optimism_signatures.signer_id = ?", row.SignerID).
 		Where("optimism_signatures.id < ?", row.ID).
 		Order("optimism_signatures.id DESC").
 		Limit(1).
-		First(&prevRow)
+		Find(&prevRow)
 
 	if tx.Error == nil {
-		row.PreviousID = prevRow.ID
-	} else if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		row.PreviousID = ""
+		if len(prevRow) > 0 {
+			row.PreviousID = prevRow[0].ID
+		} else {
+			row.PreviousID = ""
+		}
 	} else {
 		log.Error("Previous signature does not exist", append(logCtx, "err", tx.Error)...)
 		return
