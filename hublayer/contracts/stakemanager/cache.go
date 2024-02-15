@@ -56,9 +56,9 @@ func (c *Cache) RefreshLoop(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (c *Cache) Refresh(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Cache) Refresh(parent context.Context) error {
+	ctx, cancel := context.WithTimeout(parent, time.Second*15)
+	defer cancel()
 
 	total, err := c.sm.GetTotalStake(&bind.CallOpts{Context: ctx}, common.Big0)
 	if err != nil {
@@ -80,6 +80,9 @@ func (c *Cache) Refresh(ctx context.Context) error {
 		}
 		cursor = result.NewCursor
 	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	c.total = total
 	c.signerStakes = signerStakes
