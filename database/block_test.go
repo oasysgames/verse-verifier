@@ -2,6 +2,7 @@ package database
 
 import (
 	"errors"
+	"sort"
 	"testing"
 
 	"gorm.io/gorm"
@@ -18,8 +19,9 @@ func TestBlockDatabase(t *testing.T) {
 type BlockDatabaseTestSuite struct {
 	testhelper.Suite
 
-	db    *BlockDatabase
-	rawdb *gorm.DB
+	db      *BlockDatabase
+	rawdb   *gorm.DB
+	creates []*Block
 }
 
 func (s *BlockDatabaseTestSuite) SetupTest() {
@@ -29,11 +31,18 @@ func (s *BlockDatabaseTestSuite) SetupTest() {
 	}
 	s.db = db.Block
 	s.rawdb = db.db
+	s.creates = []*Block{}
 
 	for _, number := range s.Shuffle(s.Range(0, 50)) {
-		s.rawdb.Model(&Block{}).
-			Create(&Block{Number: uint64(number + 1), Hash: s.ItoHash(number + 1)})
+		block := &Block{Number: uint64(number + 1), Hash: s.ItoHash(number + 1)}
+		s.rawdb.Create(block)
+		s.creates = append(s.creates, block)
 	}
+	sort.Slice(s.creates, func(i, j int) bool {
+		return s.creates[i].Number < s.creates[j].Number
+	})
+
+	s.creates = append([]*Block{nil}, s.creates...) // padding
 }
 
 func (s *BlockDatabaseTestSuite) TestFind() {
@@ -90,7 +99,7 @@ func (s *BlockDatabaseTestSuite) TestFindUncollecteds() {
 
 	s.db.db.Transaction(func(tx *gorm.DB) error {
 		db := newDB(tx)
-		db.Block.SaveLogCollected(25)
+		db.Block.SaveCollected(25, s.creates[25].Hash)
 
 		// limit = 10
 		gots, _ = db.Block.FindUncollecteds(10)
@@ -115,27 +124,44 @@ func (s *BlockDatabaseTestSuite) TestSave() {
 	s.Equal(false, got.LogCollected)
 }
 
-func (s *BlockDatabaseTestSuite) TestSaveLogCollected() {
-	var misc Misc
-	tx := s.db.db.Where("id = ?", MISC_COLLECTED_BLOCK)
+func (s *BlockDatabaseTestSuite) TestSaveCollected() {
+	s.NoError(s.db.SaveCollected(10, s.creates[10].Hash))
+	collected, _ := findCollectedBlock(s.rawdb)
+	s.Equal(uint64(10), collected)
 
-	s.NoError(s.db.SaveLogCollected(10))
-	tx.First(&misc)
-	s.Equal([]byte{10}, misc.Value)
+	s.NoError(s.db.SaveCollected(20, s.creates[20].Hash))
+	collected, _ = findCollectedBlock(s.rawdb)
+	s.Equal(uint64(20), collected)
 
-	s.NoError(s.db.SaveLogCollected(20))
-	tx.First(&misc)
-	s.Equal([]byte{20}, misc.Value)
+	err := s.db.SaveCollected(51, s.RandHash())
+	s.ErrorContains(err, "failed to find the target block")
+
+	err = s.db.SaveCollected(20, s.RandHash())
+	s.ErrorContains(err, "this block was removed due to reorganization")
 }
 
-func (s *BlockDatabaseTestSuite) TestDelete() {
-	number := uint64(10)
+func (s *BlockDatabaseTestSuite) TestDeletes() {
+	s.NoError(s.db.Deletes(26))
 
-	got, _ := s.db.Find(number)
-	s.Equal(number, got.Number)
+	_, err := s.db.Find(25)
+	s.NoError(err)
 
-	s.db.Delete(number)
+	for n := uint64(26); n <= 50; n++ {
+		_, err := s.db.Find(n)
+		s.ErrorIs(err, ErrNotFound)
+	}
 
-	_, err := s.db.Find(number)
-	s.ErrorIs(err, ErrNotFound)
+	_, err = findCollectedBlock(s.rawdb)
+	s.ErrorIs(err, gorm.ErrRecordNotFound)
+
+	s.NoError(saveCollectedBlock(s.rawdb, 5))
+	s.NoError(s.db.Deletes(uint64(7)))
+
+	collected, _ := findCollectedBlock(s.rawdb)
+	s.Equal(uint64(5), collected)
+
+	s.NoError(s.db.Deletes(uint64(2)))
+
+	collected, _ = findCollectedBlock(s.rawdb)
+	s.Equal(uint64(1), collected)
 }

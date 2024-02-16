@@ -2,11 +2,10 @@ package database
 
 import (
 	"errors"
-	"math/big"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type BlockDatabase struct {
@@ -44,22 +43,21 @@ func (db *BlockDatabase) FindHighest() (*Block, error) {
 
 // Returns blocks for uncollected event logs(order by block number).
 func (db *BlockDatabase) FindUncollecteds(limit int) ([]*Block, error) {
-	var misc Misc
 	tx := db.db.
-		Where("id = ?", MISC_COLLECTED_BLOCK).
-		First(&misc)
+		Order("number ASC").
+		Limit(limit)
 
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		tx = db.db.Where("log_collected IS FALSE")
-	} else if tx.Error == nil {
-		tx = db.db.Where("number > ?", new(big.Int).SetBytes(misc.Value).Uint64())
+	if number, err := findCollectedBlock(db.db); err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		tx = tx.Where("log_collected IS FALSE")
+	} else {
+		tx = tx.Where("number > ?", number)
 	}
 
 	var rows []*Block
-	tx = tx.
-		Order("number ASC").
-		Limit(limit).
-		Find(&rows)
+	tx = tx.Find(&rows)
 
 	if tx.Error != nil {
 		return nil, tx.Error
@@ -74,25 +72,39 @@ func (db *BlockDatabase) SaveNewBlock(number uint64, hash common.Hash) error {
 }
 
 // Save event log collected block.
-func (db *BlockDatabase) SaveLogCollected(number uint64) error {
-	misc := &Misc{
-		ID:    MISC_COLLECTED_BLOCK,
-		Value: new(big.Int).SetUint64(number).Bytes(),
-	}
-	tx := db.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(misc)
-	return tx.Error
+func (db *BlockDatabase) SaveCollected(number uint64, hash common.Hash) error {
+	return db.db.Transaction(func(tx *gorm.DB) error {
+		block, err := newDB(tx).Block.Find(number)
+		if err != nil {
+			return fmt.Errorf("failed to find the target block: %w", err)
+		} else if block.Hash != hash {
+			return fmt.Errorf("this block was removed due to reorganization, number=%d old-hash=%s new-hash=%s",
+				number, hash, block.Hash)
+		}
+
+		return saveCollectedBlock(tx, number)
+	})
 }
 
-// Delete the specific block.
-func (db *BlockDatabase) Delete(number uint64) (rows int64, err error) {
-	tx := db.db.
-		Where("number = ?", number).
-		Delete(&Block{})
-	if tx.Error != nil {
-		return -1, tx.Error
-	}
-	return tx.RowsAffected, nil
+// Delete blocks after the number.
+func (db *BlockDatabase) Deletes(after uint64) error {
+	return db.db.Transaction(func(txdb *gorm.DB) error {
+		tx := txdb.
+			Where("number >= ?", after).
+			Delete(&Block{})
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		collected, err := findCollectedBlock(txdb)
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		} else if collected >= after {
+			return saveCollectedBlock(txdb, after-1)
+		}
+
+		return nil
+	})
 }

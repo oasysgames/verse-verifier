@@ -85,20 +85,27 @@ func (w *BlockCollector) work(ctx context.Context) {
 }
 
 func (w *BlockCollector) saveHeaders(ctx context.Context, headers []*types.Header) error {
-	for i, h := range headers {
-		if i == 0 {
-			if deleted, err := w.deleteReorganizedBlocks(ctx, h); err != nil {
-				w.log.Error("Failed to delete reorganized blocks", "err", err)
-				return err
-			} else if deleted {
-				return errors.New("reorganized")
-			}
-		}
+	if len(headers) == 0 {
+		return nil
+	}
 
+	if deleted, err := w.deleteReorganizedBlocks(ctx, headers[0]); err != nil {
+		w.log.Error("Failed to delete reorganized blocks", "err", err)
+		return err
+	} else if deleted {
+		return errors.New("reorganized")
+	}
+
+	var prev *types.Header
+	for _, h := range headers {
+		if prev != nil && prev.Hash() != h.ParentHash {
+			return errors.New("block order is wrong")
+		}
 		if err := w.db.Block.SaveNewBlock(h.Number.Uint64(), h.Hash()); err != nil {
 			w.log.Error("Failed to save new block", "err", err)
 			return err
 		}
+		prev = h
 	}
 
 	return nil
@@ -149,32 +156,33 @@ func (w *BlockCollector) deleteReorganizedBlocks(
 	}
 
 	w.log.Info("Reorganization detected", "number", comp.Number, "hash", comp.Hash())
-	return true, w.db.Transaction(func(tx *database.Database) error {
-		// delete from the head
-		for number := highest.Number; number > 0; number-- {
-			local, err := tx.Block.Find(number)
-			if err != nil && !errors.Is(err, database.ErrNotFound) {
-				return err
-			}
 
-			remote, err := w.hub.HeaderByNumber(ctx, new(big.Int).SetUint64(number))
-			if err != nil {
-				return err
-			}
-
-			if local.Hash == remote.Hash() {
-				w.log.Info("Reached reorganization starting block",
-					"number", number, "hash", remote.Hash().String())
-				break
-			}
-
-			if _, err := tx.Block.Delete(number); err != nil {
-				return err
-			}
-
-			w.log.Info("Deleted reorganized block", "number", number)
+	var deletesAfter uint64
+	for number := highest.Number; number > 0; number-- {
+		local, err := w.db.Block.Find(number)
+		if err != nil && !errors.Is(err, database.ErrNotFound) {
+			return false, err
 		}
 
-		return nil
-	})
+		remote, err := w.hub.HeaderByNumber(ctx, new(big.Int).SetUint64(number))
+		if err != nil {
+			return false, err
+		}
+		if local.Hash == remote.Hash() {
+			w.log.Info("Reached reorganization starting block",
+				"number", number, "hash", remote.Hash().String())
+			break
+		}
+
+		w.log.Info("Found reorganized block",
+			"number", number, "local-hash", local.Hash, "remote-hash", remote.Hash())
+		deletesAfter = number
+	}
+
+	if err := w.db.Block.Deletes(deletesAfter); err != nil {
+		return false, err
+	}
+
+	w.log.Info("Deleted reorganized block", "from", deletesAfter, "to", highest.Number)
+	return true, nil
 }
