@@ -106,11 +106,11 @@ func (w *EventCollector) work(ctx context.Context) {
 		}
 
 		// collect event logs from hub-layer
-		start, end := blocks[0].Number, blocks[len(blocks)-1].Number
+		start, end := blocks[0], blocks[len(blocks)-1]
 		filter := ethereum.FilterQuery{
 			Topics:    filterTopics,
-			FromBlock: new(big.Int).SetUint64(start),
-			ToBlock:   new(big.Int).SetUint64(end),
+			FromBlock: new(big.Int).SetUint64(start.Number),
+			ToBlock:   new(big.Int).SetUint64(end.Number),
 		}
 		logs, err := w.hub.FilterLogs(ctx, filter)
 		if err != nil {
@@ -118,19 +118,21 @@ func (w *EventCollector) work(ctx context.Context) {
 				"start", start, "end", end, "err", err)
 			return
 		}
+		if len(logs) == 0 {
+			w.log.Debug("No event log", "start", start, "end", end)
+		}
 
 		if err = w.db.Transaction(func(tx *database.Database) error {
-			if len(logs) == 0 {
-				w.log.Debug("No event log", "start", start, "end", end)
-			} else {
-				for _, log := range logs {
-					if err := w.processLog(tx, log); err != nil {
-						return err
-					}
+			for _, log := range logs {
+				if err := w.processLog(tx, log); err != nil {
+					return err
 				}
 			}
-
-			return w.saveLogCollectedBlocks(tx, start, end)
+			if err := tx.Block.SaveCollected(end.Number, end.Hash); err != nil {
+				w.log.Error("Failed to save collected block", "number", end, "err", err)
+				return err
+			}
+			return nil
 		}); err != nil {
 			return
 		}
@@ -248,17 +250,6 @@ func (w *EventCollector) processStateBatchVerifiedEvent(
 	if err := tx.Optimism.SaveNextIndex(e.Raw.Address, nextIndex); err != nil {
 		w.log.Error("Failed to save next index", append(logCtx, "err", err)...)
 		return err
-	}
-	return nil
-}
-
-func (w *EventCollector) saveLogCollectedBlocks(tx *database.Database, start, end uint64) error {
-	// save collected blocks
-	for number := start; number <= end; number++ {
-		if err := tx.Block.SaveLogCollected(number); err != nil {
-			w.log.Error("Failed to save collected block", "number", number, "err", err)
-			return err
-		}
 	}
 	return nil
 }
