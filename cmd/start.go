@@ -89,7 +89,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	}()
 
 	// unlock walelts(wait forever)
-	waitForUnlockWallets(ctx, conf, ks)
+	waitForUnlockWallets(ctx, ipc, conf, ks)
 
 	// create hub-layer client
 	hub, err := ethutil.NewReadOnlyClient(conf.HubLayer.RPC)
@@ -158,17 +158,12 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	sccVerifier := newSccVerifier(ctx, conf, ks, db)
 
 	//  start p2p
-	p2p := newP2P(ctx, conf, db, sccVerifier, cache)
+	p2p := newP2P(ctx, ipc, conf, db, sccVerifier, cache)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		p2p.Start(ctx)
 	}()
-
-	// set ipc handlers
-	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
-	ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, p2p.Host(), p2p.HolePunchHelper()))
-	ipc.SetHandler(ipccmd.StatusCmd.NewHandler(p2p.Host()))
 
 	// start state verifier
 	if sccVerifier != nil {
@@ -259,7 +254,15 @@ func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
 	return priv, nil
 }
 
-func waitForUnlockWallets(ctx context.Context, c *config.Config, ks *wallet.KeyStore) {
+func waitForUnlockWallets(
+	ctx context.Context,
+	ipc *ipc.IPCServer,
+	c *config.Config,
+	ks *wallet.KeyStore,
+) {
+	// set ipc handler
+	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
+
 	wg := &sync.WaitGroup{}
 	wg.Add(len(c.Wallets))
 
@@ -314,6 +317,7 @@ func newIPC(c *config.IPC, ks *wallet.KeyStore) *ipc.IPCServer {
 
 func newP2P(
 	ctx context.Context,
+	ipc *ipc.IPCServer,
 	c *config.Config,
 	db *database.Database,
 	verifier *verselayer.SccVerifier,
@@ -342,6 +346,10 @@ func newP2P(
 	if err != nil {
 		log.Crit("Failed to create p2p server", "err", err)
 	}
+
+	// set ipc handlers
+	ipc.SetHandler(ipccmd.StatusCmd.NewHandler(node.Host()))
+	ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, node.Host(), node.HolePunchHelper()))
 
 	return node
 }

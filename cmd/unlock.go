@@ -63,5 +63,5 @@ func runUnlockCmd(cmd *cobra.Command, args []string) {
 		password = string(input)
 	}
 
-	ipccmd.WalletUnlockCmd.Run(commandName, wallet.Address, password)
+	ipccmd.WalletUnlockCmd.Run(conf.IPC.Sockname, wallet.Address, password)
 }
