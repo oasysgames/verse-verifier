@@ -13,6 +13,10 @@ const (
 	EOM = 65536
 )
 
+const (
+	chunkSize = 1024
+)
+
 type Handler func(*IPCServer, []byte)
 
 type IPCServer struct {
@@ -82,7 +86,24 @@ func (s *IPCServer) Write(msgType int, message []byte) error {
 		return err
 	}
 	// If they do not sleep, clients will read messages in the wrong order.
-	time.Sleep(time.Second / 4)
+	time.Sleep(time.Second / 10)
+	return nil
+}
+
+func (s *IPCServer) ChunkedWrite(msgType int, message []byte) error {
+	var chunks [][]byte
+	for chunkSize < len(message) {
+		message, chunks = message[chunkSize:],
+			append(chunks, message[0:chunkSize:chunkSize])
+	}
+	chunks = append(chunks, message)
+
+	for _, chunk := range chunks {
+		if err := s.Write(msgType, chunk); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

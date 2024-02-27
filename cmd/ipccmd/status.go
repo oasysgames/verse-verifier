@@ -1,6 +1,7 @@
 package ipccmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +37,7 @@ func (c *status) NewHandler(h host.Host) (handlerID int, handler ipc.Handler) {
 		if data, err := json.Marshal(st); err != nil {
 			s.Write(c.handlerID, []byte(fmt.Sprintf("failed to marshal status: %s", err)))
 		} else {
-			s.Write(c.handlerID, data)
+			s.ChunkedWrite(c.handlerID, data)
 		}
 	}
 }
@@ -55,14 +56,17 @@ func (c *status) Run(sockname string) {
 	}
 
 	// read message
+	var chunks [][]byte
 	for {
 		data, err := cl.Read()
 		if errors.Is(err, io.EOF) {
-			return
+			break
 		} else if err != nil {
 			util.Exit(1, "failed to read ipc message: %s\n", err)
 		} else {
-			fmt.Println(string(data))
+			chunks = append(chunks, data)
 		}
 	}
+
+	fmt.Println(string(bytes.Join(chunks, nil)))
 }
