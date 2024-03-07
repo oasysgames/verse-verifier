@@ -1,4 +1,4 @@
-package hublayer
+package collector
 
 import (
 	"context"
