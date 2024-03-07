@@ -363,7 +363,7 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		"signer", signer,
 		"remote-latest-id", remote.Id,
 		"remote-latest-previous-id", remote.PreviousId,
-		"remote-latest-index", remote.BatchIndex,
+		"remote-latest-index", remote.RollupIndex,
 	}
 
 	if err := verifySignature(w.hubLayerChainID, remote); err != nil {
@@ -584,12 +584,12 @@ func (w *Node) handleOptimismSignatureExchangeResponses(ctx context.Context, s n
 
 		for _, res := range responses {
 			signer := common.BytesToAddress(res.Signer)
-			scc := common.BytesToAddress(res.Scc)
+			contract := common.BytesToAddress(res.Contract)
 			logctx := append(logctx,
 				"signer", signer,
 				"id", res.Id, "previous-id", res.PreviousId,
-				"scc", scc,
-				"index", res.BatchIndex)
+				"contract", contract,
+				"index", res.RollupIndex)
 
 			if err := verifySignature(w.hubLayerChainID, res); err != nil {
 				w.log.Error("Invalid signature", append(logctx, "err", err)...)
@@ -606,7 +606,7 @@ func (w *Node) handleOptimismSignatureExchangeResponses(ctx context.Context, s n
 			}
 
 			// local is newer
-			if local, err := w.db.OPSignature.Find(nil, &signer, &scc, &res.BatchIndex, 1, 0); err != nil {
+			if local, err := w.db.OPSignature.Find(nil, &signer, &contract, &res.RollupIndex, 1, 0); err != nil {
 				w.log.Error("Failed to find local signature", append(logctx, "err", err)...)
 				return
 			} else if len(local) > 0 && strings.Compare(local[0].ID, res.Id) == 1 {
@@ -626,9 +626,9 @@ func (w *Node) handleOptimismSignatureExchangeResponses(ctx context.Context, s n
 			_, err := w.db.OPSignature.Save(
 				&res.Id, &res.PreviousId,
 				signer,
-				scc,
-				res.BatchIndex,
-				common.BytesToHash(res.BatchRoot),
+				contract,
+				res.RollupIndex,
+				common.BytesToHash(res.RollupHash),
 				res.Approved,
 				database.BytesSignature(res.Signature),
 			)
@@ -1026,17 +1026,17 @@ func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error 
 	}
 
 	signer := common.BytesToAddress(sig.Signer)
-	scc := common.BytesToAddress(sig.Scc)
-	batchIndex := new(big.Int).SetUint64(sig.BatchIndex)
-	batchRoot := common.BytesToHash(sig.BatchRoot)
+	contract := common.BytesToAddress(sig.Contract)
+	rollupIndex := new(big.Int).SetUint64(sig.RollupIndex)
+	rollupHash := common.BytesToHash(sig.RollupHash)
 
-	msg := ethutil.NewMessage(hubLayerChainID, scc, batchIndex, batchRoot, sig.Approved)
+	msg := ethutil.NewMessage(hubLayerChainID, contract, rollupIndex, rollupHash, sig.Approved)
 	err := msg.VerifySigner(sig.Signature, signer)
 
 	// possibly an old signature with an approved bug
 	if _, ok := err.(*ethutil.SignerMismatchError); ok {
 		msg = ethutil.NewMessageWithApprovedBug(
-			hubLayerChainID, scc, batchIndex, batchRoot, sig.Approved)
+			hubLayerChainID, contract, rollupIndex, rollupHash, sig.Approved)
 		err = msg.VerifySigner(sig.Signature, signer)
 	}
 
@@ -1045,16 +1045,20 @@ func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error 
 
 func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {
 	sig := &pb.OptimismSignature{
-		Id:         row.ID,
-		PreviousId: row.PreviousID,
-		Signer:     row.Signer.Address[:],
-		Scc:        row.Contract.Address[:],
-		BatchIndex: row.RollupIndex,
-		BatchRoot:  row.RollupHash[:],
-		Approved:   row.Approved,
-		Signature:  row.Signature[:],
+		Id:                row.ID,
+		PreviousId:        row.PreviousID,
+		Signer:            row.Signer.Address[:],
+		Contract:          row.Contract.Address[:],
+		RollupIndex:       row.RollupIndex,
+		RollupHash:        row.RollupHash[:],
+		Approved:          row.Approved,
+		Signature:         row.Signature[:],
+		BatchSize:         0,        // Deprecated
+		PrevTotalElements: 0,        // Deprecated
+		ExtraData:         []byte{}, // Deprecated
 	}
 
+	// these fields are left for compatibility
 	if row.BatchSize != nil {
 		sig.BatchSize = *row.BatchSize
 	}
