@@ -4,17 +4,22 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/l2oo"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/l2ooverifier"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/multicall2"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/scc"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/sccverifier"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
-	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/multicall2"
-	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
-	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/sccverifier"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
-	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
-	tsccv "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/sccverifier"
+	tl2oo "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/l2oo"
+	tl2oov "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/l2ooverifier"
+	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/scc"
+	tsccv "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/sccverifier"
 )
 
 type BackendSuite struct {
@@ -35,9 +40,16 @@ type BackendSuite struct {
 	TSCC    *tscc.Scc
 	SCCAddr common.Address
 
-	SCCV     *sccverifier.Sccverifier
-	TSCCV    *tsccv.Sccverifier
-	SCCVAddr common.Address
+	L2OO     *l2oo.OasysL2OutputOracle
+	TL2OO    *tl2oo.L2oo
+	L2OOAddr common.Address
+
+	SCCV      *sccverifier.Sccverifier
+	L2OOV     *l2ooverifier.OasysL2OutputOracleVerifier
+	TSCCV     *tsccv.Sccverifier
+	TL2OOV    *tl2oov.L2ooverifier
+	SCCVAddr  common.Address
+	L2OOVAddr common.Address
 }
 
 func (b *BackendSuite) SetupTest() {
@@ -60,9 +72,19 @@ func (b *BackendSuite) SetupTest() {
 	b.SCC, _ = scc.NewScc(b.SCCAddr, b.SignableHub)
 	b.SignableHub.Mining()
 
+	// deploy `OasysL2OutputOracle` contract
+	b.L2OOAddr, _, b.TL2OO, _ = tl2oo.DeployL2oo(b.SignableHub.TransactOpts(ctx), b.SignableHub)
+	b.L2OO, _ = l2oo.NewOasysL2OutputOracle(b.L2OOAddr, b.SignableHub)
+	b.SignableHub.Mining()
+
 	// deploy `OasysRollupVerifier` contract
 	b.SCCVAddr, _, b.TSCCV, _ = tsccv.DeploySccverifier(b.SignableHub.TransactOpts(ctx), b.SignableHub)
 	b.SCCV, _ = sccverifier.NewSccverifier(b.SCCVAddr, b.SignableHub)
+	b.SignableHub.Mining()
+
+	// deploy `OasysL2OutputOracleVerifier` contract
+	b.L2OOVAddr, _, b.TL2OOV, _ = tl2oov.DeployL2ooverifier(b.SignableHub.TransactOpts(ctx), b.SignableHub)
+	b.L2OOV, _ = l2ooverifier.NewOasysL2OutputOracleVerifier(b.L2OOVAddr, b.SignableHub)
 	b.SignableHub.Mining()
 }
 
@@ -88,6 +110,23 @@ func (b *BackendSuite) EmitStateBatchAppended(index int) (
 	tx, err := b.TSCC.EmitStateBatchAppended(
 		b.SignableHub.TransactOpts(context.Background()), event.BatchIndex,
 		event.BatchRoot, event.BatchSize, event.PrevTotalElements, event.ExtraData)
+	b.NoError(err)
+	b.Mining()
+	return tx, event
+}
+
+func (b *BackendSuite) EmitOutputProposed(index int) (
+	*types.Transaction,
+	*tl2oo.L2ooOutputProposed,
+) {
+	event := &tl2oo.L2ooOutputProposed{
+		OutputRoot:    b.RandHash(),
+		L2OutputIndex: big.NewInt(int64(index)),
+		L2BlockNumber: big.NewInt(int64((index + 1) * 10)),
+		L1Timestamp:   big.NewInt(time.Now().Unix()),
+	}
+	tx, err := b.TL2OO.EmitOutputProposed(b.SignableHub.TransactOpts(context.Background()),
+		event.OutputRoot, event.L2OutputIndex, event.L2BlockNumber, event.L1Timestamp)
 	b.NoError(err)
 	b.Mining()
 	return tx, event

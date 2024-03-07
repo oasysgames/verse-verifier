@@ -21,6 +21,10 @@ contract OasysStateCommitmentChain {
 
     uint256 public nextIndex;
 
+    function setNextIndex(uint256 val) external {
+        nextIndex = val;
+    }
+
     function emitStateBatchAppended(
         uint256 batchIndex,
         bytes32 batchRoot,

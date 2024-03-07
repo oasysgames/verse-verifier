@@ -28,6 +28,7 @@ type Cache struct {
 	mu           sync.Mutex
 	total        *big.Int
 	signerStakes map[common.Address]*big.Int
+	candidates   map[common.Address]bool
 }
 
 func NewCache(sm IStakeManager) *Cache {
@@ -67,6 +68,7 @@ func (c *Cache) Refresh(parent context.Context) error {
 
 	cursor, howMany := big.NewInt(0), big.NewInt(50)
 	signerStakes := make(map[common.Address]*big.Int)
+	candidates := make(map[common.Address]bool)
 	for {
 		result, err := c.sm.GetValidators(&bind.CallOpts{Context: ctx}, common.Big0, cursor, howMany)
 		if err != nil {
@@ -77,6 +79,7 @@ func (c *Cache) Refresh(parent context.Context) error {
 
 		for i, operator := range result.Operators {
 			signerStakes[operator] = result.Stakes[i]
+			candidates[operator] = result.Candidates[i]
 		}
 		cursor = result.NewCursor
 	}
@@ -86,6 +89,7 @@ func (c *Cache) Refresh(parent context.Context) error {
 
 	c.total = total
 	c.signerStakes = signerStakes
+	c.candidates = candidates
 	return nil
 }
 
@@ -93,23 +97,44 @@ func (c *Cache) TotalStake() *big.Int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.total
+	return new(big.Int).Set(c.total)
 }
 
-func (c Cache) SignerStakes() map[common.Address]*big.Int {
+func (c *Cache) SignerStakes() map[common.Address]*big.Int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.signerStakes
-}
-
-func (c Cache) StakeBySigner(signer common.Address) *big.Int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	b := c.signerStakes[signer]
-	if b == nil {
-		b = big.NewInt(0)
+	cpy := make(map[common.Address]*big.Int)
+	for k, v := range c.signerStakes {
+		cpy[k] = new(big.Int).Set(v)
 	}
-	return b
+	return cpy
+}
+
+func (c *Cache) StakeBySigner(signer common.Address) *big.Int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if b := c.signerStakes[signer]; b != nil {
+		return new(big.Int).Set(b)
+	}
+	return big.NewInt(0)
+}
+
+func (c *Cache) Candidates() map[common.Address]bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cpy := make(map[common.Address]bool)
+	for k, v := range c.candidates {
+		cpy[k] = v
+	}
+	return cpy
+}
+
+func (c *Cache) Candidate(signer common.Address) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.candidates[signer]
 }

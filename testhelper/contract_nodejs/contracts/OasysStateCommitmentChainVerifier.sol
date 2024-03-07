@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.2;
+pragma solidity 0.8.2;
 
 import { OasysStateCommitmentChain } from "./OasysStateCommitmentChain.sol";
 
@@ -29,14 +29,16 @@ contract OasysStateCommitmentChainVerifier {
     function approve(
         address stateCommitmentChain,
         ChainBatchHeader memory batchHeader,
-        bytes[] memory signatures
+        bytes[] calldata signatures
     ) external {
-        bytes memory _signatures;
-        for (uint256 i = 0; i < signatures.length; i++) {
-            _signatures = abi.encodePacked(_signatures, signatures[i]);
-        }
-
-        assertLogs.push(AssertLog(stateCommitmentChain, batchHeader, _signatures, true));
+        assertLogs.push(
+            AssertLog(
+                stateCommitmentChain,
+                batchHeader,
+                _joinSignatures(signatures),
+                true
+            )
+        );
 
         OasysStateCommitmentChain(stateCommitmentChain).emitStateBatchVerified(
             batchHeader.batchIndex,
@@ -49,14 +51,11 @@ contract OasysStateCommitmentChainVerifier {
     function reject(
         address stateCommitmentChain,
         ChainBatchHeader memory batchHeader,
-        bytes[] memory signatures
+        bytes[] calldata signatures
     ) external {
-        bytes memory _signatures;
-        for (uint256 i = 0; i < signatures.length; i++) {
-            _signatures = abi.encodePacked(_signatures, signatures[i]);
-        }
-
-        assertLogs.push(AssertLog(stateCommitmentChain, batchHeader, _signatures, false));
+        assertLogs.push(
+            AssertLog(stateCommitmentChain, batchHeader, _joinSignatures(signatures), false)
+        );
 
         OasysStateCommitmentChain(stateCommitmentChain).emitStateBatchFailed(
             batchHeader.batchIndex,
@@ -64,5 +63,15 @@ contract OasysStateCommitmentChainVerifier {
         );
 
         emit StateBatchRejected(stateCommitmentChain, batchHeader.batchIndex, batchHeader.batchRoot);
+    }
+
+    function sccAssertLogsLen() external view returns (uint256) {
+        return assertLogs.length;
+    }
+
+    function _joinSignatures(bytes[] calldata signatures) internal pure returns (bytes memory joined) {
+        for (uint256 i = 0; i < signatures.length; i++) {
+            joined = abi.encodePacked(joined, signatures[i]);
+        }
     }
 }

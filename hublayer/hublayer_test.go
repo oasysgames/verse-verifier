@@ -8,13 +8,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/multicall2"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
-	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
-	tmcall2 "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/multicall2"
-	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
-	tsccv "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/sccverifier"
+	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/scc"
+	tsccv "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/sccverifier"
 )
 
 type SccTestSuite struct {
@@ -26,7 +26,7 @@ type SccTestSuite struct {
 
 	sm *testhelper.StakeManagerMock
 
-	mcall2     *tmcall2.Multicall2
+	mcall2     *multicall2.Multicall2
 	mcall2Addr common.Address
 
 	scc     *tscc.Scc
@@ -49,7 +49,7 @@ func (s *SccTestSuite) SetupTest() {
 	s.sm = &testhelper.StakeManagerMock{}
 
 	// deploy `Multicall2` contract
-	s.mcall2Addr, _, s.mcall2, _ = tmcall2.DeployMulticall2(s.hub.TransactOpts(ctx), s.hub)
+	s.mcall2Addr, _, s.mcall2, _ = multicall2.DeployMulticall2(s.hub.TransactOpts(ctx), s.hub)
 	s.hub.Mining()
 
 	// deploy `StateCommitmentChain` contract

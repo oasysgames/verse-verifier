@@ -14,14 +14,14 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
-	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
-	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
+	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/scc"
 )
 
 type SccVerifierTestSuite struct {

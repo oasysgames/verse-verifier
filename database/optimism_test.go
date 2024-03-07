@@ -6,7 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/suite"

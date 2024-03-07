@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/oasysgames/oasys-optimism-verifier/database"
-	tc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
+	tc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/scc"
 	"github.com/stretchr/testify/suite"
 )
 

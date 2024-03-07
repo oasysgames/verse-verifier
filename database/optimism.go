@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/scc"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
 )

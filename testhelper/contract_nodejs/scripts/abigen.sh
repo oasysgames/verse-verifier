@@ -3,12 +3,13 @@
 set -eu
 
 TARGETS="
-multicall2:contracts/Multicall2.sol
 scc:contracts/OasysStateCommitmentChain.sol
+l2oo:contracts/OasysL2OutputOracle.sol
 sccverifier:contracts/OasysStateCommitmentChainVerifier.sol
+l2ooverifier:contracts/OasysL2OutputOracleVerifier.sol
 "
 
-OUTPUT_DIR="$(cd $(dirname $0)/../../contracts; pwd)"
+OUTPUT_DIR="$(cd $(dirname $0)/../..; pwd)/contract"
 
 for target in $TARGETS; do
     pkg=$(echo $target | cut -d: -f1)
