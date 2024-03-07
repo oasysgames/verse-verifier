@@ -55,7 +55,7 @@ func init() {
 type EventCollector struct {
 	cfg    *config.Verifier
 	db     *database.Database
-	hub    ethutil.ReadOnlyClient
+	hub    ethutil.Client
 	signer common.Address
 	log    log.Logger
 }
@@ -63,7 +63,7 @@ type EventCollector struct {
 func NewEventCollector(
 	cfg *config.Verifier,
 	db *database.Database,
-	hub ethutil.ReadOnlyClient,
+	hub ethutil.Client,
 	signer common.Address,
 ) *EventCollector {
 	return &EventCollector{

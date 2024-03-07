@@ -92,7 +92,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	waitForUnlockWallets(ctx, ipc, conf, ks)
 
 	// create hub-layer client
-	hub, err := ethutil.NewReadOnlyClient(conf.HubLayer.RPC)
+	hub, err := ethutil.NewClient(conf.HubLayer.RPC)
 	if err != nil {
 		log.Crit("Failed to create hub-layer client", "err", err)
 	}
@@ -358,7 +358,7 @@ func newBlockCollector(
 	ctx context.Context,
 	c *config.Config,
 	db *database.Database,
-	hub ethutil.ReadOnlyClient,
+	hub ethutil.Client,
 ) *hublayer.BlockCollector {
 	if !c.Verifier.Enable {
 		return nil
@@ -371,7 +371,7 @@ func newEventCollector(
 	ctx context.Context,
 	c *config.Config,
 	db *database.Database,
-	hub ethutil.ReadOnlyClient,
+	hub ethutil.Client,
 ) *hublayer.EventCollector {
 	if !c.Verifier.Enable {
 		return nil
@@ -394,7 +394,7 @@ func newSccVerifier(
 	}
 
 	wallet, account := findWallet(c, ks, c.Verifier.Wallet)
-	signer, err := ethutil.NewWritableClient(
+	signer, err := ethutil.NewSignableClient(
 		new(big.Int).SetUint64(c.HubLayer.ChainId),
 		c.HubLayer.RPC,
 		wallet,
@@ -455,7 +455,7 @@ func startVerseDiscovery(
 
 					// add verse to SccVerifier
 					if c.Verifier.Enable && !verifier.HasVerse(verse.RPC, scc) {
-						if client, err := ethutil.NewReadOnlyClient(verse.RPC); err != nil {
+						if client, err := ethutil.NewClient(verse.RPC); err != nil {
 							log.Error("Failed to create verse-layer client", "err", err)
 						} else {
 							verifier.AddVerse(scc, client)
@@ -470,7 +470,7 @@ func startVerseDiscovery(
 							}
 
 							wallet, account := findWallet(c, ks, t.Wallet)
-							hubClient, err := ethutil.NewWritableClient(
+							hubClient, err := ethutil.NewSignableClient(
 								new(big.Int).SetUint64(c.HubLayer.ChainId),
 								c.HubLayer.RPC,
 								wallet,

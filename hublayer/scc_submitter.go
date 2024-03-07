@@ -46,7 +46,7 @@ func init() {
 
 type submitTask struct {
 	scc common.Address
-	hub ethutil.WritableClient
+	hub ethutil.SignableClient
 }
 
 type SccSubmitter struct {
@@ -106,7 +106,7 @@ func (w *SccSubmitter) workLoop(ctx context.Context, queue chan<- *submitTask) {
 		case <-tick.C:
 			w.hubs.Range(func(key, value any) bool {
 				scc, ok0 := key.(common.Address)
-				hub, ok1 := value.(ethutil.WritableClient)
+				hub, ok1 := value.(ethutil.SignableClient)
 				if !(ok0 && ok1) {
 					return true
 				}
@@ -136,7 +136,7 @@ func (w *SccSubmitter) workLoop(ctx context.Context, queue chan<- *submitTask) {
 	}
 }
 
-func (w *SccSubmitter) AddVerse(scc common.Address, hub ethutil.WritableClient) {
+func (w *SccSubmitter) AddVerse(scc common.Address, hub ethutil.SignableClient) {
 	if _, ok := w.hubs.Load(scc); !ok {
 		w.hubs.Store(scc, hub)
 	}

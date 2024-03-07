@@ -16,9 +16,11 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 )
@@ -148,8 +150,75 @@ func (b *TestBackend) NewBatchHeaderClient() (ethutil.BatchHeaderClient, error) 
 	return &TestBatchHeaderClient{b}, nil
 }
 
+func (b *TestBackend) GetProof(
+	ctx context.Context,
+	account common.Address,
+	keys []string,
+	blockNumber *big.Int,
+) (*gethclient.AccountResult, error) {
+	header, err := b.HeaderByNumber(ctx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	state, err := b.Blockchain().StateAt(header.Root)
+	if state == nil || err != nil {
+		return nil, err
+	}
+
+	storageTrie := state.StorageTrie(account)
+	storageHash := types.EmptyRootHash
+	codeHash := state.GetCodeHash(account)
+	storageProof := make([]gethclient.StorageResult, len(keys))
+
+	// if we have a storageTrie, (which means the account exists), we can update the storagehash
+	if storageTrie != nil {
+		storageHash = storageTrie.Hash()
+	} else {
+		// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
+		codeHash = crypto.Keccak256Hash(nil)
+	}
+
+	// create the proof for the storageKeys
+	for i, key := range keys {
+		if storageTrie != nil {
+			proof, storageError := state.GetStorageProof(account, common.HexToHash(key))
+			if storageError != nil {
+				return nil, storageError
+			}
+			storageProof[i] = gethclient.StorageResult{
+				Key:   key,
+				Value: state.GetState(account, common.HexToHash(key)).Big(),
+				Proof: toHexSlice(proof),
+			}
+		} else {
+			storageProof[i] = gethclient.StorageResult{
+				Key:   key,
+				Value: new(big.Int),
+				Proof: []string{},
+			}
+		}
+	}
+
+	// create the accountProof
+	accountProof, proofErr := state.GetProof(account)
+	if proofErr != nil {
+		return nil, proofErr
+	}
+
+	return &gethclient.AccountResult{
+		Address:      account,
+		AccountProof: toHexSlice(accountProof),
+		Balance:      state.GetBalance(account),
+		CodeHash:     codeHash,
+		Nonce:        state.GetNonce(account),
+		StorageHash:  storageHash,
+		StorageProof: storageProof,
+	}, state.Error()
+}
+
 type TestBatchHeaderClient struct {
-	ethutil.ReadOnlyClient
+	ethutil.Client
 }
 
 func (c *TestBatchHeaderClient) Get(
@@ -172,4 +241,12 @@ func (c *TestBatchHeaderClient) Get(
 
 func (c *TestBatchHeaderClient) Close() error {
 	return nil
+}
+
+func toHexSlice(b [][]byte) []string {
+	r := make([]string, len(b))
+	for i := range b {
+		r[i] = hexutil.Encode(b[i])
+	}
+	return r
 }

@@ -52,14 +52,14 @@ func init() {
 
 type verifyTask struct {
 	scc   common.Address
-	verse ethutil.ReadOnlyClient
+	verse ethutil.Client
 }
 
 // Worker to verify the events of OasysStateCommitmentChain.
 type SccVerifier struct {
 	cfg    *config.Verifier
 	db     *database.Database
-	signer ethutil.WritableClient
+	signer ethutil.SignableClient
 
 	verses *sync.Map
 	topic  *util.Topic
@@ -70,7 +70,7 @@ type SccVerifier struct {
 func NewSccVerifier(
 	cfg *config.Verifier,
 	db *database.Database,
-	signer ethutil.WritableClient,
+	signer ethutil.SignableClient,
 ) *SccVerifier {
 	return &SccVerifier{
 		cfg:    cfg,
@@ -106,7 +106,7 @@ func (w *SccVerifier) Start(ctx context.Context) {
 		case <-tick.C:
 			w.verses.Range(func(key, value interface{}) bool {
 				scc, ok0 := key.(common.Address)
-				verse, ok1 := value.(ethutil.ReadOnlyClient)
+				verse, ok1 := value.(ethutil.Client)
 				if !(ok0 && ok1) {
 					return true
 				}
@@ -136,11 +136,11 @@ func (w *SccVerifier) Start(ctx context.Context) {
 	}
 }
 
-func (w *SccVerifier) Signer() ethutil.WritableClient {
+func (w *SccVerifier) Signer() ethutil.SignableClient {
 	return w.signer
 }
 
-func (w *SccVerifier) AddVerse(scc common.Address, verse ethutil.ReadOnlyClient) {
+func (w *SccVerifier) AddVerse(scc common.Address, verse ethutil.Client) {
 	w.verses.Store(scc, verse)
 }
 
@@ -152,7 +152,7 @@ func (w *SccVerifier) HasVerse(rpc string, scc common.Address) bool {
 	if value, ok := w.verses.Load(scc); !ok {
 		return false
 	} else {
-		t, _ := value.(ethutil.ReadOnlyClient)
+		t, _ := value.(ethutil.Client)
 		return t.URL() == rpc
 	}
 }
@@ -231,7 +231,7 @@ func (w *SccVerifier) work(ctx context.Context, task *verifyTask) {
 
 func (w *SccVerifier) verifyState(
 	ctx context.Context,
-	verse ethutil.ReadOnlyClient,
+	verse ethutil.Client,
 	state *database.OptimismState,
 ) (bool, database.Signature, error) {
 	logCtx := []interface{}{

@@ -17,7 +17,7 @@ import (
 type BlockCollector struct {
 	cfg *config.Verifier
 	db  *database.Database
-	hub ethutil.ReadOnlyClient
+	hub ethutil.Client
 
 	log log.Logger
 }
@@ -25,7 +25,7 @@ type BlockCollector struct {
 func NewBlockCollector(
 	cfg *config.Verifier,
 	db *database.Database,
-	hub ethutil.ReadOnlyClient,
+	hub ethutil.Client,
 ) *BlockCollector {
 	return &BlockCollector{
 		cfg: cfg,

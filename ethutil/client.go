@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/lmittmann/w3"
 	"github.com/lmittmann/w3/module/eth"
@@ -17,20 +18,22 @@ import (
 
 type SignDataFn = func(hash []byte) (sig []byte, err error)
 
-type ReadOnlyClient interface {
+type Client interface {
 	bind.ContractBackend
 	bind.DeployBackend
 
 	URL() string
+	BlockNumber(ctx context.Context) (uint64, error)
 	TransactionByHash(
 		ctx context.Context,
 		hash common.Hash,
 	) (tx *types.Transaction, isPending bool, err error)
 	NewBatchHeaderClient() (BatchHeaderClient, error)
+	GetProof(ctx context.Context, account common.Address, keys []string, blockNumber *big.Int) (*gethclient.AccountResult, error)
 }
 
-type WritableClient interface {
-	ReadOnlyClient
+type SignableClient interface {
+	Client
 
 	ChainID() *big.Int
 	Signer() common.Address
@@ -39,38 +42,38 @@ type WritableClient interface {
 	TransactOpts(ctx context.Context) *bind.TransactOpts
 }
 
-type readOnlyClient struct {
-	ethclient.Client
+type client struct {
+	*ethclient.Client
 
 	url string
-	rpc rpc.Client
+	rpc *rpc.Client
 }
 
-func NewReadOnlyClient(url string) (ReadOnlyClient, error) {
-	rpcClient, err := rpc.Dial(url)
+func NewClient(url string) (Client, error) {
+	c, err := rpc.Dial(url)
 	if err != nil {
 		return nil, err
 	}
 
-	return &readOnlyClient{
-		Client: *ethclient.NewClient(rpcClient),
+	return &client{
+		Client: ethclient.NewClient(c),
 		url:    url,
-		rpc:    *rpcClient,
+		rpc:    c,
 	}, nil
 }
 
-func (c *readOnlyClient) URL() string {
+func (c *client) URL() string {
 	return c.url
 }
 
-func (c *readOnlyClient) TransactionByHash(
+func (c *client) TransactionByHash(
 	ctx context.Context,
 	hash common.Hash,
 ) (tx *types.Transaction, isPending bool, err error) {
 	return c.Client.TransactionByHash(ctx, hash)
 }
 
-func (c *readOnlyClient) NewBatchHeaderClient() (BatchHeaderClient, error) {
+func (c *client) NewBatchHeaderClient() (BatchHeaderClient, error) {
 	client, err := w3.Dial(c.URL())
 	if err != nil {
 		return nil, err
@@ -78,44 +81,48 @@ func (c *readOnlyClient) NewBatchHeaderClient() (BatchHeaderClient, error) {
 	return &BatchHeaderRPCClient{client: client}, nil
 }
 
-type writableClient struct {
-	ReadOnlyClient
+func (c *client) GetProof(ctx context.Context, account common.Address, keys []string, blockNumber *big.Int) (*gethclient.AccountResult, error) {
+	return gethclient.New(c.rpc).GetProof(ctx, account, keys, blockNumber)
+}
+
+type signableClient struct {
+	Client
 
 	chainId *big.Int
 	wallet  accounts.Wallet
 	signer  *accounts.Account
 }
 
-func NewWritableClient(
+func NewSignableClient(
 	chainId *big.Int,
 	rpc string,
 	wallet accounts.Wallet,
 	signer *accounts.Account,
-) (WritableClient, error) {
-	rc, err := NewReadOnlyClient(rpc)
+) (SignableClient, error) {
+	c, err := NewClient(rpc)
 	if err != nil {
 		return nil, err
 	}
 
-	return &writableClient{
-		ReadOnlyClient: rc,
-		chainId:        chainId,
-		wallet:         wallet,
-		signer:         signer,
+	return &signableClient{
+		Client:  c,
+		chainId: chainId,
+		wallet:  wallet,
+		signer:  signer,
 	}, nil
 }
 
-func (c *writableClient) ChainID() *big.Int {
+func (c *signableClient) ChainID() *big.Int {
 	return new(big.Int).Set(c.chainId)
 }
 
 // Return signer address.
-func (c *writableClient) Signer() common.Address {
+func (c *signableClient) Signer() common.Address {
 	return c.signer.Address
 }
 
 // Return transaction authorization data.
-func (c *writableClient) TransactOpts(ctx context.Context) *bind.TransactOpts {
+func (c *signableClient) TransactOpts(ctx context.Context) *bind.TransactOpts {
 	return &bind.TransactOpts{
 		Context: ctx,
 		From:    c.Signer(),
@@ -125,11 +132,11 @@ func (c *writableClient) TransactOpts(ctx context.Context) *bind.TransactOpts {
 	}
 }
 
-func (c *writableClient) SignData(data []byte) (sig []byte, err error) {
+func (c *signableClient) SignData(data []byte) (sig []byte, err error) {
 	return c.wallet.SignData(*c.signer, "", data)
 }
 
-func (c *writableClient) SignTx(tx *types.Transaction) (*types.Transaction, error) {
+func (c *signableClient) SignTx(tx *types.Transaction) (*types.Transaction, error) {
 	return c.wallet.SignTx(*c.signer, tx, c.ChainID())
 }
 

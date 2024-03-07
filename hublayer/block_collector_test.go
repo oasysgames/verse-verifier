@@ -154,7 +154,7 @@ func (r *reorgBackend) reorg() {
 }
 
 func (r *reorgBackend) NewBatchHeaderClient() (ethutil.BatchHeaderClient, error) {
-	return &testhelper.TestBatchHeaderClient{ReadOnlyClient: r}, nil
+	return &testhelper.TestBatchHeaderClient{Client: r}, nil
 }
 
 func (r *reorgBackend) HeaderByNumber(_ context.Context, b *big.Int) (*types.Header, error) {
