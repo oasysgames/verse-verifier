@@ -2,9 +2,11 @@ package database
 
 import (
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"gorm.io/gorm"
 )
 
@@ -172,4 +174,14 @@ func (db *OPEventDB[T, PT]) Deletes(contract common.Address, rollupIndex uint64)
 	}
 
 	return affected, nil
+}
+
+func NewMessage(event OPEvent, l1ChainID *big.Int, approved bool) *ethutil.Message {
+	return ethutil.NewMessage(
+		l1ChainID,
+		event.GetContract().Address,
+		new(big.Int).SetUint64(event.GetRollupIndex()),
+		event.GetRollupHash(),
+		approved,
+	)
 }
