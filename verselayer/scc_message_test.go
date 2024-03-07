@@ -10,14 +10,14 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	"github.com/stretchr/testify/suite"
 )
 
 type SccSigTestSuite struct {
 	suite.Suite
 
-	b          *testhelper.TestBackend
+	b          *backend.SignableBackend
 	approveMsg *SccMessage
 	rejectMsg  *SccMessage
 }
@@ -27,7 +27,7 @@ func TestSccSig(t *testing.T) {
 }
 
 func (s *SccSigTestSuite) SetupSuite() {
-	s.b = testhelper.NewTestBackend()
+	s.b = backend.NewSignableBackend(nil, nil, nil)
 	s.approveMsg = NewSccMessage(
 		big.NewInt(1),
 		common.HexToAddress("0x469b39F9425C26baF6E782C89C11425F93a02814"),

@@ -30,7 +30,6 @@ func (s *CacheTestSuite) SetupTest() {
 		s.sm.Operators = append(s.sm.Operators, s.RandAddress())
 		s.sm.Stakes = append(s.sm.Stakes, big.NewInt(int64(i)))
 		s.sm.Candidates = append(s.sm.Candidates, true)
-		s.sm.NewCursor = big.NewInt(0)
 	}
 }
 

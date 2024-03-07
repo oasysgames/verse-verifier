@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	thttp "github.com/oasysgames/oasys-optimism-verifier/testhelper/http"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -23,7 +23,7 @@ func TestVerseDiscovery(t *testing.T) {
 
 func (s *VerseDiscoveryTestSuite) TestDiscover() {
 	// setup test client
-	client := testhelper.NewTestHTTPClient(func(req *http.Request) *http.Response {
+	client := thttp.NewTestHTTPClient(func(req *http.Request) *http.Response {
 		s.Equal("https://example.com/", req.URL.String())
 		return &http.Response{
 			StatusCode: 200,

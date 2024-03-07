@@ -19,6 +19,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
 	"github.com/oklog/ulid/v2"
@@ -32,18 +33,12 @@ func TestNode(t *testing.T) {
 type NodeTestSuite struct {
 	testhelper.Suite
 
-	baseTime     time.Time
-	b0           *testhelper.TestBackend
-	b1           *testhelper.TestBackend
-	b2           *testhelper.TestBackend
-	stakemanager *stakemanager.Cache
-	signer0      common.Address
-	signer1      common.Address
-	signer2      common.Address
-	scc0         common.Address
-	scc1         common.Address
-	scc2         common.Address
-	sigs         map[common.Address]map[common.Address][]*database.OptimismSignature
+	baseTime                  time.Time
+	stakemanager              *stakemanager.Cache
+	b0, b1, b2                *backend.SignableBackend
+	signer0, signer1, signer2 common.Address
+	scc0, scc1, scc2          common.Address
+	sigs                      map[common.Address]map[common.Address][]*database.OptimismSignature
 
 	bootnode *Node
 	node1    *Node
@@ -52,9 +47,9 @@ type NodeTestSuite struct {
 
 func (s *NodeTestSuite) SetupTest() {
 	s.baseTime = time.Now().UTC()
-	s.b0 = testhelper.NewTestBackend()
-	s.b1 = s.b0.NewAccountBackend()
-	s.b2 = s.b0.NewAccountBackend()
+	s.b0 = backend.NewSignableBackend(nil, nil, nil)
+	s.b1 = s.b0.WithNewAccount()
+	s.b2 = s.b0.WithNewAccount()
 	s.signer0 = s.b0.Signer()
 	s.signer1 = s.b1.Signer()
 	s.signer2 = s.b2.Signer()
@@ -63,7 +58,7 @@ func (s *NodeTestSuite) SetupTest() {
 	s.scc2 = s.RandAddress()
 	s.sigs = map[common.Address]map[common.Address][]*database.OptimismSignature{}
 
-	backends := []*testhelper.TestBackend{s.b0, s.b1, s.b2}
+	backends := []*backend.SignableBackend{s.b0, s.b1, s.b2}
 	signers := []common.Address{s.signer0, s.signer1}
 	sccs := []common.Address{s.scc0, s.scc1}
 
@@ -75,7 +70,6 @@ func (s *NodeTestSuite) SetupTest() {
 		sm.Operators = append(sm.Operators, signer)
 		sm.Stakes = append(sm.Stakes, tenMillionEther)
 		sm.Candidates = append(sm.Candidates, true)
-		sm.NewCursor = big.NewInt(0)
 	}
 	s.stakemanager.Refresh(context.Background())
 
@@ -387,7 +381,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 	cases := []struct {
-		b    *testhelper.TestBackend
+		b    *backend.SignableBackend
 		want *pb.OptimismSignature
 	}{
 		{

@@ -11,6 +11,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/hublayer/contracts/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	tmcall2 "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/multicall2"
 	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/scc"
 	tsccv "github.com/oasysgames/oasys-optimism-verifier/testhelper/contracts/sccverifier"
@@ -20,8 +21,8 @@ type SccTestSuite struct {
 	testhelper.Suite
 
 	db    *database.Database
-	hub   *testhelper.TestBackend
-	verse *testhelper.TestBackend
+	hub   *backend.SignableBackend
+	verse *backend.Backend
 
 	sm *testhelper.StakeManagerMock
 
@@ -43,8 +44,8 @@ func (s *SccTestSuite) SetupTest() {
 	s.db, _ = database.NewDatabase(&config.Database{Path: ":memory:"})
 
 	// setup test chain
-	s.hub = testhelper.NewTestBackend()
-	s.verse = testhelper.NewTestBackend()
+	s.hub = backend.NewSignableBackend(nil, nil, nil)
+	s.verse = backend.NewBackend(nil, 0)
 	s.sm = &testhelper.StakeManagerMock{}
 
 	// deploy `Multicall2` contract

@@ -42,7 +42,6 @@ func (s *SccSubmitterTestSuite) TestWork() {
 			new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000)),
 		)
 		s.sm.Candidates = append(s.sm.Candidates, true)
-		s.sm.NewCursor = big.NewInt(0)
 	}
 
 	for i := range s.Range(0, indexes) {
