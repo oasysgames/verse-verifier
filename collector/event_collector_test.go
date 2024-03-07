@@ -4,79 +4,100 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
-	tc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/scc"
+	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
+	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/scc"
 	"github.com/stretchr/testify/suite"
 )
 
 type EventCollectorTestSuite struct {
-	SccTestSuite
+	backend.BackendSuite
+
+	collector *EventCollector
+	eventDB   database.IOPEventDB
 }
 
 func TestEventCollector(t *testing.T) {
 	suite.Run(t, new(EventCollectorTestSuite))
 }
 
-func (s *EventCollectorTestSuite) TestProcessStateBatchAppendedEvent() {
+func (s *EventCollectorTestSuite) SetupTest() {
+	s.BackendSuite.SetupTest()
+
+	s.collector = NewEventCollector(&config.Verifier{
+		Interval:         time.Millisecond,
+		EventFilterLimit: 1000,
+	}, s.DB, s.Hub, s.SignableHub.Signer())
+	s.eventDB = database.NewOPEventDB[database.OptimismState](s.DB)
+}
+
+func (s *EventCollectorTestSuite) TestHandleRollupedEvent() {
 	// emit `StateBatchAppended` events
-	var emits []*tc.SccStateBatchAppended
-	for i := range s.Range(0, 10) {
-		emits = append(emits, s.emitStateBatchAppendedEvent(i))
+	emits := make([]*tscc.SccStateBatchAppended, 10)
+	for i := range s.Range(0, len(emits)) {
+		_, emits[i] = s.EmitStateBatchAppended(i)
 	}
 
 	// collect `StateBatchAppended` events
-	s.stateCollector.work(context.Background())
+	s.collector.work(context.Background())
 
 	// assert
-	for i := range s.Range(0, 10) {
-		got, _ := s.db.Optimism.FindState(s.sccAddr, uint64(i))
-		s.Equal(s.sccAddr, got.OptimismScc.Address)
-		s.Equal(emits[i].BatchIndex.Uint64(), got.BatchIndex)
-		s.Equal(emits[i].BatchRoot[:], got.BatchRoot[:])
-		s.Equal(emits[i].BatchSize.Uint64(), got.BatchSize)
-		s.Equal(emits[i].PrevTotalElements.Uint64(), got.PrevTotalElements)
-		s.Equal(emits[i].ExtraData, got.ExtraData)
+	for i := range s.Range(0, len(emits)) {
+		got, err := s.eventDB.FindByRollupIndex(s.SCCAddr, uint64(i))
+		s.NoError(err)
+
+		gott := got.(*database.OptimismState)
+		s.Equal(s.SCCAddr, gott.Contract.Address)
+		s.Equal(emits[i].BatchIndex.Uint64(), gott.BatchIndex)
+		s.Equal(emits[i].BatchRoot[:], gott.BatchRoot[:])
+		s.Equal(emits[i].BatchSize.Uint64(), gott.BatchSize)
+		s.Equal(emits[i].PrevTotalElements.Uint64(), gott.PrevTotalElements)
+		s.Equal(emits[i].ExtraData, gott.ExtraData)
 	}
 }
 
-func (s *EventCollectorTestSuite) TestProcessStateBatchDeletedEvent() {
+func (s *EventCollectorTestSuite) TestHandleDeletedEvent() {
 	ctx := context.Background()
 
 	// emit `StateBatchAppended` events
-	var emits []*tc.SccStateBatchAppended
-	for i := range s.Range(0, 10) {
-		emits = append(emits, s.emitStateBatchAppendedEvent(i))
+	emits := make([]*tscc.SccStateBatchAppended, 10)
+	for i := range s.Range(0, len(emits)) {
+		_, emits[i] = s.EmitStateBatchAppended(i)
 	}
 
 	// collect `StateBatchAppended` events
-	s.stateCollector.work(ctx)
+	s.collector.work(ctx)
 
 	// create signature records
 	var creates []*database.OptimismSignature
-	for i := range s.Range(0, 10) {
-		sig, _ := s.db.OPSignature.Save(
+	for i := range s.Range(0, len(emits)) {
+		sig, err := s.DB.OPSignature.Save(
 			nil, nil,
-			s.hub.Signer(),
-			s.sccAddr,
+			s.SignableHub.Signer(),
+			s.SCCAddr,
 			emits[i].BatchIndex.Uint64(),
 			emits[i].BatchRoot,
 			true,
 			database.RandSignature(),
 		)
+		s.NoError(err)
 		creates = append(creates, sig)
 	}
 
 	// emit `StateBatchDeleted` event
-	s.scc.EmitStateBatchDeleted(
-		s.hub.TransactOpts(ctx),
+	_, err := s.TSCC.EmitStateBatchDeleted(
+		s.SignableHub.TransactOpts(ctx),
 		emits[5].BatchIndex,
 		emits[5].BatchRoot,
 	)
-	s.mining()
+	s.NoError(err)
+	s.Mining()
 
 	// collect `StateBatchDeleted` events
-	s.stateCollector.work(ctx)
+	s.collector.work(ctx)
 
 	// assert
 	for i := range s.Range(0, 10) {
@@ -84,44 +105,48 @@ func (s *EventCollectorTestSuite) TestProcessStateBatchDeletedEvent() {
 		if i >= 5 {
 			want = database.ErrNotFound
 		}
-		_, err0 := s.db.Optimism.FindState(s.sccAddr, uint64(i))
-		_, err1 := s.db.OPSignature.FindByID(creates[i].ID)
+		_, err0 := s.eventDB.FindByRollupIndex(s.SCCAddr, uint64(i))
+		_, err1 := s.DB.OPSignature.FindByID(creates[i].ID)
 		s.Equal(want, err0)
 		s.Equal(want, err1)
 	}
 }
 
-func (s *EventCollectorTestSuite) TestProcessStateBatchVerifiedEvent() {
+func (s *EventCollectorTestSuite) TestHandleVerifiedEvent() {
 	// emit `EmitStateBatchVerified` events
 	for index := range s.Range(0, 5) {
-		s.scc.EmitStateBatchVerified(
-			s.hub.TransactOpts(context.Background()),
+		_, err := s.TSCC.EmitStateBatchVerified(
+			s.SignableHub.TransactOpts(context.Background()),
 			big.NewInt(int64(index)),
 			s.RandHash(),
 		)
-		s.mining()
+		s.NoError(err)
+		s.Mining()
 	}
 
 	// collect `EmitStateBatchVerified` events
-	s.stateCollector.work(context.Background())
+	s.collector.work(context.Background())
 
 	// assert
-	scc, _ := s.db.OPContract.FindOrCreate(s.sccAddr)
+	scc, _ := s.DB.OPContract.FindOrCreate(s.SCCAddr)
 	s.Equal(uint64(5), scc.NextIndex)
 }
 
-func (s *EventCollectorTestSuite) TestNoHandleOtherEvent() {
+func (s *EventCollectorTestSuite) TestIgnoreOtherEvent() {
 	ctx := context.Background()
 
 	// emit `StateBatchAppended` and `Other` events
 	for i := range s.Range(0, 10) {
-		s.emitStateBatchAppendedEvent(i)
-		s.scc.EmitOtherEvent(s.hub.TransactOpts(ctx), big.NewInt(11))
-		s.mining()
+		s.EmitStateBatchAppended(i)
+		s.Mining()
+
+		_, err := s.TSCC.EmitOtherEvent(s.SignableHub.TransactOpts(ctx), big.NewInt(11))
+		s.NoError(err)
+		s.Mining()
 	}
 
 	// collect `StateBatchAppended` events
-	s.stateCollector.work(ctx)
+	s.collector.work(ctx)
 
 	// assert
 	for i := range s.Range(0, 20) {
@@ -129,7 +154,7 @@ func (s *EventCollectorTestSuite) TestNoHandleOtherEvent() {
 		if i >= 10 {
 			want = database.ErrNotFound
 		}
-		_, err := s.db.Optimism.FindState(s.sccAddr, uint64(i))
+		_, err := s.eventDB.FindByRollupIndex(s.SCCAddr, uint64(i))
 		s.ErrorIs(err, want)
 	}
 }
@@ -138,43 +163,44 @@ func (s *EventCollectorTestSuite) TestHandleReorganization() {
 	ctx := context.Background()
 
 	// emit `StateBatchAppended` events
-	var emits []*tc.SccStateBatchAppended
-	for i := range s.Range(0, 10) {
-		emits = append(emits, s.emitStateBatchAppendedEvent(i))
+	emits := make([]*tscc.SccStateBatchAppended, 10)
+	for i := range s.Range(0, len(emits)) {
+		_, emits[i] = s.EmitStateBatchAppended(i)
 	}
 
 	// collect `StateBatchAppended` events
-	s.stateCollector.work(ctx)
+	s.collector.work(ctx)
 
 	// create signature records
 	var creates []*database.OptimismSignature
-	for i := range s.Range(0, 10) {
-		sig, _ := s.db.OPSignature.Save(
+	for i := range s.Range(0, len(emits)) {
+		sig, err := s.DB.OPSignature.Save(
 			nil, nil,
-			s.hub.Signer(),
-			s.sccAddr,
+			s.SignableHub.Signer(),
+			s.SCCAddr,
 			emits[i].BatchIndex.Uint64(),
 			emits[i].BatchRoot,
 			true,
 			database.RandSignature(),
 		)
+		s.NoError(err)
 		creates = append(creates, sig)
 	}
 
 	// simulate chain reorganization
-	s.emitStateBatchAppendedEvent(4)
-	s.stateCollector.work(ctx)
+	s.EmitStateBatchAppended(4)
+	s.collector.work(ctx)
 
 	// assert
-	for i := range s.Range(0, 10) {
-		_, err := s.db.Optimism.FindState(s.sccAddr, uint64(i))
+	for i := range s.Range(0, len(emits)) {
+		_, err := s.eventDB.FindByRollupIndex(s.SCCAddr, uint64(i))
 		if i < 5 {
 			s.NoError(err)
 		} else {
 			s.Error(err, database.ErrNotFound)
 		}
 
-		_, err = s.db.OPSignature.FindByID(creates[i].ID)
+		_, err = s.DB.OPSignature.FindByID(creates[i].ID)
 		if i < 4 {
 			s.NoError(err)
 		} else {
