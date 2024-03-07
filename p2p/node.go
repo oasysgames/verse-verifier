@@ -13,7 +13,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/metrics"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -40,8 +39,7 @@ const (
 )
 
 var (
-	eom             = &pb.Stream{Body: &pb.Stream_Eom{Eom: nil}}
-	tenMillionEther = new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000))
+	eom = &pb.Stream{Body: &pb.Stream_Eom{Eom: nil}}
 
 	// miscellaneous messages
 	misc_SIGRECEIVED = []byte("SIGNATURES_RECEIVED")
@@ -265,7 +263,7 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 			signer := common.BytesToAddress(remote.Signer)
 			if _, ok := w.ignoreSigners[signer]; ok {
 				continue
-			} else if w.stakemanager.StakeBySigner(signer).Cmp(tenMillionEther) == -1 {
+			} else if w.stakemanager.StakeBySigner(signer).Cmp(ethutil.TenMillionOAS) == -1 {
 				continue
 			}
 
@@ -497,7 +495,7 @@ func (w *Node) handleOptimismSignatureExchangeRequest(
 
 	for _, req := range requests {
 		signer := common.BytesToAddress(req.Signer)
-		if w.stakemanager.StakeBySigner(signer).Cmp(tenMillionEther) == -1 {
+		if w.stakemanager.StakeBySigner(signer).Cmp(ethutil.TenMillionOAS) == -1 {
 			continue
 		}
 
@@ -779,7 +777,7 @@ func (w *Node) publishLatestSignatures(ctx context.Context) {
 	}
 	filterd := []*database.OptimismSignature{}
 	for _, sig := range latests {
-		if w.stakemanager.StakeBySigner(sig.Signer.Address).Cmp(tenMillionEther) >= 0 {
+		if w.stakemanager.StakeBySigner(sig.Signer.Address).Cmp(ethutil.TenMillionOAS) >= 0 {
 			filterd = append(filterd, sig)
 		}
 	}

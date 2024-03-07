@@ -90,7 +90,9 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		gas_multiplier: 1.5
 		batch_size: 100
 		max_gas: 1_000
-		verifier_address: '0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA'
+		scc_verifier_address: '0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA'
+		l2oo_verifier_address: '0x67a16865f03F6d46a206EF894F7A56597E0152b7'
+		use_multicall: true
 		multicall2_address: '0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5'
 		targets:
 			- chain_id: 12345
@@ -252,15 +254,17 @@ func (s *ConfigTestSuite) TestParseConfig() {
 	}, got.Verifier)
 
 	s.Equal(Submitter{
-		Enable:            true,
-		Concurrency:       10,
-		Interval:          5 * time.Second,
-		Confirmations:     4,
-		GasMultiplier:     1.5,
-		BatchSize:         100,
-		MaxGas:            1_000,
-		VerifierAddress:   "0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA",
-		Multicall2Address: "0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5",
+		Enable:              true,
+		Concurrency:         10,
+		Interval:            5 * time.Second,
+		Confirmations:       4,
+		GasMultiplier:       1.5,
+		BatchSize:           100,
+		MaxGas:              1_000,
+		SCCVerifierAddress:  "0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA",
+		L2OOVerifierAddress: "0x67a16865f03F6d46a206EF894F7A56597E0152b7",
+		UseMulticall:        true,
+		Multicall2Address:   "0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5",
 		Targets: []struct {
 			ChainID uint64 "json:\"chain_id\"     mapstructure:\"chain_id\"     validate:\"required\""
 			Wallet  string "json:\"wallet\" validate:\"required\""
@@ -431,8 +435,10 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(6, got.Submitter.Confirmations)
 	s.Equal(1.1, got.Submitter.GasMultiplier)
 	s.Equal(20, got.Submitter.BatchSize)
-	s.Equal(5_000_000, got.Submitter.MaxGas)
-	s.Equal("0x5200000000000000000000000000000000000014", got.Submitter.VerifierAddress)
+	s.Equal(uint64(5_000_000), got.Submitter.MaxGas)
+	s.Equal("0x5200000000000000000000000000000000000014", got.Submitter.SCCVerifierAddress)
+	s.Equal("0xF62fD2d4ef5a99C5bAa1effd0dc20889c5021E1c", got.Submitter.L2OOVerifierAddress)
+	s.Equal(true, got.Submitter.UseMulticall)
 	s.Equal("0x5200000000000000000000000000000000000022", got.Submitter.Multicall2Address)
 
 	s.True(got.Beacon.Enable)

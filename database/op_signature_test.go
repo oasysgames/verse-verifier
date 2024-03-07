@@ -1,6 +1,7 @@
 package database
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -340,4 +341,16 @@ func (s *OptimismSignatureDBTestSuite) TestSequentialFinder() {
 	assert(gots3, sigtree[3])
 	assert(gots4, sigtree[4])
 	assert(gots5, []*OptimismSignature{})
+}
+
+func (s *OptimismSignatureDBTestSuite) TestSort() {
+	sigs := []*OptimismSignature{
+		{Signer: Signer{Address: common.HexToAddress("0x2")}},
+		{Signer: Signer{Address: common.HexToAddress("0x1")}},
+		{Signer: Signer{Address: common.HexToAddress("0x0")}},
+	}
+	sort.Sort(OptimismSignatures(sigs))
+	s.Equal(common.HexToAddress("0x0"), sigs[0].Signer.Address)
+	s.Equal(common.HexToAddress("0x1"), sigs[1].Signer.Address)
+	s.Equal(common.HexToAddress("0x2"), sigs[2].Signer.Address)
 }

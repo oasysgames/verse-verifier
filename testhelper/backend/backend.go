@@ -132,6 +132,11 @@ func (b *Backend) GetHeaderBatch(
 	return headers, nil
 }
 
+func (b *Backend) TxSender(tx *types.Transaction) (common.Address, error) {
+	signer := types.MakeSigner(b.Blockchain().Config(), common.Big0)
+	return types.Sender(signer, tx)
+}
+
 func (b *Backend) Mining() *types.Header {
 	b.Commit()
 	return b.Blockchain().CurrentHeader()

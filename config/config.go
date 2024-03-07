@@ -54,14 +54,16 @@ var (
 		"verifier.state_collect_timeout": 15 * time.Second,
 		"verifier.db_optimize_interval":  time.Hour,
 
-		"submitter.interval":           15 * time.Second,
-		"submitter.concurrency":        50,
-		"submitter.confirmations":      6,
-		"submitter.gas_multiplier":     1.1,
-		"submitter.batch_size":         20,
-		"submitter.max_gas":            5_000_000,
-		"submitter.verifier_address":   "0x5200000000000000000000000000000000000014",
-		"submitter.multicall2_address": "0x5200000000000000000000000000000000000022",
+		"submitter.interval":              15 * time.Second,
+		"submitter.concurrency":           50,
+		"submitter.confirmations":         6,
+		"submitter.gas_multiplier":        1.1,
+		"submitter.batch_size":            20,
+		"submitter.max_gas":               5_000_000,
+		"submitter.scc_verifier_address":  "0x5200000000000000000000000000000000000014",
+		"submitter.l2oo_verifier_address": "0xF62fD2d4ef5a99C5bAa1effd0dc20889c5021E1c",
+		"submitter.use_multicall":         true,
+		"submitter.multicall2_address":    "0x5200000000000000000000000000000000000022",
 
 		"beacon.enable":   true,
 		"beacon.endpoint": "https://script.google.com/macros/s/AKfycbzJpDKyn271jbm5otk_BxGkrS2b1YdMQerVq2-XxLdTOdhUPKCZICqvagvGgByxx_nq0Q/exec",
@@ -367,12 +369,16 @@ type Submitter struct {
 	BatchSize int `json:"batch_size" mapstructure:"batch_size"`
 
 	// Maximum gas of calls for Multicall2.
-	MaxGas int `json:"max_gas" mapstructure:"max_gas"`
+	MaxGas uint64 `json:"max_gas" mapstructure:"max_gas"`
 
-	// Address of the OasysStateCommitmentChain contract.
-	VerifierAddress string `json:"verifier_address" mapstructure:"verifier_address"`
+	// Address of the OasysStateCommitmentChainVerifier contract.
+	SCCVerifierAddress string `json:"scc_verifier_address" mapstructure:"scc_verifier_address"`
+
+	// Address of the OasysL2OutputOracleVerifier contract.
+	L2OOVerifierAddress string `json:"l2oo_verifier_address" mapstructure:"l2oo_verifier_address"`
 
 	// Address of the Multicall2 contract.
+	UseMulticall      bool   `json:"use_multicall" mapstructure:"use_multicall"`
 	Multicall2Address string `json:"multicall2_address" mapstructure:"multicall2_address"`
 
 	Targets []struct {
@@ -382,6 +388,10 @@ type Submitter struct {
 		// Name of the wallet to send transaction.
 		Wallet string `json:"wallet" validate:"required"`
 	} `json:"targets" validate:"dive"`
+}
+
+func (c *Submitter) MultiplyGas(base uint64) uint64 {
+	return uint64(float64(base) * c.GasMultiplier)
 }
 
 type Beacon struct {

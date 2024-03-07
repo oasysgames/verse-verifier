@@ -66,7 +66,7 @@ func (s *NodeTestSuite) SetupTest() {
 	for _, signer := range signers {
 		sm.Owners = append(sm.Owners, s.RandAddress())
 		sm.Operators = append(sm.Operators, signer)
-		sm.Stakes = append(sm.Stakes, tenMillionEther)
+		sm.Stakes = append(sm.Stakes, ethutil.TenMillionOAS)
 		sm.Candidates = append(sm.Candidates, true)
 	}
 	s.stakemanager.Refresh(context.Background())

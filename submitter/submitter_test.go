@@ -1,9 +1,7 @@
-package hublayer
+package submitter
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"math/big"
 	"sort"
 	"testing"
@@ -11,185 +9,147 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
+	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
+	tscc "github.com/oasysgames/oasys-optimism-verifier/testhelper/contract/scc"
+	"github.com/oasysgames/oasys-optimism-verifier/verse"
 	"github.com/stretchr/testify/suite"
 )
 
-type SccSubmitterTestSuite struct {
-	SccTestSuite
+type SubmitterTestSuite struct {
+	backend.BackendSuite
+
+	submitter *Submitter
+	task      verse.TransactableVerse
 }
 
-func TestSccSubmitter(t *testing.T) {
-	suite.Run(t, new(SccSubmitterTestSuite))
+func TestSubmitter(t *testing.T) {
+	suite.Run(t, new(SubmitterTestSuite))
 }
 
-func (s *SccSubmitterTestSuite) TestWork() {
-	var (
-		indexes = 5
+func (s *SubmitterTestSuite) SetupTest() {
+	s.BackendSuite.SetupTest()
 
-		signers    [20]common.Address
-		signatures [][]*database.OptimismSignature
-	)
-
-	for i := range s.Range(0, len(signers)) {
-		signers[i] = s.RandAddress()
-
-		s.sm.Owners = append(s.sm.Owners, s.RandAddress())
-		s.sm.Operators = append(s.sm.Operators, signers[i])
-		s.sm.Stakes = append(
-			s.sm.Stakes,
-			new(big.Int).Mul(big.NewInt(params.Ether), big.NewInt(10_000_000)),
-		)
-		s.sm.Candidates = append(s.sm.Candidates, true)
+	// Setup `StakeManager` contract
+	for i := range s.Range(0, 10) {
+		s.StakeManager.Owners = append(s.StakeManager.Owners, s.RandAddress())
+		s.StakeManager.Operators = append(s.StakeManager.Operators, s.RandAddress())
+		s.StakeManager.Stakes = append(s.StakeManager.Stakes,
+			new(big.Int).Add(ethutil.TenMillionOAS, big.NewInt(int64(10-i))))
+		s.StakeManager.Candidates = append(s.StakeManager.Candidates, true)
 	}
 
-	for i := range s.Range(0, indexes) {
-		signatures = append(signatures, make([]*database.OptimismSignature, len(signers)))
+	// Setup submitter
+	s.submitter = NewSubmitter(&config.Submitter{
+		Interval:          0,
+		Concurrency:       0,
+		Confirmations:     0,
+		GasMultiplier:     1.0,
+		BatchSize:         20,
+		MaxGas:            500_000_000,
+		UseMulticall:      true, // TODO
+		Multicall2Address: s.MulticallAddr.String(),
+	}, s.DB, s.StakeManager)
 
-		batchIndex := uint64(i)
-		batchRoot := s.RandHash()
-		batchSize := uint64(i)
-		prevTotalElements := uint64(i + 1)
-		extraData := []byte(fmt.Sprintf("%d", i))
-		approved := i < indexes-1
+	s.task = verse.
+		NewOPLegacy(s.DB, s.Hub, s.SCCAddr).
+		WithTransactable(s.SignableHub, s.SCCVAddr)
+}
 
-		// create sample signatures
+func (s *SubmitterTestSuite) TestSubmit() {
+	ctx := context.Background()
+	batchIndexes := s.Range(0, 5)
+	nextIndex := 2
+	signers := s.StakeManager.Operators
+
+	// save dummy signatures
+	events := make([]*tscc.SccStateBatchAppended, len(batchIndexes))
+	signatures := make([][]*database.OptimismSignature, len(batchIndexes))
+	for i := range batchIndexes {
+		_, events[i] = s.EmitStateBatchAppended(i)
+		signatures[i] = make([]*database.OptimismSignature, len(signers))
+
 		for j := range s.Range(0, len(signers)) {
-			sig, _ := s.db.OPSignature.Save(
+			signatures[i][j], _ = s.DB.OPSignature.Save(
 				nil, nil,
 				signers[j],
-				s.sccAddr,
-				batchIndex,
-				batchRoot,
-				approved,
+				s.SCCAddr,
+				events[i].BatchIndex.Uint64(),
+				events[i].BatchRoot,
+				i < len(batchIndexes)-1,
 				database.RandSignature(),
 			)
-
-			signatures[i][j] = sig
 		}
-		sort.Slice(signatures[i], func(x, y int) bool {
-			a := signatures[i][x].Signer.Address.Hash().Big()
-			b := signatures[i][y].Signer.Address.Hash().Big()
-			return a.Cmp(b) == -1
+
+		// no more signatures than the minimum stake should be sent
+		sort.Slice(signatures[i], func(j, h int) bool {
+			// sort by stake amount
+			a := s.submitter.stakemanager.StakeBySigner(signatures[i][j].Signer.Address)
+			b := s.submitter.stakemanager.StakeBySigner(signatures[i][h].Signer.Address)
+			return a.Cmp(b) == 1 // order by desc
 		})
-
-		// emit StateBatchAppended event to the test contract
-		s.scc.EmitStateBatchAppended(
-			s.hub.TransactOpts(context.Background()),
-			new(big.Int).SetUint64(batchIndex),
-			batchRoot,
-			new(big.Int).SetUint64(batchSize),
-			new(big.Int).SetUint64(prevTotalElements),
-			extraData)
-		s.mining()
+		signatures[i] = signatures[i][:6]
+		sort.Sort(database.OptimismSignatures(signatures[i]))
 	}
 
-	s.sccSubmitter.stakemanager.Refresh(context.Background())
+	// set the `SCC.nextIndex`
+	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
+	s.Hub.Commit()
 
-	for range s.Range(0, indexes/s.sccSubmitter.cfg.BatchSize+1) {
-		go func() {
-			time.Sleep(10 * time.Millisecond)
-			s.hub.Commit()
-		}()
-		s.sccSubmitter.work(context.Background(), &submitTask{scc: s.sccAddr, hub: s.hub})
-	}
+	// submitter do the work.
+	s.submitter.stakemanager.Refresh(ctx)
+	go s.submitter.work(ctx, s.task)
+	time.Sleep(time.Second / 10)
+	s.Hub.Commit()
 
-	for i := range s.Range(0, indexes) {
-		got, _ := s.sccv.AssertLogs(
-			&bind.CallOpts{Context: context.Background()},
-			big.NewInt(int64(i)),
-		)
+	// assert multicall transaction
+	mcallTx := s.Hub.Blockchain().CurrentBlock().Transactions()[0]
+	sender, _ := s.Hub.TxSender(mcallTx)
+	s.Equal(s.task.L1Signer().Signer(), sender)
+	s.Equal(s.MulticallAddr, *mcallTx.To())
 
-		s.Equal(s.sccAddr, got.StateCommitmentChain)
+	mcallReceipt, _ := s.Hub.TransactionReceipt(context.Background(), mcallTx.Hash())
+	s.Len(mcallReceipt.Logs, 6)
+	s.Equal(s.SCCAddr, mcallReceipt.Logs[0].Address)
+	s.Equal(s.SCCVAddr, mcallReceipt.Logs[1].Address)
+	s.Equal(s.SCCAddr, mcallReceipt.Logs[2].Address)
+	s.Equal(s.SCCVAddr, mcallReceipt.Logs[3].Address)
+	s.Equal(s.SCCAddr, mcallReceipt.Logs[4].Address)
+	s.Equal(s.SCCVAddr, mcallReceipt.Logs[5].Address)
 
-		s.Equal(uint64(i), got.BatchHeader.BatchIndex.Uint64())
-		s.Equal(signatures[i][0].RollupHash[:], got.BatchHeader.BatchRoot[:])
-		s.Equal(uint64(i), got.BatchHeader.BatchSize.Uint64())
-		s.Equal(uint64(i+1), got.BatchHeader.PrevTotalElements.Uint64())
-		s.Equal([]byte(fmt.Sprintf("%d", i)), got.BatchHeader.ExtraData)
+	// assert call parameters
+	length, _ := s.TSCCV.SccAssertLogsLen(&bind.CallOpts{Context: ctx})
+	s.Equal(uint64(3), length.Uint64())
 
-		s.Len(got.Signatures, len(signers)*65)
-		for j, sig := range signatures[i] {
-			start := j * 65
-			end := start + 65
-			s.Equal(sig.Signature[:], got.Signatures[start:end])
-		}
+	for i := range batchIndexes {
+		if i < nextIndex {
+			got, err := s.TSCCV.AssertLogs(
+				&bind.CallOpts{Context: ctx},
+				big.NewInt(int64(i+nextIndex+1)))
+			s.ErrorContains(err, "execution reverted")
+			s.Equal(common.Address{}, got.StateCommitmentChain)
+		} else {
+			got, err := s.TSCCV.AssertLogs(
+				&bind.CallOpts{Context: ctx},
+				big.NewInt(int64(i-nextIndex)))
+			s.NoError(err)
+			s.Equal(s.SCCAddr, got.StateCommitmentChain)
+			s.Equal(events[i].BatchIndex.Uint64(), got.BatchHeader.BatchIndex.Uint64())
+			s.Equal(events[i].BatchRoot, got.BatchHeader.BatchRoot)
+			s.Equal(events[i].BatchSize.Uint64(), got.BatchHeader.BatchSize.Uint64())
+			s.Equal(events[i].PrevTotalElements.Uint64(), got.BatchHeader.PrevTotalElements.Uint64())
+			s.Equal(events[i].ExtraData, got.BatchHeader.ExtraData)
+			s.Equal(i < len(batchIndexes)-1, got.Approve)
 
-		s.Equal(i < indexes-1, got.Approve)
-	}
-}
-
-func (s *SccSubmitterTestSuite) TestFindSignatures() {
-	type group struct {
-		signers    []common.Address
-		signatures []*database.OptimismSignature
-		batchRoot  common.Hash
-		approved   bool
-		stake      int64
-	}
-
-	var (
-		batchRoot0 = s.RandHash()
-		batchRoot1 = s.RandHash()
-		batchIndex = uint64(10)
-
-		totalStake   = big.NewInt(0)
-		signerStakes = map[common.Address]*big.Int{}
-
-		groups = []*group{
-			{batchRoot: batchRoot0, approved: true, stake: 1000},
-			{batchRoot: batchRoot0, approved: false, stake: 2000},
-			{batchRoot: batchRoot1, approved: true, stake: 10000}, // want
-			{batchRoot: batchRoot1, approved: false, stake: 3000},
-		}
-		want = groups[2]
-	)
-
-	for _, group := range groups {
-		totalStake.Add(totalStake, big.NewInt(group.stake))
-
-		for i := range s.Range(0, 10) {
-			group.signers = append(group.signers, s.RandAddress())
-			signerStakes[group.signers[i]] = big.NewInt(group.stake / int64(10))
-
-			// create sample signatures
-			sig, _ := s.db.OPSignature.Save(
-				nil, nil,
-				group.signers[i],
-				s.sccAddr,
-				batchIndex,
-				group.batchRoot,
-				group.approved,
-				database.RandSignature(),
-			)
-			group.signatures = append(group.signatures, sig)
+			// no more signatures than the minimum stake should be sent
+			s.Len(got.Signatures, len(signatures[i])*65)
+			for j, sig := range signatures[i] {
+				start := j * 65
+				end := start + 65
+				s.Equal(sig.Signature[:], got.Signatures[start:end])
+			}
 		}
 	}
-
-	sort.Slice(want.signatures, func(x, y int) bool {
-		return bytes.Compare(
-			want.signatures[x].Signer.Address[:],
-			want.signatures[y].Signer.Address[:],
-		) == -1
-	})
-
-	// assert
-	gots, _ := s.sccSubmitter.findSignatures(
-		s.sccAddr, batchIndex, common.Big0, totalStake, signerStakes)
-	s.Len(gots, len(want.signatures))
-	for i, want := range want.signatures {
-		s.Equal(want.Signature, gots[i].Signature)
-	}
-
-	rows, err := s.sccSubmitter.findSignatures(
-		s.sccAddr, batchIndex+1, common.Big0, totalStake, signerStakes)
-	s.Len(rows, 0)
-	s.NoError(err)
-
-	// stake amount shortage
-	rows, err = s.sccSubmitter.findSignatures(
-		s.sccAddr, batchIndex, common.Big0, big.NewInt(20000), signerStakes)
-	s.Len(rows, 0)
-	s.NoError(err)
 }
