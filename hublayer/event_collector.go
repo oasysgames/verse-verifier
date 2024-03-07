@@ -184,7 +184,7 @@ func (w *EventCollector) processStateBatchAppendedEvent(
 	}
 
 	// delete the `OptimismSignature` records in consideration of chain reorganization
-	if rows, err := tx.Optimism.DeleteSignatures(w.signer, address, batchIndex); err != nil {
+	if rows, err := tx.OPSignature.Deletes(w.signer, address, batchIndex); err != nil {
 		w.log.Error("Failed to delete reorganized signatures",
 			append(logCtx, "err", err)...)
 		return err
@@ -224,7 +224,7 @@ func (w *EventCollector) processStateBatchDeletedEvent(
 	}
 
 	// delete the `OptimismSignature` records in consideration of chain reorganization
-	if rows, err := tx.Optimism.DeleteSignatures(w.signer, address, batchIndex); err != nil {
+	if rows, err := tx.OPSignature.Deletes(w.signer, address, batchIndex); err != nil {
 		w.log.Error("Failed to delete reorganized signatures", append(logCtx, "err", err)...)
 		return err
 	} else if rows > 0 {
@@ -247,7 +247,7 @@ func (w *EventCollector) processStateBatchVerifiedEvent(
 	}
 	w.log.Info("New SCC.StateBatchVerified event", logCtx...)
 
-	if err := tx.Optimism.SaveNextIndex(e.Raw.Address, nextIndex); err != nil {
+	if err := tx.OPContract.SaveNextIndex(e.Raw.Address, nextIndex); err != nil {
 		w.log.Error("Failed to save next index", append(logCtx, "err", err)...)
 		return err
 	}

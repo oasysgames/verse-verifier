@@ -182,7 +182,7 @@ func (w *SccSubmitter) findSignatures(
 	signerStakes map[common.Address]*big.Int,
 ) ([]*database.OptimismSignature, error) {
 	// find signatures from database
-	rows, err := w.db.Optimism.FindSignatures(nil, nil, &scc, &batchIndex, 1000, 0)
+	rows, err := w.db.OPSignature.Find(nil, nil, &scc, &batchIndex, 1000, 0)
 	if err != nil {
 		return nil, err
 	} else if len(rows) == 0 {
@@ -193,7 +193,7 @@ func (w *SccSubmitter) findSignatures(
 	sigGroup := map[string][]*database.OptimismSignature{}
 	stakeGroup := map[string]*big.Int{}
 	for _, row := range rows {
-		k := fmt.Sprintf("%s:%v", row.BatchRoot, row.Approved)
+		k := fmt.Sprintf("%s:%v", row.RollupHash, row.Approved)
 		if _, ok := sigGroup[k]; !ok {
 			sigGroup[k] = []*database.OptimismSignature{}
 			stakeGroup[k] = new(big.Int)

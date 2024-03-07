@@ -213,12 +213,14 @@ func (w *SccVerifier) work(ctx context.Context, task *verifyTask) {
 			return
 		}
 
-		row, err := w.db.Optimism.SaveSignature(
+		row, err := w.db.OPSignature.Save(
 			nil, nil,
-			w.signer.Signer(), state.OptimismScc.Address,
-			state.BatchIndex, state.BatchRoot, state.BatchSize,
-			state.PrevTotalElements, state.ExtraData,
-			approved, sig)
+			w.signer.Signer(),
+			state.OptimismScc.Address,
+			state.BatchIndex,
+			state.BatchRoot,
+			approved,
+			sig)
 		if err != nil {
 			w.log.Error("Failed to save signature", append(logCtx, "err", err)...)
 			return
@@ -235,7 +237,7 @@ func (w *SccVerifier) verifyState(
 	state *database.OptimismState,
 ) (bool, database.Signature, error) {
 	logCtx := []interface{}{
-		"scc", state.OptimismScc.Address.Hex(),
+		"scc", state.Contract.Address.Hex(),
 		"index", state.BatchIndex,
 	}
 
@@ -288,9 +290,9 @@ func (w *SccVerifier) verifyState(
 	approved := bytes.Equal(state.BatchRoot[:], merkleRoot[:])
 
 	// calc and save signature
-	msg := NewSccMessage(
+	msg := ethutil.NewMessage(
 		w.signer.ChainID(),
-		state.OptimismScc.Address,
+		state.Contract.Address,
 		new(big.Int).SetUint64(state.BatchIndex),
 		state.BatchRoot,
 		approved,
@@ -307,7 +309,7 @@ func (w *SccVerifier) deleteInvalidSignature(scc common.Address, nextIndex uint6
 	logCtx := []interface{}{"scc", scc.Hex(), "next-index", nextIndex}
 
 	signer := w.signer.Signer()
-	sigs, err := w.db.Optimism.FindSignatures(nil, &signer, &scc, &nextIndex, 1, 0)
+	sigs, err := w.db.OPSignature.Find(nil, &signer, &scc, &nextIndex, 1, 0)
 	if err != nil {
 		w.log.Error("Unable to find signatures", append(logCtx, "err", err)...)
 		return
@@ -316,11 +318,11 @@ func (w *SccVerifier) deleteInvalidSignature(scc common.Address, nextIndex uint6
 		return
 	}
 
-	msg := NewSccMessage(
+	msg := ethutil.NewMessage(
 		w.signer.ChainID(),
-		sigs[0].OptimismScc.Address,
-		new(big.Int).SetUint64(sigs[0].BatchIndex),
-		sigs[0].BatchRoot,
+		sigs[0].Contract.Address,
+		new(big.Int).SetUint64(sigs[0].RollupIndex),
+		sigs[0].RollupHash,
 		sigs[0].Approved)
 	if err := msg.VerifySigner(sigs[0].Signature[:], signer); err == nil {
 		w.log.Debug("No invalid signature", logCtx...)
@@ -331,7 +333,7 @@ func (w *SccVerifier) deleteInvalidSignature(scc common.Address, nextIndex uint6
 
 	w.log.Warn("Found invalid signature", append(logCtx, "signature", sigs[0].Signature.Hex())...)
 
-	if rows, err := w.db.Optimism.DeleteSignatures(signer, scc, nextIndex); err != nil {
+	if rows, err := w.db.OPSignature.Deletes(signer, scc, nextIndex); err != nil {
 		w.log.Error("Unable to delete signatures", append(logCtx, "err", err)...)
 	} else {
 		w.log.Warn("Deleted invalid signature", append(logCtx, "delete-rows", rows)...)

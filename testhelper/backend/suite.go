@@ -92,7 +92,7 @@ func (b *BackendSuite) Mining() {
 	b.NotEmpty(b.SignableHub.Commit())
 	header, err := b.SignableHub.HeaderByNumber(context.Background(), nil)
 	b.NoError(err)
-	b.DB.Block.SaveNewBlock(header.Number.Uint64(), header.Hash())
+	b.DB.Block.Save(header.Number.Uint64(), header.Hash())
 }
 
 func (b *BackendSuite) EmitStateBatchAppended(index int) (

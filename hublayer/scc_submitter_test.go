@@ -56,15 +56,12 @@ func (s *SccSubmitterTestSuite) TestWork() {
 
 		// create sample signatures
 		for j := range s.Range(0, len(signers)) {
-			sig, _ := s.db.Optimism.SaveSignature(
+			sig, _ := s.db.OPSignature.Save(
 				nil, nil,
 				signers[j],
 				s.sccAddr,
 				batchIndex,
 				batchRoot,
-				batchSize,
-				prevTotalElements,
-				extraData,
 				approved,
 				database.RandSignature(),
 			)
@@ -107,7 +104,7 @@ func (s *SccSubmitterTestSuite) TestWork() {
 		s.Equal(s.sccAddr, got.StateCommitmentChain)
 
 		s.Equal(uint64(i), got.BatchHeader.BatchIndex.Uint64())
-		s.Equal(signatures[i][0].BatchRoot[:], got.BatchHeader.BatchRoot[:])
+		s.Equal(signatures[i][0].RollupHash[:], got.BatchHeader.BatchRoot[:])
 		s.Equal(uint64(i), got.BatchHeader.BatchSize.Uint64())
 		s.Equal(uint64(i+1), got.BatchHeader.PrevTotalElements.Uint64())
 		s.Equal([]byte(fmt.Sprintf("%d", i)), got.BatchHeader.ExtraData)
@@ -157,15 +154,12 @@ func (s *SccSubmitterTestSuite) TestFindSignatures() {
 			signerStakes[group.signers[i]] = big.NewInt(group.stake / int64(10))
 
 			// create sample signatures
-			sig, _ := s.db.Optimism.SaveSignature(
+			sig, _ := s.db.OPSignature.Save(
 				nil, nil,
 				group.signers[i],
 				s.sccAddr,
 				batchIndex,
 				group.batchRoot,
-				0,
-				0,
-				[]byte(nil),
 				group.approved,
 				database.RandSignature(),
 			)

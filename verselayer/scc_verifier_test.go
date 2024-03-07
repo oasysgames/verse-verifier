@@ -101,11 +101,11 @@ func (s *SccVerifierTestSuite) TestVerify() {
 	// assert
 	for i, tt := range cases {
 		index := uint64(i)
-		got0, _ := s.db.Optimism.FindSignatures(nil, nil, nil, &index, 1, 0)
+		got0, _ := s.db.OPSignature.Find(nil, nil, nil, &index, 1, 0)
 		got1 := subscribes[i]
 
-		s.Equal(tt.batchRoot, got0[0].BatchRoot.Hex())
-		s.Equal(tt.batchRoot, got1.BatchRoot.Hex())
+		s.Equal(tt.batchRoot, got0[0].RollupHash.Hex())
+		s.Equal(tt.batchRoot, got1.RollupHash.Hex())
 
 		s.Equal(uint64(batchSize), got0[0].BatchSize)
 		s.Equal(uint64(batchSize), got1.BatchSize)
@@ -113,8 +113,8 @@ func (s *SccVerifierTestSuite) TestVerify() {
 		s.Equal(uint64(batchSize*i), got0[0].PrevTotalElements)
 		s.Equal(uint64(batchSize*i), got1.PrevTotalElements)
 
-		s.Equal(fmt.Sprintf("test-%d", batchSize), string(got0[0].ExtraData))
-		s.Equal(fmt.Sprintf("test-%d", batchSize), string(got1.ExtraData))
+		s.Equal(fmt.Sprintf("test-%d", batchSize), string(*got0[0].ExtraData))
+		s.Equal(fmt.Sprintf("test-%d", batchSize), string(*got1.ExtraData))
 
 		s.Equal(tt.wantApproved, got0[0].Approved)
 		s.Equal(tt.wantApproved, got1.Approved)
@@ -155,7 +155,7 @@ func (s *SccVerifierTestSuite) TestDeleteInvalidSignature() {
 		// run verification
 		sigs := s.startAndWait(s.verifier, 1)
 		s.Len(sigs, 1)
-		s.Equal(merkleRoot[:], sigs[0].BatchRoot[:])
+		s.Equal(merkleRoot[:], sigs[0].RollupHash[:])
 		createds[batchIdx] = sigs[0]
 	}
 
@@ -173,7 +173,7 @@ func (s *SccVerifierTestSuite) TestDeleteInvalidSignature() {
 	s.Len(s.startAndWait(s.verifier, 1), 0)
 
 	signer := s.hub.Signer()
-	gots, _ := s.db.Optimism.FindSignatures(nil, &signer, &s.sccAddr, nil, 100, 0)
+	gots, _ := s.db.OPSignature.Find(nil, &signer, &s.sccAddr, nil, 100, 0)
 	s.Equal(len(batches), len(gots))
 
 	for batchIdx := range batches {
@@ -183,16 +183,13 @@ func (s *SccVerifierTestSuite) TestDeleteInvalidSignature() {
 	}
 
 	// update to invalid signature
-	s.db.Optimism.SaveSignature(
+	s.db.OPSignature.Save(
 		&createds[invalidBatch].ID,
 		&createds[invalidBatch].PreviousID,
 		createds[invalidBatch].Signer.Address,
-		createds[invalidBatch].OptimismScc.Address,
-		createds[invalidBatch].BatchIndex,
-		createds[invalidBatch].BatchRoot,
-		createds[invalidBatch].BatchSize,
-		createds[invalidBatch].PrevTotalElements,
-		createds[invalidBatch].ExtraData,
+		createds[invalidBatch].Contract.Address,
+		createds[invalidBatch].RollupIndex,
+		createds[invalidBatch].RollupHash,
 		createds[invalidBatch].Approved,
 		database.RandSignature())
 
@@ -202,7 +199,7 @@ func (s *SccVerifierTestSuite) TestDeleteInvalidSignature() {
 		len(batches)-invalidBatch,
 	)
 
-	gots, _ = s.db.Optimism.FindSignatures(nil, &signer, &s.sccAddr, nil, 100, 0)
+	gots, _ = s.db.OPSignature.Find(nil, &signer, &s.sccAddr, nil, 100, 0)
 	s.Equal(len(batches), len(gots))
 
 	for batchIdx := range batches {

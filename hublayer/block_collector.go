@@ -101,7 +101,7 @@ func (w *BlockCollector) saveHeaders(ctx context.Context, headers []*types.Heade
 		if prev != nil && prev.Hash() != h.ParentHash {
 			return errors.New("block order is wrong")
 		}
-		if err := w.db.Block.SaveNewBlock(h.Number.Uint64(), h.Hash()); err != nil {
+		if err := w.db.Block.Save(h.Number.Uint64(), h.Hash()); err != nil {
 			w.log.Error("Failed to save new block", "err", err)
 			return err
 		}

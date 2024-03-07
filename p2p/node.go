@@ -24,10 +24,10 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
-	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
@@ -373,7 +373,7 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		return
 	}
 
-	local, err := w.db.Optimism.FindLatestSignaturesBySigner(signer, 1, 0)
+	local, err := w.db.OPSignature.FindLatestsBySigner(signer, 1, 0)
 	if err != nil {
 		w.log.Error("Failed to find the latest signature", append(logctx, "err", err)...)
 		return
@@ -514,7 +514,7 @@ func (w *Node) handleOptimismSignatureExchangeRequest(
 			}
 
 			// get latest signatures for each requested signer
-			sigs, err := w.db.Optimism.FindSignatures(
+			sigs, err := w.db.OPSignature.Find(
 				&req.IdAfter, &signer, nil, nil, queryLimit, offset)
 			sem.ReleaseALL()
 			if err != nil {
@@ -603,12 +603,12 @@ func (w *Node) handleOptimismSignatureExchangeResponses(ctx context.Context, s n
 			}
 
 			// deduplication
-			if local, err := w.db.Optimism.FindSignatureByID(res.Id); err == nil && local.PreviousID == res.PreviousId {
+			if local, err := w.db.OPSignature.FindByID(res.Id); err == nil && local.PreviousID == res.PreviousId {
 				continue
 			}
 
 			// local is newer
-			if local, err := w.db.Optimism.FindSignatures(nil, &signer, &scc, &res.BatchIndex, 1, 0); err != nil {
+			if local, err := w.db.OPSignature.Find(nil, &signer, &scc, &res.BatchIndex, 1, 0); err != nil {
 				w.log.Error("Failed to find local signature", append(logctx, "err", err)...)
 				return
 			} else if len(local) > 0 && strings.Compare(local[0].ID, res.Id) == 1 {
@@ -616,7 +616,7 @@ func (w *Node) handleOptimismSignatureExchangeResponses(ctx context.Context, s n
 			}
 
 			if res.PreviousId != "" {
-				_, err := w.db.Optimism.FindSignatureByID(res.PreviousId)
+				_, err := w.db.OPSignature.FindByID(res.PreviousId)
 				if errors.Is(err, database.ErrNotFound) {
 					w.log.Warn("Previous ID does not exist", logctx...)
 				} else if err != nil {
@@ -625,15 +625,12 @@ func (w *Node) handleOptimismSignatureExchangeResponses(ctx context.Context, s n
 				}
 			}
 
-			_, err := w.db.Optimism.SaveSignature(
+			_, err := w.db.OPSignature.Save(
 				&res.Id, &res.PreviousId,
 				signer,
 				scc,
 				res.BatchIndex,
 				common.BytesToHash(res.BatchRoot),
-				res.BatchSize,
-				res.PrevTotalElements,
-				res.ExtraData,
 				res.Approved,
 				database.BytesSignature(res.Signature),
 			)
@@ -663,7 +660,7 @@ func (w *Node) handleFindCommonOptimismSignature(
 
 	var found *pb.OptimismSignature
 	for _, remote := range remotes {
-		local, err := w.db.Optimism.FindSignatureByID(remote.Id)
+		local, err := w.db.OPSignature.FindByID(remote.Id)
 		if errors.Is(err, database.ErrNotFound) {
 			continue
 		}
@@ -716,7 +713,7 @@ func (w *Node) findCommonLatestSignature(
 		}
 
 		// find local latest signatures (order by: id desc)
-		sigs, err := w.db.Optimism.FindLatestSignaturesBySigner(signer, limit, offset)
+		sigs, err := w.db.OPSignature.FindLatestsBySigner(signer, limit, offset)
 		sem.ReleaseALL()
 		if err != nil {
 			w.log.Error("Failed to find latest signatures", append(logctx, "err", err)...)
@@ -775,7 +772,7 @@ func (w *Node) findCommonLatestSignature(
 }
 
 func (w *Node) publishLatestSignatures(ctx context.Context) {
-	latests, err := w.db.Optimism.FindLatestSignaturePerSigners()
+	latests, err := w.db.OPSignature.FindLatestsPerSigners()
 	if err != nil {
 		w.log.Error("Failed to find latest signatures", "err", err)
 		return
@@ -1035,12 +1032,12 @@ func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error 
 	batchIndex := new(big.Int).SetUint64(sig.BatchIndex)
 	batchRoot := common.BytesToHash(sig.BatchRoot)
 
-	msg := verselayer.NewSccMessage(hubLayerChainID, scc, batchIndex, batchRoot, sig.Approved)
+	msg := ethutil.NewMessage(hubLayerChainID, scc, batchIndex, batchRoot, sig.Approved)
 	err := msg.VerifySigner(sig.Signature, signer)
 
 	// possibly an old signature with an approved bug
-	if _, ok := err.(*verselayer.SignerMismatchError); ok {
-		msg = verselayer.NewSCCMessageWithApprovedBug(
+	if _, ok := err.(*ethutil.SignerMismatchError); ok {
+		msg = ethutil.NewMessageWithApprovedBug(
 			hubLayerChainID, scc, batchIndex, batchRoot, sig.Approved)
 		err = msg.VerifySigner(sig.Signature, signer)
 	}
@@ -1049,17 +1046,26 @@ func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error 
 }
 
 func toProtoBufSig(row *database.OptimismSignature) *pb.OptimismSignature {
-	return &pb.OptimismSignature{
-		Id:                row.ID,
-		PreviousId:        row.PreviousID,
-		Signer:            row.Signer.Address[:],
-		Scc:               row.OptimismScc.Address[:],
-		BatchIndex:        row.BatchIndex,
-		BatchRoot:         row.BatchRoot[:],
-		BatchSize:         row.BatchSize,
-		PrevTotalElements: row.PrevTotalElements,
-		ExtraData:         row.ExtraData,
-		Approved:          row.Approved,
-		Signature:         row.Signature[:],
+	sig := &pb.OptimismSignature{
+		Id:         row.ID,
+		PreviousId: row.PreviousID,
+		Signer:     row.Signer.Address[:],
+		Scc:        row.Contract.Address[:],
+		BatchIndex: row.RollupIndex,
+		BatchRoot:  row.RollupHash[:],
+		Approved:   row.Approved,
+		Signature:  row.Signature[:],
 	}
+
+	if row.BatchSize != nil {
+		sig.BatchSize = *row.BatchSize
+	}
+	if row.PrevTotalElements != nil {
+		sig.PrevTotalElements = *row.PrevTotalElements
+	}
+	if row.ExtraData != nil {
+		sig.ExtraData = *row.ExtraData
+	}
+
+	return sig
 }

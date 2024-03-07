@@ -15,18 +15,26 @@ var (
 	models = []interface{}{
 		&Block{},
 		&Signer{},
-		&OptimismScc{},
+		&OptimismContract{},
 		&OptimismState{},
+		&OpstackProposal{},
 		&OptimismSignature{},
 		&Misc{},
 	}
 )
 
 type Database struct {
-	db *gorm.DB
+	rawdb *gorm.DB
 
-	Block    *BlockDatabase
-	Optimism *OptimismDatabase
+	Block       *BlockDB
+	Signer      *SignerDB
+	OPContract  *OptimismContractDB
+	OPSignature *OptimismSignatureDB
+}
+
+type db struct {
+	rawdb *gorm.DB
+	db    *Database
 }
 
 func NewDatabase(cfg *config.Database) (*Database, error) {
@@ -56,18 +64,22 @@ func NewDatabase(cfg *config.Database) (*Database, error) {
 	return newDB(db), nil
 }
 
-func (db *Database) Transaction(fn func(*Database) error) error {
-	return db.db.Transaction(func(tx *gorm.DB) error {
-		return fn(newDB(tx))
+func (db *Database) Transaction(fn func(txdb *Database) error) error {
+	return db.rawdb.Transaction(func(rawtxdb *gorm.DB) error {
+		return fn(newDB(rawtxdb))
 	})
 }
 
-func newDB(db *gorm.DB) *Database {
-	return &Database{
-		db:       db,
-		Block:    &BlockDatabase{db: db},
-		Optimism: &OptimismDatabase{db: db},
+func newDB(rawdb *gorm.DB) *Database {
+	var db Database
+	db = Database{
+		rawdb:       rawdb,
+		Block:       &BlockDB{rawdb: rawdb, db: &db},
+		Signer:      &SignerDB{rawdb: rawdb, db: &db},
+		OPContract:  &OptimismContractDB{rawdb: rawdb, db: &db},
+		OPSignature: &OptimismSignatureDB{rawdb: rawdb, db: &db},
 	}
+	return &db
 }
 
 func errconv(err error) error {

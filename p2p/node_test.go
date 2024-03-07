@@ -2,9 +2,7 @@ package p2p
 
 import (
 	"context"
-	"fmt"
 	"math/big"
-	"math/rand"
 	"net"
 	"strconv"
 	"sync"
@@ -17,11 +15,11 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
+	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
-	"github.com/oasysgames/oasys-optimism-verifier/verselayer"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/suite"
 )
@@ -81,12 +79,12 @@ func (s *NodeTestSuite) SetupTest() {
 
 	// create sample records
 	for _, node := range []*Node{s.node1, s.node2} {
-		node.db.Optimism.FindOrCreateSigner(s.signer0)
-		node.db.Optimism.FindOrCreateSigner(s.signer1)
-		node.db.Optimism.FindOrCreateSigner(s.signer2)
-		node.db.Optimism.FindOrCreateSCC(s.scc0)
-		node.db.Optimism.FindOrCreateSCC(s.scc1)
-		node.db.Optimism.FindOrCreateSCC(s.scc2)
+		node.db.Signer.FindOrCreate(s.signer0)
+		node.db.Signer.FindOrCreate(s.signer1)
+		node.db.Signer.FindOrCreate(s.signer2)
+		node.db.OPContract.FindOrCreate(s.scc0)
+		node.db.OPContract.FindOrCreate(s.scc1)
+		node.db.OPContract.FindOrCreate(s.scc2)
 	}
 
 	sizes := [][]int{
@@ -110,7 +108,7 @@ func (s *NodeTestSuite) SetupTest() {
 				batchRoot := s.genStateRoot(scc[:], index)
 				approved := true
 
-				msg := verselayer.NewSccMessage(
+				msg := ethutil.NewMessage(
 					backend.ChainID(),
 					scc,
 					big.NewInt(int64(index)),
@@ -119,15 +117,12 @@ func (s *NodeTestSuite) SetupTest() {
 				)
 				sigbin, _ := msg.Signature(backend.SignData)
 
-				sig, _ := s.node1.db.Optimism.SaveSignature(
+				sig, _ := s.node1.db.OPSignature.Save(
 					nil, nil,
 					signer,
 					scc,
 					uint64(index),
 					batchRoot,
-					uint64(index),
-					uint64(index),
-					[]byte(fmt.Sprintf("test-%d", index)),
 					approved,
 					sigbin,
 				)
@@ -157,23 +152,20 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 		},
 		{
 			&pb.OptimismSignature{
-				Id:                util.ULID(nil).String(),
-				PreviousId:        util.ULID(nil).String(),
-				Signer:            s.signer2[:],
-				Scc:               s.scc2[:],
-				BatchIndex:        0,
-				BatchRoot:         s.genStateRoot(s.scc2[:], 0).Bytes(),
-				BatchSize:         0,
-				PrevTotalElements: 0,
-				ExtraData:         []byte(fmt.Sprintf("test-%d", 0)),
-				Approved:          true,
+				Id:         util.ULID(nil).String(),
+				PreviousId: util.ULID(nil).String(),
+				Signer:     s.signer2[:],
+				Scc:        s.scc2[:],
+				BatchIndex: 0,
+				BatchRoot:  s.genStateRoot(s.scc2[:], 0).Bytes(),
+				Approved:   true,
 			},
 			want{s.signer2, ""},
 		},
 	}
 
 	lastcase := cases[len(cases)-1]
-	msg := verselayer.NewSccMessage(
+	msg := ethutil.NewMessage(
 		s.b2.ChainID(),
 		common.BytesToAddress(lastcase.msg.Scc),
 		new(big.Int).SetUint64(lastcase.msg.BatchIndex),
@@ -364,12 +356,9 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
 				wantsig := s.sigs[want.signer][want.scc][bi]
 				s.Equal(wantsig.ID, got.Id)
 				s.Equal(wantsig.Signer.Address[:], got.Signer)
-				s.Equal(wantsig.OptimismScc.Address[:], got.Scc)
-				s.Equal(wantsig.BatchIndex, got.BatchIndex)
-				s.Equal(wantsig.BatchRoot[:], got.BatchRoot)
-				s.Equal(wantsig.BatchSize, got.BatchSize)
-				s.Equal(wantsig.PrevTotalElements, got.PrevTotalElements)
-				s.Equal(wantsig.ExtraData, got.ExtraData)
+				s.Equal(wantsig.Contract.Address[:], got.Scc)
+				s.Equal(wantsig.RollupIndex, got.BatchIndex)
+				s.Equal(wantsig.RollupHash[:], got.BatchRoot)
 				s.Equal(wantsig.Approved, got.Approved)
 				s.Equal(wantsig.Signature[:], got.Signature)
 			}
@@ -387,73 +376,58 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 		{
 			s.b0,
 			&pb.OptimismSignature{
-				Id:                util.ULID(nil).String(),
-				PreviousId:        s.sigs[s.signer0][s.scc0][49].ID,
-				Scc:               s.scc0[:],
-				BatchIndex:        1000,
-				BatchRoot:         s.RandHash().Bytes(),
-				BatchSize:         uint64(rand.Intn(100)),
-				PrevTotalElements: uint64(rand.Intn(100)),
-				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
-				Approved:          true,
+				Id:         util.ULID(nil).String(),
+				PreviousId: s.sigs[s.signer0][s.scc0][49].ID,
+				Scc:        s.scc0[:],
+				BatchIndex: 1000,
+				BatchRoot:  s.RandHash().Bytes(),
+				Approved:   true,
 			},
 		},
 		{
 			s.b1,
 			&pb.OptimismSignature{
-				Id:                util.ULID(nil).String(),
-				PreviousId:        s.sigs[s.signer1][s.scc0][99].ID,
-				Scc:               s.scc0[:],
-				BatchIndex:        1000,
-				BatchRoot:         s.RandHash().Bytes(),
-				BatchSize:         uint64(rand.Intn(100)),
-				PrevTotalElements: uint64(rand.Intn(100)),
-				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
-				Approved:          true,
+				Id:         util.ULID(nil).String(),
+				PreviousId: s.sigs[s.signer1][s.scc0][99].ID,
+				Scc:        s.scc0[:],
+				BatchIndex: 1000,
+				BatchRoot:  s.RandHash().Bytes(),
+				Approved:   true,
 			},
 		},
 		{
 			s.b1,
 			&pb.OptimismSignature{
-				Id:                util.ULID(nil).String(),
-				PreviousId:        s.sigs[s.signer1][s.scc0][99].ID,
-				Scc:               s.scc0[:],
-				BatchIndex:        1001,
-				BatchRoot:         s.RandHash().Bytes(),
-				BatchSize:         uint64(rand.Intn(100)),
-				PrevTotalElements: uint64(rand.Intn(100)),
-				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
-				Approved:          true,
+				Id:         util.ULID(nil).String(),
+				PreviousId: s.sigs[s.signer1][s.scc0][99].ID,
+				Scc:        s.scc0[:],
+				BatchIndex: 1001,
+				BatchRoot:  s.RandHash().Bytes(),
+				Approved:   true,
 			},
 		},
 		// new signer
 		{
 			s.b2,
 			&pb.OptimismSignature{
-				Id:                util.ULID(nil).String(),
-				PreviousId:        "",
-				Scc:               s.scc0[:],
-				BatchIndex:        0,
-				BatchRoot:         s.RandHash().Bytes(),
-				BatchSize:         uint64(rand.Intn(100)),
-				PrevTotalElements: uint64(rand.Intn(100)),
-				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(100))),
-				Approved:          true,
+				Id:         util.ULID(nil).String(),
+				PreviousId: "",
+				Scc:        s.scc0[:],
+				BatchIndex: 0,
+				BatchRoot:  s.RandHash().Bytes(),
+				Approved:   true,
 			},
 		},
 		// overwrite
 		{
 			s.b0,
 			&pb.OptimismSignature{
-				Id:                util.ULID(nil).String(),
-				PreviousId:        s.sigs[s.signer0][s.scc0][49].ID,
-				Scc:               s.scc0[:],
-				BatchIndex:        s.sigs[s.signer0][s.scc0][1].BatchIndex,
-				BatchRoot:         s.RandHash().Bytes(),
-				BatchSize:         uint64(rand.Intn(99999)),
-				PrevTotalElements: uint64(rand.Intn(99999)),
-				ExtraData:         []byte(fmt.Sprintf("test-%d", rand.Intn(99999))),
-				Approved:          true,
+				Id:         util.ULID(nil).String(),
+				PreviousId: s.sigs[s.signer0][s.scc0][49].ID,
+				Scc:        s.scc0[:],
+				BatchIndex: s.sigs[s.signer0][s.scc0][1].RollupIndex,
+				BatchRoot:  s.RandHash().Bytes(),
+				Approved:   true,
 			},
 		},
 	}
@@ -469,7 +443,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 	// send message from node2 to node1
 	responses := []*pb.OptimismSignature{}
 	for _, tt := range cases {
-		m := verselayer.NewSccMessage(
+		m := ethutil.NewMessage(
 			tt.b.ChainID(),
 			common.BytesToAddress(tt.want.Scc),
 			new(big.Int).SetUint64(tt.want.BatchIndex),
@@ -495,16 +469,13 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeResponses() {
 		signer := common.BytesToAddress(tt.want.Signer)
 		scc := common.BytesToAddress(tt.want.Scc)
 		index := tt.want.BatchIndex
-		got, _ := s.node1.db.Optimism.FindSignatures(nil, &signer, &scc, &index, 1, 0)
+		got, _ := s.node1.db.OPSignature.Find(nil, &signer, &scc, &index, 1, 0)
 
 		s.Equal(tt.want.Id, got[0].ID)
 		s.Equal(tt.want.Signer, got[0].Signer.Address[:])
-		s.Equal(tt.want.Scc, got[0].OptimismScc.Address[:])
-		s.Equal(tt.want.BatchIndex, got[0].BatchIndex)
-		s.Equal(tt.want.BatchRoot, got[0].BatchRoot[:])
-		s.Equal(tt.want.BatchSize, got[0].BatchSize)
-		s.Equal(tt.want.PrevTotalElements, got[0].PrevTotalElements)
-		s.Equal(tt.want.ExtraData, got[0].ExtraData)
+		s.Equal(tt.want.Scc, got[0].Contract.Address[:])
+		s.Equal(tt.want.BatchIndex, got[0].RollupIndex)
+		s.Equal(tt.want.BatchRoot, got[0].RollupHash[:])
 		s.Equal(tt.want.Approved, got[0].Approved)
 		s.Equal(tt.want.Signature, got[0].Signature[:])
 	}

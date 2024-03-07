@@ -83,7 +83,7 @@ func (s *SccTestSuite) SetupTest() {
 func (s *SccTestSuite) mining() {
 	s.hub.Commit()
 	header, _ := s.hub.HeaderByNumber(context.Background(), nil)
-	s.db.Block.SaveNewBlock(header.Number.Uint64(), header.Hash())
+	s.db.Block.Save(header.Number.Uint64(), header.Hash())
 }
 
 func (s *SccTestSuite) emitStateBatchAppendedEvent(index int) *tscc.SccStateBatchAppended {

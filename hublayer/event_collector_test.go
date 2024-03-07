@@ -55,15 +55,12 @@ func (s *EventCollectorTestSuite) TestProcessStateBatchDeletedEvent() {
 	// create signature records
 	var creates []*database.OptimismSignature
 	for i := range s.Range(0, 10) {
-		sig, _ := s.db.Optimism.SaveSignature(
+		sig, _ := s.db.OPSignature.Save(
 			nil, nil,
 			s.hub.Signer(),
 			s.sccAddr,
 			emits[i].BatchIndex.Uint64(),
 			emits[i].BatchRoot,
-			0,
-			0,
-			[]byte(nil),
 			true,
 			database.RandSignature(),
 		)
@@ -88,7 +85,7 @@ func (s *EventCollectorTestSuite) TestProcessStateBatchDeletedEvent() {
 			want = database.ErrNotFound
 		}
 		_, err0 := s.db.Optimism.FindState(s.sccAddr, uint64(i))
-		_, err1 := s.db.Optimism.FindSignatureByID(creates[i].ID)
+		_, err1 := s.db.OPSignature.FindByID(creates[i].ID)
 		s.Equal(want, err0)
 		s.Equal(want, err1)
 	}
@@ -109,7 +106,7 @@ func (s *EventCollectorTestSuite) TestProcessStateBatchVerifiedEvent() {
 	s.stateCollector.work(context.Background())
 
 	// assert
-	scc, _ := s.db.Optimism.FindOrCreateSCC(s.sccAddr)
+	scc, _ := s.db.OPContract.FindOrCreate(s.sccAddr)
 	s.Equal(uint64(5), scc.NextIndex)
 }
 
@@ -152,15 +149,12 @@ func (s *EventCollectorTestSuite) TestHandleReorganization() {
 	// create signature records
 	var creates []*database.OptimismSignature
 	for i := range s.Range(0, 10) {
-		sig, _ := s.db.Optimism.SaveSignature(
+		sig, _ := s.db.OPSignature.Save(
 			nil, nil,
 			s.hub.Signer(),
 			s.sccAddr,
 			emits[i].BatchIndex.Uint64(),
 			emits[i].BatchRoot,
-			emits[i].BatchSize.Uint64(),
-			emits[i].PrevTotalElements.Uint64(),
-			emits[i].ExtraData,
 			true,
 			database.RandSignature(),
 		)
@@ -180,7 +174,7 @@ func (s *EventCollectorTestSuite) TestHandleReorganization() {
 			s.Error(err, database.ErrNotFound)
 		}
 
-		_, err = s.db.Optimism.FindSignatureByID(creates[i].ID)
+		_, err = s.db.OPSignature.FindByID(creates[i].ID)
 		if i < 4 {
 			s.NoError(err)
 		} else {
