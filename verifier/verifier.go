@@ -1,4 +1,4 @@
-package verselayer
+package verifier
 
 import (
 	"bytes"
