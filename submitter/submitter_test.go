@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
+	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
@@ -51,7 +52,7 @@ func (s *SubmitterTestSuite) SetupTest() {
 		MaxGas:            500_000_000,
 		UseMulticall:      true, // TODO
 		Multicall2Address: s.MulticallAddr.String(),
-	}, s.DB, s.StakeManager)
+	}, s.DB, stakemanager.NewCache(s.StakeManager))
 
 	s.task = verse.
 		NewOPLegacy(s.DB, s.Hub, s.SCCAddr).

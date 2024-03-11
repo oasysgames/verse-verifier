@@ -3,15 +3,13 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 )
-
-type response []*Verse
 
 type VerseDiscovery struct {
 	client          *http.Client
@@ -63,9 +61,9 @@ func (w *VerseDiscovery) Start(ctx context.Context) {
 }
 
 func (w *VerseDiscovery) Subscribe(ctx context.Context) *VerseSubscription {
-	ch := make(chan *Verse)
+	ch := make(chan []*Verse)
 	cancel := w.topic.Subscribe(ctx, func(ctx context.Context, data interface{}) {
-		if t, ok := data.(*Verse); ok {
+		if t, ok := data.([]*Verse); ok {
 			ch <- t
 		}
 	})
@@ -88,10 +86,7 @@ func (w *VerseDiscovery) work(ctx context.Context) error {
 		return err
 	}
 
-	for _, v := range verses {
-		w.topic.Publish(v)
-	}
-
+	w.topic.Publish(verses)
 	return nil
 }
 
@@ -107,7 +102,7 @@ func (w *VerseDiscovery) fetch(ctx context.Context) ([]byte, error) {
 	}
 	defer res.Body.Close()
 
-	data, err := ioutil.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -115,20 +110,19 @@ func (w *VerseDiscovery) fetch(ctx context.Context) ([]byte, error) {
 	return data, nil
 }
 
-func (w *VerseDiscovery) unmarshal(data []byte) (response, error) {
-	var resp response
-	err := json.Unmarshal(data, &resp)
+func (w *VerseDiscovery) unmarshal(data []byte) (verses []*Verse, err error) {
+	err = json.Unmarshal(data, &verses)
 	if err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return verses, nil
 }
 
 type VerseSubscription struct {
 	Cancel context.CancelFunc
-	ch     chan *Verse
+	ch     chan []*Verse
 }
 
-func (s *VerseSubscription) Next() <-chan *Verse {
+func (s *VerseSubscription) Next() <-chan []*Verse {
 	return s.ch
 }

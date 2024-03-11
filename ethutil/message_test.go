@@ -124,12 +124,17 @@ func (s *MessageTestSuite) TestVerifySigner() {
 				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef1b"), s.account.Address)
 	got3 := s.rejectMsg.VerifySigner(
 		hexutil.MustDecode(
+			"0x0000000000000000000000000000000000000000000000000000000000000000"+
+				"000000000000000000000000000000000000000000000000000000000000000000"), s.account.Address)
+	got4 := s.rejectMsg.VerifySigner(
+		hexutil.MustDecode(
 			"0x821d05b483cc69c0f50beb8828b597ea632a8ac0552d579996526665150c5729"+
-				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef10"), s.account.Address)
+				"0111f891cb9a4f82ab95667bb9d025dd7592b3f8d5a2217e3d173ca21cb374ef1b"), common.HexToAddress("0x0"))
 
 	s.Nil(got1)
 	s.Nil(got2)
-	s.Error(got3)
+	s.ErrorContains(got3, "invalid Ethereum signatur")
+	s.ErrorContains(got4, "signer mismatch")
 }
 
 func (s *MessageTestSuite) TestL2OORollupHashSource() {

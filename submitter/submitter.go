@@ -36,12 +36,12 @@ type Submitter struct {
 func NewSubmitter(
 	cfg *config.Submitter,
 	db *database.Database,
-	sm stakemanager.IStakeManager,
+	stakemanager *stakemanager.Cache,
 ) *Submitter {
 	return &Submitter{
 		cfg:          cfg,
 		db:           db,
-		stakemanager: stakemanager.NewCache(sm),
+		stakemanager: stakemanager,
 		log:          log.New("worker", "submitter"),
 	}
 }
