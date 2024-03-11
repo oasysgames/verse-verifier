@@ -5,8 +5,8 @@ import "fmt"
 const (
 	Major = 0
 	Minor = 0
-	Patch = 10
-	Meta  = ""
+	Patch = 11
+	Meta  = "dev0"
 )
 
 func SemVer() string {
