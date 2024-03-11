@@ -1,6 +1,7 @@
 .git*
 .env*
 Dockerfile
+docker-bake.hcl
 LICENSE
 *.md
 *.proto
