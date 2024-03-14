@@ -285,7 +285,9 @@ func (s *server) mustSetupVerifier() {
 
 	wallet, account := findWallet(s.conf, s.ks, s.conf.Verifier.Wallet)
 	l1Signer, err := ethutil.NewSignableClient(
-		new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, wallet, account)
+		new(big.Int).SetUint64(s.conf.HubLayer.ChainID),
+		s.conf.HubLayer.RPC,
+		ethutil.NewKeystoreSigner(wallet, account))
 	if err != nil {
 		log.Crit("Failed to construct verifier", "err", err)
 	}
@@ -488,7 +490,8 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 				wallet, account := findWallet(s.conf, s.ks, tg.Wallet)
 				l1Signer, err := ethutil.NewSignableClient(
 					new(big.Int).SetUint64(s.conf.HubLayer.ChainID),
-					s.conf.HubLayer.RPC, wallet, account)
+					s.conf.HubLayer.RPC,
+					ethutil.NewKeystoreSigner(wallet, account))
 				if err != nil {
 					log.Error("Failed to construct hub-layer client", "err", err)
 				} else {

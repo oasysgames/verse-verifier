@@ -4,7 +4,6 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -89,16 +88,10 @@ type signableClient struct {
 	Client
 
 	chainId *big.Int
-	wallet  accounts.Wallet
-	signer  *accounts.Account
+	signer  Signer
 }
 
-func NewSignableClient(
-	chainId *big.Int,
-	rpc string,
-	wallet accounts.Wallet,
-	signer *accounts.Account,
-) (SignableClient, error) {
+func NewSignableClient(chainId *big.Int, rpc string, signer Signer) (SignableClient, error) {
 	c, err := NewClient(rpc)
 	if err != nil {
 		return nil, err
@@ -107,7 +100,6 @@ func NewSignableClient(
 	return &signableClient{
 		Client:  c,
 		chainId: chainId,
-		wallet:  wallet,
 		signer:  signer,
 	}, nil
 }
@@ -118,26 +110,26 @@ func (c *signableClient) ChainID() *big.Int {
 
 // Return signer address.
 func (c *signableClient) Signer() common.Address {
-	return c.signer.Address
+	return c.signer.From()
 }
 
 // Return transaction authorization data.
 func (c *signableClient) TransactOpts(ctx context.Context) *bind.TransactOpts {
 	return &bind.TransactOpts{
 		Context: ctx,
-		From:    c.Signer(),
+		From:    c.signer.From(),
 		Signer: func(a common.Address, tx *types.Transaction) (*types.Transaction, error) {
-			return c.wallet.SignTx(*c.signer, tx, c.ChainID())
+			return c.signer.SignTx(tx, c.ChainID())
 		},
 	}
 }
 
 func (c *signableClient) SignData(data []byte) (sig []byte, err error) {
-	return c.wallet.SignData(*c.signer, "", data)
+	return c.signer.SignData(data)
 }
 
 func (c *signableClient) SignTx(tx *types.Transaction) (*types.Transaction, error) {
-	return c.wallet.SignTx(*c.signer, tx, c.ChainID())
+	return c.signer.SignTx(tx, c.ChainID())
 }
 
 type BatchHeaderRPCClient struct {

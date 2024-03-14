@@ -49,7 +49,7 @@ type NodeTestSuite struct {
 
 func (s *NodeTestSuite) SetupTest() {
 	s.baseTime = time.Now().UTC()
-	s.b0 = backend.NewSignableBackend(nil, nil, nil)
+	s.b0 = backend.NewSignableBackend(nil, nil)
 	s.b1 = s.b0.WithNewAccount()
 	s.b2 = s.b0.WithNewAccount()
 	s.signer0 = s.b0.Signer()

@@ -12,8 +12,10 @@ import (
 )
 
 var (
-	DefaultKeyStore *keystore.KeyStore
-	DefaultAccount  *accounts.Account
+	DefaultPrivateKey *ecdsa.PrivateKey
+	DefaultKeyStore   *keystore.KeyStore
+	DefaultAccount    *accounts.Account
+	DefaultWallet     accounts.Wallet
 )
 
 var (
@@ -21,6 +23,13 @@ var (
 )
 
 func init() {
+	// decode default private key
+	if priv, err := crypto.HexToECDSA(privateKey); err != nil {
+		panic(err)
+	} else {
+		DefaultPrivateKey = priv
+	}
+
 	// create default keystore
 	if ks, err := NewKeyStore("default"); err != nil {
 		panic(err)
@@ -33,6 +42,20 @@ func init() {
 		panic(err)
 	} else {
 		DefaultAccount = ac
+	}
+
+	// kss := wallet.NewKeyStore(DefaultKeyStore)
+LOOP:
+	for _, wallet := range DefaultKeyStore.Wallets() {
+		for _, account := range wallet.Accounts() {
+			if account.Address == DefaultAccount.Address {
+				DefaultWallet = wallet
+				break LOOP
+			}
+		}
+	}
+	if DefaultWallet == nil {
+		panic("Wallet not found")
 	}
 }
 

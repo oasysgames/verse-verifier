@@ -60,8 +60,8 @@ func (b *BackendSuite) SetupTest() {
 	// setup test chain
 	b.Hub = NewBackend(nil, 0)
 	b.Verse = NewBackend(nil, 0)
-	b.SignableHub = NewSignableBackend(b.Hub, nil, nil)
-	b.SignableVerse = NewSignableBackend(b.Verse, nil, nil)
+	b.SignableHub = NewSignableBackend(b.Hub, nil)
+	b.SignableVerse = NewSignableBackend(b.Verse, nil)
 
 	// deploy `Multicall2` contract
 	b.MulticallAddr, _, b.Multicall, _ = multicall2.DeployMulticall2(b.SignableHub.TransactOpts(ctx), b.SignableHub)

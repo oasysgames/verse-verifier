@@ -5,10 +5,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"math/big"
+	mrand "math/rand"
 
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -16,34 +15,28 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/account"
 )
 
-var _ ethutil.SignableClient = &SignableBackend{}
-
-func NewSignableBackend(
-	b *Backend,
-	ks *keystore.KeyStore,
-	ac *accounts.Account,
-) *SignableBackend {
+func NewSignableBackend(b *Backend, signer ethutil.Signer) *SignableBackend {
 	if b == nil {
 		b = NewBackend(nil, 0)
 	}
-	if ks == nil {
-		ks = account.DefaultKeyStore
-	}
-	if ac == nil {
-		ac = account.DefaultAccount
+	if signer == nil {
+		// alternate the use of KeystoreSigner and PrivateKeySigner to test both signers
+		if mrand.Intn(100)%2 == 0 {
+			signer = ethutil.NewKeystoreSigner(account.DefaultWallet, account.DefaultAccount)
+		} else {
+			signer = ethutil.NewPrivateKeySigner(account.DefaultPrivateKey)
+		}
 	}
 	return &SignableBackend{
 		Backend: b,
-		ks:      ks,
-		account: ac,
+		signer:  signer,
 	}
 }
 
 type SignableBackend struct {
 	*Backend
 
-	ks      *keystore.KeyStore
-	account *accounts.Account
+	signer ethutil.Signer
 }
 
 func (c *SignableBackend) ChainID() *big.Int {
@@ -51,23 +44,23 @@ func (c *SignableBackend) ChainID() *big.Int {
 }
 
 func (c *SignableBackend) Signer() common.Address {
-	return c.account.Address
+	return c.signer.From()
 }
 
 func (c *SignableBackend) SignData(data []byte) (sig []byte, err error) {
-	return c.ks.SignHash(*c.account, crypto.Keccak256(data))
+	return c.signer.SignData(data)
 }
 
 func (c *SignableBackend) SignTx(tx *types.Transaction) (*types.Transaction, error) {
-	return c.ks.SignTx(*c.account, tx, c.ChainID())
+	return c.signer.SignTx(tx, c.ChainID())
 }
 
 func (c *SignableBackend) TransactOpts(ctx context.Context) *bind.TransactOpts {
 	return &bind.TransactOpts{
 		Context: ctx,
-		From:    c.Signer(),
+		From:    c.signer.From(),
 		Signer: func(a common.Address, tx *types.Transaction) (*types.Transaction, error) {
-			return c.ks.SignTx(*c.account, tx, c.ChainID())
+			return c.signer.SignTx(tx, c.ChainID())
 		},
 		GasPrice: big.NewInt(875_000_000),
 		GasLimit: 500_000_000,
@@ -76,13 +69,9 @@ func (c *SignableBackend) TransactOpts(ctx context.Context) *bind.TransactOpts {
 
 func (b *SignableBackend) WithNewAccount() *SignableBackend {
 	priv, _ := ecdsa.GenerateKey(crypto.S256(), rand.Reader)
-	account, _ := b.ks.ImportECDSA(priv, "")
-	b.ks.Unlock(account, "")
-
 	return &SignableBackend{
 		Backend: b.Backend,
-		ks:      b.ks,
-		account: &account,
+		signer:  ethutil.NewPrivateKeySigner(priv),
 	}
 }
 

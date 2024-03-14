@@ -39,7 +39,7 @@ func (s *VerseTestSuite) SetupTest() {
 	s.verifyContract = common.HexToAddress("0x2")
 	s.l1Client = backend.NewBackend(nil, 0)
 	s.l2Client = backend.NewBackend(nil, 0)
-	s.l1Signer = backend.NewSignableBackend(nil, nil, nil)
+	s.l1Signer = backend.NewSignableBackend(nil, nil)
 
 	factory := newVerseFactory(func(v Verse) Verse { return v })
 
