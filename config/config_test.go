@@ -1,13 +1,12 @@
 package config
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/spf13/viper"
+	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -19,10 +18,9 @@ func TestConfig(t *testing.T) {
 	suite.Run(t, new(ConfigTestSuite))
 }
 
-func (s *ConfigTestSuite) TestParseConfig() {
+func (s *ConfigTestSuite) TestNewConfig() {
 	input := (`
 	datastore: /tmp
-
 	keystore: /tmp
 
 	wallets:
@@ -93,7 +91,7 @@ func (s *ConfigTestSuite) TestParseConfig() {
 		scc_verifier_address: '0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA'
 		l2oo_verifier_address: '0x67a16865f03F6d46a206EF894F7A56597E0152b7'
 		use_multicall: true
-		multicall2_address: '0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5'
+		multicall_address: '0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5'
 		targets:
 			- chain_id: 12345
 			  wallet: wallet1
@@ -125,191 +123,177 @@ func (s *ConfigTestSuite) TestParseConfig() {
 			mem_profile_rate: 2
 	`)
 
-	got, _ := NewConfig([]byte(strings.ReplaceAll(input, "\t", "  ")))
-
-	s.Equal("/tmp", got.DataStore)
-
-	s.Equal("/tmp", got.KeyStore)
-
-	s.Equal(map[string]Wallet{
-		"wallet1": {
-			Address:  "0xBA3186c30Bb0d9e8c7924147238F82617C3fE729",
-			Password: "/etc/passwd",
+	want := &Config{
+		Datastore: "/tmp",
+		Keystore:  "/tmp",
+		Wallets: map[string]*Wallet{
+			"wallet1": {
+				Address:  "0xBA3186c30Bb0d9e8c7924147238F82617C3fE729",
+				Password: "/etc/passwd",
+			},
 		},
-	}, got.Wallets)
-
-	s.Equal(hubLayer{
-		ChainId: 12345,
-		RPC:     "http://127.0.0.1:8545/",
-	}, got.HubLayer)
-
-	s.Equal(verseLayer{
-		Discovery: struct {
-			Endpoint        string        "json:\"endpoint\" validate:\"omitempty,url\""
-			RefreshInterval time.Duration "json:\"refresh_interval\" mapstructure:\"refresh_interval\""
-		}{
-			Endpoint:        "http://127.0.0.1/api/v1/verse-layers.json",
-			RefreshInterval: 5 * time.Second,
+		HubLayer: HubLayer{
+			ChainID: 12345,
+			RPC:     "http://127.0.0.1:8545/",
 		},
-		Directs: []*Verse{
-			{
-				ChainID: 12345,
-				RPC:     "http://127.0.0.1:8545/",
-				L1Contracts: map[string]string{
-					"StateCommitmentChain": "0x62b105FD57A11819f9E50892E18a354bd7c89937",
+		VerseLayer: VerseLayer{
+			Discovery: struct {
+				Endpoint        string        "validate:\"omitempty,url\""
+				RefreshInterval time.Duration "koanf:\"refresh_interval\""
+			}{
+				Endpoint:        "http://127.0.0.1/api/v1/verse-layers.json",
+				RefreshInterval: 5 * time.Second,
+			},
+			Directs: []*Verse{
+				0: {
+					ChainID: 12345,
+					RPC:     "http://127.0.0.1:8545/",
+					L1Contracts: map[string]string{
+						"StateCommitmentChain": "0x62b105FD57A11819f9E50892E18a354bd7c89937",
+					},
 				},
 			},
 		},
-	}, got.VerseLayer)
-
-	durationPtr := func(d time.Duration) *time.Duration { return &d }
-	intPtr := func(d int) *int { return &d }
-	int64Ptr := func(d int64) *int64 { return &d }
-	s.Equal(P2P{
-		Listens:          []string{"listen0"},
-		NoAnnounce:       []string{"noann0"},
-		ConnectionFilter: []string{"connfil0"},
-		Transports: struct {
-			TCP  bool "json:\"tcp\""
-			QUIC bool "json:\"quic\""
-		}{
-			TCP:  true,
-			QUIC: true,
-		},
-		Listen: "",
-		Bootnodes: []string{
-			"/ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899",
-		},
-		NAT: struct {
-			UPnP      bool "json:\"upnp\" mapstructure:\"upnp\""
-			AutoNAT   bool "json:\"autonat\" mapstructure:\"autonat\""
-			HolePunch bool "json:\"holepunch\" mapstructure:\"holepunch\""
-		}{
-			UPnP:      true,
-			AutoNAT:   true,
-			HolePunch: true,
-		},
-		RelayService: struct {
-			Enable                 bool           "json:\"enable\""
-			DurationLimit          *time.Duration "json:\"duration_limit,omitempty\" mapstructure:\"duration_limit\""
-			DataLimit              *int64         "json:\"data_limit,omitempty\" mapstructure:\"data_limit\""
-			ReservationTTL         *time.Duration "json:\"reservation_ttl,omitempty\" mapstructure:\"reservation_ttl\""
-			MaxReservations        *int           "json:\"max_reservations,omitempty\" mapstructure:\"max_reservations\""
-			MaxCircuits            *int           "json:\"max_circuits,omitempty\" mapstructure:\"max_circuits\""
-			BufferSize             *int           "json:\"buffer_size,omitempty\" mapstructure:\"buffer_size\""
-			MaxReservationsPerPeer *int           "json:\"max_reservations_per_peer,omitempty\" mapstructure:\"max_reservations_per_peer\""
-			MaxReservationsPerIP   *int           "json:\"max_reservations_per_ip,omitempty\" mapstructure:\"max_reservations_per_ip\""
-			MaxReservationsPerASN  *int           "json:\"max_reservations_per_asn,omitempty\" mapstructure:\"max_reservations_per_asn\""
-		}{
-			Enable:                 true,
-			DurationLimit:          durationPtr(time.Minute),
-			DataLimit:              int64Ptr(2),
-			ReservationTTL:         durationPtr(3 * time.Minute),
-			MaxReservations:        intPtr(4),
-			MaxCircuits:            intPtr(5),
-			BufferSize:             intPtr(6),
-			MaxReservationsPerPeer: intPtr(7),
-			MaxReservationsPerIP:   intPtr(8),
-			MaxReservationsPerASN:  intPtr(9),
-		},
-		RelayClient: struct {
-			Enable     bool     "json:\"enable\""
-			RelayNodes []string "json:\"relay_nodes\" mapstructure:\"relay_nodes\""
-		}{
-			Enable:     true,
-			RelayNodes: []string{"relay-0", "relay-1"},
-		},
-		PublishInterval: 5 * time.Minute,
-		StreamTimeout:   10 * time.Second,
-		OutboundLimits: struct {
-			Concurrency int "json:\"concurrency\""
-			Throttling  int "json:\"throttling\""
-		}{
-			Concurrency: 10,
-			Throttling:  500,
-		},
-		InboundLimits: struct {
-			Concurrency int           "json:\"concurrency\""
-			Throttling  int           "json:\"throttling\""
-			MaxSendTime time.Duration "json:\"max_send_time\" mapstructure:\"max_send_time\""
-		}{
-			Concurrency: 10,
-			Throttling:  500,
-			MaxSendTime: 30 * time.Second,
-		},
-	}, got.P2P)
-
-	s.Equal(IPC{Sockname: "testsock"}, got.IPC)
-
-	s.Equal(Verifier{
-		Enable:              true,
-		Wallet:              "wallet1",
-		Interval:            5 * time.Second,
-		Concurrency:         10,
-		BlockLimit:          500,
-		EventFilterLimit:    50,
-		StateCollectLimit:   5,
-		StateCollectTimeout: time.Second,
-		OptimizeInterval:    time.Second * 2,
-	}, got.Verifier)
-
-	s.Equal(Submitter{
-		Enable:              true,
-		Concurrency:         10,
-		Interval:            5 * time.Second,
-		Confirmations:       4,
-		GasMultiplier:       1.5,
-		BatchSize:           100,
-		MaxGas:              1_000,
-		SCCVerifierAddress:  "0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA",
-		L2OOVerifierAddress: "0x67a16865f03F6d46a206EF894F7A56597E0152b7",
-		UseMulticall:        true,
-		Multicall2Address:   "0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5",
-		Targets: []struct {
-			ChainID uint64 "json:\"chain_id\"     mapstructure:\"chain_id\"     validate:\"required\""
-			Wallet  string "json:\"wallet\" validate:\"required\""
-		}{
-			{
-				ChainID: 12345,
-				Wallet:  "wallet1",
-			},
-		},
-	}, got.Submitter)
-
-	s.Equal(Beacon{
-		Enable:   true,
-		Endpoint: "http://127.0.0.1/beacon",
-		Interval: time.Second,
-	}, got.Beacon)
-
-	s.Equal(Database{
-		LongQueryTime:       time.Second,
-		MinExaminedRowLimit: 100,
-	}, got.Database)
-
-	s.Equal(Metrics{
-		Enable:   true,
-		Type:     "testcollector",
-		Prefix:   "testprefix",
-		Listen:   "127.0.0.1:3030",
-		Endpoint: "/testmetrics",
-	}, got.Metrics)
-
-	s.Equal(Debug{
-		Pprof: Pprof{
-			Enable: true,
-			Listen: "0.0.0.0:12345",
-			BasicAuth: struct {
-				Username string "json:\"username\""
-				Password string "json:\"password\""
+		P2P: P2P{
+			Listens:          []string{"listen0"},
+			NoAnnounce:       []string{"noann0"},
+			ConnectionFilter: []string{"connfil0"},
+			Transports: struct {
+				TCP  bool
+				QUIC bool
 			}{
-				Username: "my-username",
-				Password: "my-password",
+				TCP:  true,
+				QUIC: true,
 			},
-			BlockProfileRate: 1,
-			MemProfileRate:   2,
+			Listen: "",
+			Bootnodes: []string{
+				"/ip4/127.0.0.1/tcp/20002/p2p/12D3KooWCNqRgVdwAhGrurCc8XE4RsWB8S2T83yMZR9R7Gdtf899",
+			},
+			NAT: struct {
+				UPnP      bool "koanf:\"upnp\""
+				AutoNAT   bool "koanf:\"autonat\""
+				HolePunch bool "koanf:\"holepunch\""
+			}{
+				UPnP:      true,
+				AutoNAT:   true,
+				HolePunch: true,
+			},
+			RelayService: struct {
+				Enable                 bool
+				DurationLimit          *time.Duration "koanf:\"duration_limit\""
+				DataLimit              *int64         "koanf:\"data_limit\""
+				ReservationTTL         *time.Duration "koanf:\"reservation_ttl\""
+				MaxReservations        *int           "koanf:\"max_reservations\""
+				MaxCircuits            *int           "koanf:\"max_circuits\""
+				BufferSize             *int           "koanf:\"buffer_size\""
+				MaxReservationsPerPeer *int           "koanf:\"max_reservations_per_peer\""
+				MaxReservationsPerIP   *int           "koanf:\"max_reservations_per_ip\""
+				MaxReservationsPerASN  *int           "koanf:\"max_reservations_per_asn\""
+			}{
+				Enable:                 true,
+				DurationLimit:          testhelper.Pointer(time.Minute),
+				DataLimit:              testhelper.Pointer(int64(2)),
+				ReservationTTL:         testhelper.Pointer(3 * time.Minute),
+				MaxReservations:        testhelper.Pointer(int(4)),
+				MaxCircuits:            testhelper.Pointer(int(5)),
+				BufferSize:             testhelper.Pointer(int(6)),
+				MaxReservationsPerPeer: testhelper.Pointer(int(7)),
+				MaxReservationsPerIP:   testhelper.Pointer(int(8)),
+				MaxReservationsPerASN:  testhelper.Pointer(int(9)),
+			},
+			RelayClient: struct {
+				Enable     bool
+				RelayNodes []string "koanf:\"relay_nodes\""
+			}{
+				Enable:     true,
+				RelayNodes: []string{"relay-0", "relay-1"},
+			},
+			PublishInterval: 5 * time.Minute,
+			StreamTimeout:   10 * time.Second,
+			OutboundLimits: struct {
+				Concurrency int
+				Throttling  int
+			}{
+				Concurrency: 10,
+				Throttling:  500,
+			},
+			InboundLimits: struct {
+				Concurrency int
+				Throttling  int
+				MaxSendTime time.Duration "koanf:\"max_send_time\""
+			}{
+				Concurrency: 10,
+				Throttling:  500,
+				MaxSendTime: 30 * time.Second,
+			},
 		},
-	}, got.Debug)
+		IPC: IPC{Sockname: "testsock"},
+		Verifier: Verifier{
+			Enable:              true,
+			Wallet:              "wallet1",
+			Interval:            5 * time.Second,
+			Concurrency:         10,
+			BlockLimit:          500,
+			EventFilterLimit:    50,
+			StateCollectLimit:   5,
+			StateCollectTimeout: time.Second,
+			OptimizeInterval:    time.Second * 2,
+		},
+		Submitter: Submitter{
+			Enable:              true,
+			Concurrency:         10,
+			Interval:            5 * time.Second,
+			Confirmations:       4,
+			GasMultiplier:       1.5,
+			BatchSize:           100,
+			MaxGas:              1_000,
+			SCCVerifierAddress:  "0xC79800039e6c4d6C29E10F2aCf2158516Fe686AA",
+			L2OOVerifierAddress: "0x67a16865f03F6d46a206EF894F7A56597E0152b7",
+			UseMulticall:        true,
+			MulticallAddress:    "0x74746c14ABD3b4e8B6317e279E8C9e27D9dA56E5",
+			Targets: []*SubmitterTarget{
+				{
+					ChainID: 12345,
+					Wallet:  "wallet1",
+				},
+			},
+		},
+		Beacon: Beacon{
+			Enable:   true,
+			Endpoint: "http://127.0.0.1/beacon",
+			Interval: time.Second,
+		},
+		Database: Database{
+			LongQueryTime:       time.Second,
+			MinExaminedRowLimit: 100,
+		},
+		Metrics: Metrics{
+			Enable:   true,
+			Type:     "testcollector",
+			Prefix:   "testprefix",
+			Listen:   "127.0.0.1:3030",
+			Endpoint: "/testmetrics",
+		},
+		Debug: Debug{
+			Pprof: Pprof{
+				Enable: true,
+				Listen: "0.0.0.0:12345",
+				BasicAuth: struct {
+					Username string
+					Password string
+				}{
+					Username: "my-username",
+					Password: "my-password",
+				},
+				BlockProfileRate: 1,
+				MemProfileRate:   2,
+			},
+		},
+	}
+
+	got, _ := NewConfig(s.toBytes(input))
+
+	s.Equal(want, got)
 }
 
 func (s *ConfigTestSuite) TestValidate() {
@@ -331,7 +315,7 @@ func (s *ConfigTestSuite) TestValidate() {
 		enable: true
 	submitter:
 		targets:
-			- xxx
+			- {}
 	metrics:
 		listen: xxx
 	`)
@@ -354,15 +338,8 @@ func (s *ConfigTestSuite) TestValidate() {
 		"Config.metrics.listen":                            "hostname_port",
 	}
 
-	// parse config
-	var config Config
-	viper.ReadConfig(bytes.NewBuffer([]byte(strings.ReplaceAll(input, "\t", "  "))))
-	viper.Unmarshal(&config)
+	_, err := NewConfig(s.toBytes(input))
 
-	// do validation
-	err := validate.Struct(&config)
-
-	// assert
 	gots := map[string]string{}
 	for _, e := range err.(validator.ValidationErrors) {
 		gots[e.Namespace()] = e.Tag()
@@ -391,7 +368,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 		listen: 127.0.0.1:20001
 	`)
 
-	got, _ := NewConfig([]byte(strings.ReplaceAll(input, "\t", "  ")))
+	got, _ := NewConfig(s.toBytes(input))
 
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 
@@ -439,7 +416,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal("0x5200000000000000000000000000000000000014", got.Submitter.SCCVerifierAddress)
 	s.Equal("0xF62fD2d4ef5a99C5bAa1effd0dc20889c5021E1c", got.Submitter.L2OOVerifierAddress)
 	s.Equal(true, got.Submitter.UseMulticall)
-	s.Equal("0x5200000000000000000000000000000000000022", got.Submitter.Multicall2Address)
+	s.Equal("0x5200000000000000000000000000000000000022", got.Submitter.MulticallAddress)
 
 	s.True(got.Beacon.Enable)
 	s.Equal(
@@ -461,4 +438,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal("password", got.Debug.Pprof.BasicAuth.Password)
 	s.Equal(0, got.Debug.Pprof.BlockProfileRate)
 	s.Equal(524288, got.Debug.Pprof.MemProfileRate)
+}
+
+func (s *ConfigTestSuite) toBytes(yaml string) []byte {
+	return []byte(strings.ReplaceAll(yaml, "\t", "  "))
 }

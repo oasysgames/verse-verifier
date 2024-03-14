@@ -62,7 +62,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	s := mustNewServer(cmd)
+	s := mustNewServer()
 
 	// start metrics server
 	s.mustStartMetrics(ctx)
@@ -121,14 +121,13 @@ type server struct {
 	discoveredVerses chan []*config.Verse
 }
 
-func mustNewServer(cmd *cobra.Command) *server {
+func mustNewServer() *server {
 	var err error
 
 	s := &server{discoveredVerses: make(chan []*config.Verse)}
 
-	// load configuration file
-	if s.conf, err = loadConfig(cmd); err != nil {
-		log.Crit("Failed to load configuration file", "err", err)
+	if s.conf, err = globalConfigLoader.load(); err != nil {
+		log.Crit("Failed to load configuration", "err", err)
 	}
 
 	// setup database
@@ -140,7 +139,7 @@ func mustNewServer(cmd *cobra.Command) *server {
 	}
 
 	// open geth keystore
-	s.ks = wallet.NewKeyStore(s.conf.KeyStore)
+	s.ks = wallet.NewKeyStore(s.conf.Keystore)
 
 	// construct hub-layer client
 	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC); err != nil {
@@ -232,7 +231,7 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	}
 
 	s.p2p, err = p2p.NewNode(&s.conf.P2P, s.db, host, dht, bwm,
-		hpHelper, s.conf.HubLayer.ChainId, ignoreSigners, s.smcache)
+		hpHelper, s.conf.HubLayer.ChainID, ignoreSigners, s.smcache)
 	if err != nil {
 		log.Crit("Failed to construct p2p node", "err", err)
 	}
@@ -286,7 +285,7 @@ func (s *server) mustSetupVerifier() {
 
 	wallet, account := findWallet(s.conf, s.ks, s.conf.Verifier.Wallet)
 	l1Signer, err := ethutil.NewSignableClient(
-		new(big.Int).SetUint64(s.conf.HubLayer.ChainId), s.conf.HubLayer.RPC, wallet, account)
+		new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, wallet, account)
 	if err != nil {
 		log.Crit("Failed to construct verifier", "err", err)
 	}
@@ -488,7 +487,7 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 
 				wallet, account := findWallet(s.conf, s.ks, tg.Wallet)
 				l1Signer, err := ethutil.NewSignableClient(
-					new(big.Int).SetUint64(s.conf.HubLayer.ChainId),
+					new(big.Int).SetUint64(s.conf.HubLayer.ChainID),
 					s.conf.HubLayer.RPC, wallet, account)
 				if err != nil {
 					log.Error("Failed to construct hub-layer client", "err", err)
@@ -577,7 +576,7 @@ func (s *server) mustUnlockWallets(ctx context.Context, ipc *ipc.IPCServer) {
 	wg.Add(len(s.conf.Wallets))
 
 	for name, wallet := range s.conf.Wallets {
-		go func(name string, wallet config.Wallet) {
+		go func(name string, wallet *config.Wallet) {
 			defer wg.Done()
 
 			address := common.HexToAddress(wallet.Address)

@@ -11,9 +11,9 @@ var statusCmd = &cobra.Command{
 	Short: "Show status",
 	Long:  "Show status",
 	Run: func(cmd *cobra.Command, args []string) {
-		conf, err := loadConfig(cmd)
+		conf, err := globalConfigLoader.load()
 		if err != nil {
-			util.Exit(1, "Failed to load configuration file: %s\n", err)
+			util.Exit(1, "Failed to load configuration: %s\n", err)
 		}
 		ipccmd.StatusCmd.Run(conf.IPC.Sockname)
 	},

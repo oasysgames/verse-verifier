@@ -44,14 +44,14 @@ func (s *SubmitterTestSuite) SetupTest() {
 
 	// Setup submitter
 	s.submitter = NewSubmitter(&config.Submitter{
-		Interval:          0,
-		Concurrency:       0,
-		Confirmations:     0,
-		GasMultiplier:     1.0,
-		BatchSize:         20,
-		MaxGas:            500_000_000,
-		UseMulticall:      true, // TODO
-		Multicall2Address: s.MulticallAddr.String(),
+		Interval:         0,
+		Concurrency:      0,
+		Confirmations:    0,
+		GasMultiplier:    1.0,
+		BatchSize:        20,
+		MaxGas:           500_000_000,
+		UseMulticall:     true, // TODO
+		MulticallAddress: s.MulticallAddr.String(),
 	}, s.DB, stakemanager.NewCache(s.StakeManager))
 
 	s.task = verse.

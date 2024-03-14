@@ -6,7 +6,7 @@ const (
 	Major = 0
 	Minor = 0
 	Patch = 11
-	Meta  = "dev0"
+	Meta  = "dev1"
 )
 
 func SemVer() string {

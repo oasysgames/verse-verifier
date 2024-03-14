@@ -65,7 +65,7 @@ func (w *Submitter) Start(ctx context.Context) {
 		"scc-verifier", w.cfg.SCCVerifierAddress,
 		"l2oo-verifier", w.cfg.L2OOVerifierAddress,
 		"use-multicall", w.cfg.UseMulticall,
-		"multicall", w.cfg.Multicall2Address)
+		"multicall", w.cfg.MulticallAddress)
 
 	wg.Wait()
 	w.log.Info("Worker stopped")
@@ -208,7 +208,7 @@ func (w *Submitter) sendMulticallTx(
 	iter *signatureIterator,
 ) (*types.Transaction, error) {
 	mcall, err := multicall2.NewMulticall2(
-		common.HexToAddress(w.cfg.Multicall2Address), task.L1Signer())
+		common.HexToAddress(w.cfg.MulticallAddress), task.L1Signer())
 	if err != nil {
 		log.Error("Failed to construct the multicall contract", "err", err)
 		return nil, err
