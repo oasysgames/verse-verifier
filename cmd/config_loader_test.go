@@ -50,11 +50,13 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigFromYAML() {
 
 	wallets:
 		verifier:
-			address: '0xF436eE34947bcaA51b714EABE1f0777F6e14C9A2'
+			address: '0x08E9441C28c9f34dcB1fa06f773a0450f15B6F43'
 			password: %s
+			plain: '0x5ea366a14e0bd46e7da7e894c8cc896ebecd1f6452b674aaa41688878f45ff73'
 		submitter:
-			address: '0x8939dB9898cA941CC8C3d89536d0e62da0592c0B'
+			address: '0xD244F03CA3e99C6093f6cBEFBD2f4508244C59D4'
 			password: %s
+			plain: '0xebf3a7f5f805e02c0bbbd599acd5c881f40db22caa95127d4bf48e2dde5fd7bb'
 	
 	hub_layer:
 		chain_id: 1
@@ -155,8 +157,9 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigWithVerifierArgs() {
 
 	got := s.executeWithCliArgs([]string{
 		"--config.verifier",
-		"--config.verifier.wallet.address", "0xF436eE34947bcaA51b714EABE1f0777F6e14C9A2",
+		"--config.verifier.wallet.address", "0x08E9441C28c9f34dcB1fa06f773a0450f15B6F43",
 		"--config.verifier.wallet.password", s.passwdFile1.Name(),
+		"--config.verifier.wallet.plain", "0x5ea366a14e0bd46e7da7e894c8cc896ebecd1f6452b674aaa41688878f45ff73",
 	})
 
 	s.Equal(want, got)
@@ -174,8 +177,9 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigWithSubmitterArgs() {
 		"--config.submitter.multicall-address", "0x0664C632576A4CA04166D585c2f3620aBc0c65D9",
 		"--config.submitter.targets", "2",
 		"--config.submitter.targets", "3",
-		"--config.submitter.wallet.address", "0x8939dB9898cA941CC8C3d89536d0e62da0592c0B",
+		"--config.submitter.wallet.address", "0xD244F03CA3e99C6093f6cBEFBD2f4508244C59D4",
 		"--config.submitter.wallet.password", s.passwdFile2.Name(),
+		"--config.submitter.wallet.plain", "0xebf3a7f5f805e02c0bbbd599acd5c881f40db22caa95127d4bf48e2dde5fd7bb",
 	})
 
 	s.Equal(want, got)
@@ -375,8 +379,9 @@ func (s *ConfigLoaderTestSuite) applyVerseCliArgs(c *config.Config) {
 
 func (s *ConfigLoaderTestSuite) applyVerifierCliArgs(c *config.Config) {
 	c.Wallets["verifier"] = &config.Wallet{
-		Address:  "0xF436eE34947bcaA51b714EABE1f0777F6e14C9A2",
+		Address:  "0x08E9441C28c9f34dcB1fa06f773a0450f15B6F43",
 		Password: s.passwdFile1.Name(),
+		Plain:    "0x5ea366a14e0bd46e7da7e894c8cc896ebecd1f6452b674aaa41688878f45ff73",
 	}
 	c.Verifier.Enable = true
 	c.Verifier.Wallet = "verifier"
@@ -384,8 +389,9 @@ func (s *ConfigLoaderTestSuite) applyVerifierCliArgs(c *config.Config) {
 
 func (s *ConfigLoaderTestSuite) applySubmitterCliArgs(c *config.Config) {
 	c.Wallets["submitter"] = &config.Wallet{
-		Address:  "0x8939dB9898cA941CC8C3d89536d0e62da0592c0B",
+		Address:  "0xD244F03CA3e99C6093f6cBEFBD2f4508244C59D4",
 		Password: s.passwdFile2.Name(),
+		Plain:    "0xebf3a7f5f805e02c0bbbd599acd5c881f40db22caa95127d4bf48e2dde5fd7bb",
 	}
 	c.Submitter.Enable = true
 	c.Submitter.Confirmations = 10

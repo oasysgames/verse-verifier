@@ -101,6 +101,7 @@ func mustNewConfigLoader(cmd *cobra.Command) *configLoader {
 				"":                argConfigFlag(&opts.verifier.use, f.BoolVar, "Enable the verifier feature"),
 				"wallet.address":  argConfigFlag(&opts.verifier.wallet.Address, f.StringVar, "Address of the verifier wallet"),
 				"wallet.password": argConfigFlag(&opts.verifier.wallet.Password, f.StringVar, "Password file of the verifier wallet"),
+				"wallet.plain":    argConfigFlag(&opts.verifier.wallet.Plain, f.StringVar, "Plaintext private key of the verifier wallet"),
 			},
 		},
 		{
@@ -114,6 +115,7 @@ func mustNewConfigLoader(cmd *cobra.Command) *configLoader {
 				"targets":               argConfigFlag(&opts.submitter.targets, f.UintSliceVar, "List of Chain IDs to submit"),
 				"wallet.address":        argConfigFlag(&opts.submitter.wallet.Address, f.StringVar, "Address of the submitter wallet"),
 				"wallet.password":       argConfigFlag(&opts.submitter.wallet.Password, f.StringVar, "Password file of the submitter wallet"),
+				"wallet.plain":          argConfigFlag(&opts.submitter.wallet.Plain, f.StringVar, "Plaintext private key of the submitter wallet"),
 			},
 		},
 	}

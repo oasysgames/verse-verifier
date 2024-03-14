@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/oasysgames/oasys-optimism-verifier/beacon"
@@ -73,16 +73,16 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	// start the ipc server and services dependent on ipc
 	s.mustStartIPC(ctx, []func(context.Context, *ipc.IPCServer){
 		// unlock walelts(wait forever)
-		s.mustUnlockWallets,
+		s.mustLoadSigners,
 		// start p2p (Note: must start the P2P before setup beacon worker)
 		s.mustStartP2P,
 	})
 
 	// setup workers
-	s.setupCollector()
+	s.mustSetupCollector()
 	s.mustSetupVerifier()
 	s.setupSubmitter()
-	s.setupBeacon()
+	s.mustSetupBeacon()
 
 	// start cache updater
 	s.smcache.Refresh(ctx) // first time synchronous
@@ -109,7 +109,7 @@ type server struct {
 	wg               sync.WaitGroup
 	conf             *config.Config
 	db               *database.Database
-	ks               *wallet.KeyStore
+	signers          map[string]ethutil.Signer
 	hub              ethutil.Client
 	smcache          *stakemanager.Cache
 	p2p              *p2p.Node
@@ -124,7 +124,10 @@ type server struct {
 func mustNewServer() *server {
 	var err error
 
-	s := &server{discoveredVerses: make(chan []*config.Verse)}
+	s := &server{
+		signers:          map[string]ethutil.Signer{},
+		discoveredVerses: make(chan []*config.Verse),
+	}
 
 	if s.conf, err = globalConfigLoader.load(); err != nil {
 		log.Crit("Failed to load configuration", "err", err)
@@ -137,9 +140,6 @@ func mustNewServer() *server {
 	if s.db, err = database.NewDatabase(&s.conf.Database); err != nil {
 		log.Crit("Failed to open database", "err", err)
 	}
-
-	// open geth keystore
-	s.ks = wallet.NewKeyStore(s.conf.Keystore)
 
 	// construct hub-layer client
 	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC); err != nil {
@@ -225,9 +225,8 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 
 	// ignore self-signed signatures
 	ignoreSigners := []common.Address{}
-	if s.conf.Verifier.Enable {
-		_, account := findWallet(s.conf, s.ks, s.conf.Verifier.Wallet)
-		ignoreSigners = append(ignoreSigners, account.Address)
+	if signer, ok := s.signers[s.conf.Verifier.Wallet]; ok {
+		ignoreSigners = append(ignoreSigners, signer.From())
 	}
 
 	s.p2p, err = p2p.NewNode(&s.conf.P2P, s.db, host, dht, bwm,
@@ -246,16 +245,18 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	}()
 }
 
-func (s *server) setupCollector() {
+func (s *server) mustSetupCollector() {
 	if !s.conf.Verifier.Enable {
 		return
 	}
 
-	s.blockCollector = collector.NewBlockCollector(&s.conf.Verifier, s.db, s.hub)
+	signer, ok := s.signers[s.conf.Verifier.Wallet]
+	if !ok {
+		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
+	}
 
-	_, account := findWallet(s.conf, s.ks, s.conf.Verifier.Wallet)
-	s.eventCollector = collector.NewEventCollector(
-		&s.conf.Verifier, s.db, s.hub, account.Address)
+	s.blockCollector = collector.NewBlockCollector(&s.conf.Verifier, s.db, s.hub)
+	s.eventCollector = collector.NewEventCollector(&s.conf.Verifier, s.db, s.hub, signer.From())
 }
 
 func (s *server) startCollector(ctx context.Context) {
@@ -283,11 +284,13 @@ func (s *server) mustSetupVerifier() {
 		return
 	}
 
-	wallet, account := findWallet(s.conf, s.ks, s.conf.Verifier.Wallet)
+	signer, ok := s.signers[s.conf.Verifier.Wallet]
+	if !ok {
+		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
+	}
+
 	l1Signer, err := ethutil.NewSignableClient(
-		new(big.Int).SetUint64(s.conf.HubLayer.ChainID),
-		s.conf.HubLayer.RPC,
-		ethutil.NewKeystoreSigner(wallet, account))
+		new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, signer)
 	if err != nil {
 		log.Crit("Failed to construct verifier", "err", err)
 	}
@@ -487,11 +490,14 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 					continue
 				}
 
-				wallet, account := findWallet(s.conf, s.ks, tg.Wallet)
+				signer, ok := s.signers[tg.Wallet]
+				if !ok {
+					log.Error("Wallet for the Submitter not found", "wallet", tg.Wallet)
+					continue
+				}
+
 				l1Signer, err := ethutil.NewSignableClient(
-					new(big.Int).SetUint64(s.conf.HubLayer.ChainID),
-					s.conf.HubLayer.RPC,
-					ethutil.NewKeystoreSigner(wallet, account))
+					new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, signer)
 				if err != nil {
 					log.Error("Failed to construct hub-layer client", "err", err)
 				} else {
@@ -502,17 +508,21 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 	}
 }
 
-func (s *server) setupBeacon() {
+func (s *server) mustSetupBeacon() {
 	if !s.conf.Beacon.Enable || !s.conf.Verifier.Enable {
 		return
 	}
 
-	_, account := findWallet(s.conf, s.ks, s.conf.Verifier.Wallet)
+	signer, ok := s.signers[s.conf.Verifier.Wallet]
+	if !ok {
+		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
+	}
+
 	s.bw = beacon.NewBeaconWorker(
 		&s.conf.Beacon,
 		http.DefaultClient,
 		beacon.Beacon{
-			Signer:  account.Address.Hex(),
+			Signer:  signer.From().Hex(),
 			Version: version.SemVer(),
 			PeerID:  s.p2p.PeerID().String(),
 		},
@@ -572,20 +582,50 @@ func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
 	return priv, nil
 }
 
-func (s *server) mustUnlockWallets(ctx context.Context, ipc *ipc.IPCServer) {
-	ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(s.ks))
+func (s *server) mustLoadSigners(ctx context.Context, ipc *ipc.IPCServer) {
+	// open geth keystore
+	var ks *wallet.KeyStore
+	if s.conf.Keystore != "" {
+		ks = wallet.NewKeyStore(s.conf.Keystore)
+		ipc.SetHandler(ipccmd.WalletUnlockCmd.NewHandler(ks))
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(len(s.conf.Wallets))
 
-	for name, wallet := range s.conf.Wallets {
+	for n, w := range s.conf.Wallets {
 		go func(name string, wallet *config.Wallet) {
 			defer wg.Done()
-
 			address := common.HexToAddress(wallet.Address)
-			_wallet, account, err := s.ks.FindWallet(address)
+
+			// Plain text private key.
+			if wallet.Plain != "" {
+				priv, err := ethcrypto.HexToECDSA(strings.TrimPrefix(wallet.Plain, "0x"))
+				if err != nil {
+					log.Crit("Failed to decode private key",
+						"name", name, "address", wallet.Address, "err", err)
+				}
+
+				signer := ethutil.NewPrivateKeySigner(priv)
+				if signer.From() != address {
+					log.Crit("Decrypted private key address does not "+
+						"match the wallet address in the config",
+						"name", name, "want", address, "got", signer.From())
+				}
+
+				s.signers[name] = signer
+				log.Info("Loaded plaintext private key wallet", "name", name, "address", address)
+				return
+			}
+
+			// go-ethereum's private key.
+			if ks == nil {
+				log.Crit("Keystore directory is not specified")
+			}
+
+			_wallet, account, err := ks.FindWallet(address)
 			if err != nil {
-				log.Crit("Failed to find a wallet",
+				log.Crit("Failed to find the wallet",
 					"name", name, "address", wallet.Address, "err", err)
 			}
 
@@ -596,35 +636,25 @@ func (s *server) mustUnlockWallets(ctx context.Context, ipc *ipc.IPCServer) {
 						"name", name, "address", address, "err", err)
 				}
 
-				if err := s.ks.Unlock(*account, strings.Trim(string(pw), "\r\n\t ")); err != nil {
+				if err := ks.Unlock(*account, strings.Trim(string(pw), "\r\n\t ")); err != nil {
 					log.Crit("Failed to unlock wallet using password file",
 						"name", name, "address", address, "err", err)
 				}
 				log.Info("Wallet unlocked using password file", "name", name, "address", address)
-			} else if s.ks.Unlock(*account, "") == nil {
-				log.Info("Wallet unlocked", "name", name, "address", address)
+			} else if ks.Unlock(*account, "") == nil {
+				log.Info("Wallet unlocked using empty password", "name", name, "address", address)
 			} else {
 				log.Info("Waiting for wallet unlock via IPC", "name", name, "address", address)
-				if err := s.ks.WaitForUnlock(ctx, _wallet); err != nil {
+				if err := ks.WaitForUnlock(ctx, _wallet); err != nil {
 					log.Crit("Wallet was not unlocked",
 						"name", name, "address", address, "err", err)
 				}
 				log.Info("Wallet unlocked via IPC", "name", name, "address", address)
 			}
-		}(name, wallet)
+
+			s.signers[name] = ethutil.NewKeystoreSigner(_wallet, account)
+		}(n, w)
 	}
 
 	wg.Wait()
-}
-
-func findWallet(
-	c *config.Config,
-	ks *wallet.KeyStore,
-	name string,
-) (accounts.Wallet, *accounts.Account) {
-	wallet, account, err := ks.FindWallet(common.HexToAddress(c.Wallets[name].Address))
-	if err != nil {
-		log.Crit("Wallet not found", "name", name)
-	}
-	return wallet, account
 }

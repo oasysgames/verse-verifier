@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/go-playground/validator/v10"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
@@ -161,7 +160,7 @@ type Config struct {
 	Datastore string `validate:"dir"`
 
 	// Validator keystore directory path.
-	Keystore string `validate:"dir"`
+	Keystore string `validate:"omitempty,dir"`
 
 	// Address used to create signatures and send transactions.
 	Wallets map[string]*Wallet `validate:"dive"`
@@ -205,16 +204,15 @@ func (c *Config) P2PKeyPath() string {
 	return filepath.Join(c.Datastore, "p2p.key")
 }
 
-func (c *Config) OpenKeyStore() *keystore.KeyStore {
-	return keystore.NewKeyStore(c.Keystore, keystore.StandardScryptN, keystore.StandardScryptP)
-}
-
 type Wallet struct {
 	// Address of the wallet.
 	Address string `validate:"hexadecimal"`
 
 	// Password file of the wallet.
 	Password string `validate:"omitempty,file"`
+
+	// Hex-encoded plaintext private key.
+	Plain string `validate:"omitempty,hexadecimal"`
 }
 
 type HubLayer struct {

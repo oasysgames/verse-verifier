@@ -27,6 +27,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		wallet1:
 			address: '0xBA3186c30Bb0d9e8c7924147238F82617C3fE729'
 			password: /etc/passwd
+			plain: '0x70ce1ba0e76547883c0999662d093dd3426d550ec783a6c775b0060bf4ee6d0f'
 	
 	hub_layer:
 		chain_id: 12345
@@ -130,6 +131,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			"wallet1": {
 				Address:  "0xBA3186c30Bb0d9e8c7924147238F82617C3fE729",
 				Password: "/etc/passwd",
+				Plain:    "0x70ce1ba0e76547883c0999662d093dd3426d550ec783a6c775b0060bf4ee6d0f",
 			},
 		},
 		HubLayer: HubLayer{
@@ -298,6 +300,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 
 func (s *ConfigTestSuite) TestValidate() {
 	input := (`
+	keystore: /xxx
 	verse_layer:
 		discovery:
 			endpoint: xxx
