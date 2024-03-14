@@ -127,6 +127,7 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse) {
 		log.Error("Failed to call the NextIndex method", "err", err)
 		return
 	}
+	log = log.New("next-index", nextIndex)
 
 	// verify the signature that match the nextIndex
 	// and delete after signatures if there is a problem.
@@ -139,8 +140,6 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse) {
 	defer cancel()
 
 	for rollupIndex := nextIndex.Uint64(); ; rollupIndex++ {
-		log := log.New("rollup-index", rollupIndex)
-
 		events, err := task.EventDB().FindForVerification(
 			w.l1Signer.Signer(), task.RollupContract(), rollupIndex, 1)
 		if err != nil {
@@ -151,6 +150,7 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse) {
 			return
 		}
 
+		log := log.New("rollup-index", events[0].GetRollupIndex())
 		log.Info("Start verification")
 
 		approved, err := task.Verify(log, ctx, events[0], w.cfg.StateCollectLimit)
