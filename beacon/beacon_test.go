@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	httphelper "github.com/oasysgames/oasys-optimism-verifier/testhelper/http"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -28,7 +29,7 @@ func (s *BeaconWorkerTestSuite) TestBeaconWorker() {
 	)
 
 	// setup test client
-	client := testhelper.NewTestHTTPClient(func(req *http.Request) *http.Response {
+	client := httphelper.NewTestHTTPClient(func(req *http.Request) *http.Response {
 		url = req.URL.String()
 		data, _ = io.ReadAll(req.Body)
 

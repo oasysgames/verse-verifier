@@ -1,21 +1,40 @@
 package config
 
 import (
-	"bytes"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/go-playground/validator/v10"
-	"github.com/spf13/viper"
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/confmap"
+	"github.com/knadh/koanf/providers/rawbytes"
+	"github.com/knadh/koanf/v2"
 )
 
 var (
 	validate = validator.New()
+)
 
-	defaults = map[string]interface{}{
+func init() {
+	// Convert error message to use the field names from
+	// configuration file instead of the struct field names.
+	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
+		name := strings.SplitN(fld.Tag.Get("koanf"), ",", 2)[0]
+		switch name {
+		case "":
+			return strings.ToLower(fld.Name)
+		case "-":
+			return ""
+		default:
+			return name
+		}
+	})
+}
+
+func Defaults() map[string]interface{} {
+	return map[string]interface{}{
 		"verse_layer.discovery.refresh_interval": time.Hour,
 
 		"p2p.no_announce": []string{
@@ -54,14 +73,16 @@ var (
 		"verifier.state_collect_timeout": 15 * time.Second,
 		"verifier.db_optimize_interval":  time.Hour,
 
-		"submitter.interval":           15 * time.Second,
-		"submitter.concurrency":        50,
-		"submitter.confirmations":      6,
-		"submitter.gas_multiplier":     1.1,
-		"submitter.batch_size":         20,
-		"submitter.max_gas":            5_000_000,
-		"submitter.verifier_address":   "0x5200000000000000000000000000000000000014",
-		"submitter.multicall2_address": "0x5200000000000000000000000000000000000022",
+		"submitter.interval":              15 * time.Second,
+		"submitter.concurrency":           50,
+		"submitter.confirmations":         6,
+		"submitter.gas_multiplier":        1.1,
+		"submitter.batch_size":            20,
+		"submitter.max_gas":               5_000_000,
+		"submitter.scc_verifier_address":  "0x5200000000000000000000000000000000000014",
+		"submitter.l2oo_verifier_address": "0xF62fD2d4ef5a99C5bAa1effd0dc20889c5021E1c",
+		"submitter.use_multicall":         true,
+		"submitter.multicall_address":     "0x5200000000000000000000000000000000000022",
 
 		"beacon.enable":   true,
 		"beacon.endpoint": "https://script.google.com/macros/s/AKfycbzJpDKyn271jbm5otk_BxGkrS2b1YdMQerVq2-XxLdTOdhUPKCZICqvagvGgByxx_nq0Q/exec",
@@ -81,365 +102,379 @@ var (
 		"debug.pprof.block_profile_rate":  0,
 		"debug.pprof.mem_profile_rate":    524288,
 	}
-)
-
-func init() {
-	initViper()
-	initValidate()
 }
 
-// Read the configuration file.
+// Build configuration.
 func NewConfig(input []byte) (*Config, error) {
-	if err := viper.ReadConfig(bytes.NewBuffer(input)); err != nil {
+	k := koanf.New(".")
+
+	// load default values
+	if err := k.Load(confmap.Provider(Defaults(), "."), nil); err != nil {
 		return nil, err
 	}
 
+	// load yaml configuration file
+	err := k.Load(rawbytes.Provider(input), yaml.Parser())
+	if err != nil {
+		return nil, err
+	}
+
+	// assign values to `Config` struct
 	var conf Config
-	if err := viper.Unmarshal(&conf); err != nil {
+	if err := k.Unmarshal("", &conf); err != nil {
 		return nil, err
 	}
 
-	if err := validate.Struct(conf); err != nil {
+	// run validation
+	if err := Validate(&conf); err != nil {
 		return nil, err
 	}
 
 	return &conf, nil
-
 }
 
-func initViper() {
-	// set config types
-	viper.SetConfigType("json")
-	viper.SetConfigType("yaml")
+// Returns a Config with default values set.
+// However, the returned config is missing required fields, so it cannot be used as is.
+func MustNewDefaultConfig() *Config {
+	k := koanf.New(".")
 
-	// set default values
-	for k, b := range defaults {
-		viper.SetDefault(k, b)
+	if err := k.Load(confmap.Provider(Defaults(), "."), nil); err != nil {
+		panic(err)
 	}
+
+	var conf Config
+	if err := k.Unmarshal("", &conf); err != nil {
+		panic(err)
+	}
+
+	return &conf
 }
 
-func initValidate() {
-	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
-		// use `json` tag
-		name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
-		if name == "-" {
-			return ""
-		}
-		return name
-	})
+func Validate(conf *Config) error {
+	return validate.Struct(conf)
 }
 
 // App configuration.
 type Config struct {
 	// Datastore directory path.
-	DataStore string `json:"datastore" validate:"dir"`
+	Datastore string `validate:"dir"`
 
 	// Validator keystore directory path.
-	KeyStore string `json:"keystore" validate:"dir"`
+	Keystore string `validate:"omitempty,dir"`
 
 	// Address used to create signatures and send transactions.
-	Wallets map[string]Wallet `json:"wallets" validate:"dive"`
+	Wallets map[string]*Wallet `validate:"dive"`
 
 	// Configuration of the Hub-Layer.
-	HubLayer hubLayer `json:"hub_layer" mapstructure:"hub_layer"`
+	HubLayer HubLayer `koanf:"hub_layer"`
 
 	// Configuration of Verse-Layer discovery.
-	VerseLayer verseLayer `json:"verse_layer" mapstructure:"verse_layer"`
+	VerseLayer VerseLayer `koanf:"verse_layer"`
 
 	// P2P worker configuration.
-	P2P P2P `json:"p2p"`
+	P2P P2P
 
 	// IPC configuration.
-	IPC IPC `json:"ipc"`
+	IPC IPC
 
 	// Verifier configuration.
-	Verifier Verifier `json:"verifier" mapstructure:"verifier"`
+	Verifier Verifier
 
 	// Submitter configuration.
-	Submitter Submitter `json:"submitter" mapstructure:"submitter"`
+	Submitter Submitter
 
 	// Beacon worker configuration.
-	Beacon Beacon `json:"beacon" mapstructure:"beacon"`
+	Beacon Beacon
 
 	// Database configuration.
-	Database Database `json:"database" mapstructure:"database"`
+	Database Database
 
 	// Metrics configuration
-	Metrics Metrics `json:"metrics"`
+	Metrics Metrics
 
 	// Debug configuration.
-	Debug Debug `json:"debug" mapstructure:"debug"`
+	Debug Debug
 }
 
 func (c *Config) DatabasePath() string {
-	return filepath.Join(c.DataStore, "db.sqlite")
+	return filepath.Join(c.Datastore, "db.sqlite")
 }
 
 func (c *Config) P2PKeyPath() string {
-	return filepath.Join(c.DataStore, "p2p.key")
-}
-
-func (c *Config) OpenKeyStore() *keystore.KeyStore {
-	return keystore.NewKeyStore(c.KeyStore, keystore.StandardScryptN, keystore.StandardScryptP)
+	return filepath.Join(c.Datastore, "p2p.key")
 }
 
 type Wallet struct {
 	// Address of the wallet.
-	Address string `json:"address" validate:"hexadecimal"`
+	Address string `validate:"hexadecimal"`
 
 	// Password file of the wallet.
-	Password string `json:"password" validate:"omitempty,file"`
+	Password string `validate:"omitempty,file"`
+
+	// Hex-encoded plaintext private key.
+	Plain string `validate:"omitempty,hexadecimal"`
 }
 
-type hubLayer struct {
+type HubLayer struct {
 	// Chain ID of the Hub-Layer.
-	ChainId uint64 `json:"chain_id" mapstructure:"chain_id" validate:"required"`
+	ChainID uint64 `koanf:"chain_id" validate:"required"`
 
 	// RPC of the Hub-Layer(HTTP or WebSocket).
-	RPC string `json:"rpc" validate:"url"`
+	RPC string `validate:"url"`
 }
 
 type Verse struct {
 	// Chain ID of the Verse-Layer.
-	ChainID uint64 `json:"chain_id" mapstructure:"chain_id" validate:"required"`
+	ChainID uint64 `json:"chain_id" koanf:"chain_id" validate:"required"`
 
 	// RPC of the Verse-Layer(HTTP or WebSocket).
 	RPC string `json:"rpc" validate:"url"`
 
 	// Contract addresses on the Hub-Layer.
-	L1Contracts map[string]string `json:"l1_contracts" mapstructure:"l1_contracts" validate:"required,dive,hexadecimal"`
+	L1Contracts map[string]string `json:"l1_contracts" koanf:"l1_contracts" validate:"required,dive,hexadecimal"`
 }
 
-type verseLayer struct {
+type VerseLayer struct {
 	// Discover from API.
 	Discovery struct {
-		Endpoint        string        `json:"endpoint" validate:"omitempty,url"`
-		RefreshInterval time.Duration `json:"refresh_interval" mapstructure:"refresh_interval"`
-	} `json:"discovery" validate:"dive"`
+		Endpoint        string        `validate:"omitempty,url"`
+		RefreshInterval time.Duration `koanf:"refresh_interval"`
+	}
 
 	// List of Verse-Layer.
-	Directs []*Verse `json:"directs" validate:"dive"`
+	Directs []*Verse `validate:"dive"`
 }
 
 type P2P struct {
 	// libp2p multi-addresses to listen.
-	Listens []string `json:"listens" mapstructure:"listens"`
+	Listens []string
 
 	// Additional multi-addresses to advertise.
-	AppendAnnounce []string `json:"append_announce" mapstructure:"append_announce"`
+	AppendAnnounce []string `koanf:"append_announce"`
 
 	// Multi-addresses not advertised.
-	NoAnnounce []string `json:"no_announce" mapstructure:"no_announce"`
+	NoAnnounce []string `koanf:"no_announce"`
 
 	// Multi-addresses that filter dial or receive connections.
-	ConnectionFilter []string `json:"connection_filter" mapstructure:"connection_filter"`
+	ConnectionFilter []string `koanf:"connection_filter"`
 
 	// Enabled transport protocols.
 	Transports struct {
-		TCP  bool `json:"tcp"`
-		QUIC bool `json:"quic"`
-	} `json:"transports"`
+		TCP  bool
+		QUIC bool
+	}
 
 	// Deprecated: Address and port to listen.
-	Listen string `json:"listen" validate:"omitempty,hostname_port"`
+	Listen string `validate:"omitempty,hostname_port"`
 
 	// Initial node list.
-	Bootnodes []string `json:"bootnodes"`
+	Bootnodes []string
 
 	// Enabled NAT Travasal features.
 	NAT struct {
-		UPnP      bool `json:"upnp" mapstructure:"upnp"`
-		AutoNAT   bool `json:"autonat" mapstructure:"autonat"`
-		HolePunch bool `json:"holepunch" mapstructure:"holepunch"`
-	} `json:"nat"`
+		UPnP      bool `koanf:"upnp"`
+		AutoNAT   bool `koanf:"autonat"`
+		HolePunch bool `koanf:"holepunch"`
+	}
 
 	// Enable Circuit Relay(v2) service.
 	// Note: Public connectivity is required.
 	RelayService struct {
-		Enable bool `json:"enable"`
+		Enable bool
 
 		// DurationLimit is the limit of data relayed (on each direction) before resetting the connection.
-		DurationLimit *time.Duration `json:"duration_limit,omitempty" mapstructure:"duration_limit"`
+		DurationLimit *time.Duration `koanf:"duration_limit"`
 		// DataLimit is the time limit before resetting a relayed connection.
-		DataLimit *int64 `json:"data_limit,omitempty" mapstructure:"data_limit"`
+		DataLimit *int64 `koanf:"data_limit"`
 
 		// ReservationTTL is the duration of a new (or refreshed reservation).
-		ReservationTTL *time.Duration `json:"reservation_ttl,omitempty" mapstructure:"reservation_ttl"`
+		ReservationTTL *time.Duration `koanf:"reservation_ttl"`
 
 		// MaxReservations is the maximum number of active relay slots.
-		MaxReservations *int `json:"max_reservations,omitempty" mapstructure:"max_reservations"`
+		MaxReservations *int `koanf:"max_reservations"`
 		// MaxCircuits is the maximum number of open relay connections for each peer; defaults to 16.
-		MaxCircuits *int `json:"max_circuits,omitempty" mapstructure:"max_circuits"`
+		MaxCircuits *int `koanf:"max_circuits"`
 		// BufferSize is the size of the relayed connection buffers.
-		BufferSize *int `json:"buffer_size,omitempty" mapstructure:"buffer_size"`
+		BufferSize *int `koanf:"buffer_size"`
 
 		// MaxReservationsPerPeer is the maximum number of reservations originating from the same peer.
-		MaxReservationsPerPeer *int `json:"max_reservations_per_peer,omitempty" mapstructure:"max_reservations_per_peer"`
+		MaxReservationsPerPeer *int `koanf:"max_reservations_per_peer"`
 		// MaxReservationsPerIP is the maximum number of reservations originating from the same IP address.
-		MaxReservationsPerIP *int `json:"max_reservations_per_ip,omitempty" mapstructure:"max_reservations_per_ip"`
+		MaxReservationsPerIP *int `koanf:"max_reservations_per_ip"`
 		// MaxReservationsPerASN is the maximum number of reservations origination from the same ASN.
-		MaxReservationsPerASN *int `json:"max_reservations_per_asn,omitempty" mapstructure:"max_reservations_per_asn"`
-	} `json:"relay_service" mapstructure:"relay_service"`
+		MaxReservationsPerASN *int `koanf:"max_reservations_per_asn"`
+	} `koanf:"relay_service"`
 
 	// Enable Circuit Relay(v2) client.
 	RelayClient struct {
-		Enable     bool     `json:"enable"`
-		RelayNodes []string `json:"relay_nodes" mapstructure:"relay_nodes"`
-	} `json:"relay_client" mapstructure:"relay_client"`
+		Enable     bool
+		RelayNodes []string `koanf:"relay_nodes"`
+	} `koanf:"relay_client"`
 
 	// Interval to publish own signature status.
-	PublishInterval time.Duration `json:"publish_interval" mapstructure:"publish_interval"`
+	PublishInterval time.Duration `koanf:"publish_interval"`
 
 	// Timeout for P2P stream communication.
-	StreamTimeout time.Duration `json:"stream_timeout" mapstructure:"stream_timeout"`
+	StreamTimeout time.Duration `koanf:"stream_timeout"`
 
 	OutboundLimits struct {
 		// Maximum number of concurrent signature requests from oneself to peers.
-		Concurrency int `json:"concurrency"`
+		Concurrency int
 
 		// The number of signatures that can be sent to peers per second.
-		Throttling int `json:"throttling"`
-	} `json:"outbound_limits" mapstructure:"outbound_limits"`
+		Throttling int
+	} `koanf:"outbound_limits"`
 
 	InboundLimits struct {
 		// Maximum number of concurrent signature requests from peers to oneself.
-		Concurrency int `json:"concurrency"`
+		Concurrency int
 
 		// The number of signatures that can be sent to peers per second.
-		Throttling int `json:"throttling"`
+		Throttling int
 
 		// Maximum time to send signatures to a peer.
-		MaxSendTime time.Duration `json:"max_send_time" mapstructure:"max_send_time"`
-	} `json:"inbound_limits" mapstructure:"inbound_limits"`
+		MaxSendTime time.Duration `koanf:"max_send_time"`
+	} `koanf:"inbound_limits"`
 }
 
 type IPC struct {
 	// Socket file name, In UNIX-based OS, it is created as /tmp/{sockname}.sock.
-	Sockname string `json:"sockname"`
+	Sockname string
 }
 
 type Verifier struct {
 	// Enable to verifier.
-	Enable bool `json:"enable"`
+	Enable bool
 
 	// Name of the wallet to create signature.
-	Wallet string `json:"wallet" validate:"required_if=Enable true"`
+	Wallet string `validate:"required_if=Enable true"`
 
 	// Interval for get block data.
-	Interval time.Duration `json:"interval" mapstructure:"interval"`
+	Interval time.Duration
 
 	// Number of concurrent executions.
-	Concurrency int `json:"concurrency"`
+	Concurrency int
 
 	// Number of block headers to collect at a time.
-	BlockLimit int `json:"block_limit" mapstructure:"block_limit"`
+	BlockLimit int `koanf:"block_limit"`
 
 	// Number of blocks to event filter.
-	EventFilterLimit int `json:"event_filter_limit" mapstructure:"event_filter_limit"`
+	EventFilterLimit int `koanf:"event_filter_limit"`
 
 	// Number of state root to collect at a time.
-	StateCollectLimit int `json:"state_collect_limit" mapstructure:"state_collect_limit"`
+	StateCollectLimit int `koanf:"state_collect_limit"`
 
 	// Timeout for state root collection.
-	StateCollectTimeout time.Duration `json:"state_collect_timeout" mapstructure:"state_collect_timeout"`
+	StateCollectTimeout time.Duration `koanf:"state_collect_timeout"`
 
 	// Interval to optimize database.
-	OptimizeInterval time.Duration `json:"db_optimize_interval" mapstructure:"db_optimize_interval"`
+	OptimizeInterval time.Duration `koanf:"db_optimize_interval"`
 }
 
 type Submitter struct {
 	// Whether to enable worker.
-	Enable bool `json:"enable"`
+	Enable bool `koanf:"enable"`
 
 	// Interval for send transaction.
-	Interval time.Duration `json:"interval" mapstructure:"interval"`
+	Interval time.Duration
 
 	// Number of concurrent executions.
-	Concurrency int `json:"concurrency"`
+	Concurrency int
 
 	// Number of confirmation blocks for transaction receipt.
-	Confirmations int `json:"confirmations"`
+	Confirmations int
 
 	// How much to increase the estimated gas limit.
-	GasMultiplier float64 `json:"gas_multiplier" mapstructure:"gas_multiplier"`
+	GasMultiplier float64 `koanf:"gas_multiplier"`
 
 	// Maximum number of calls for Multicall2.
-	BatchSize int `json:"batch_size" mapstructure:"batch_size"`
+	BatchSize int `koanf:"batch_size"`
 
 	// Maximum gas of calls for Multicall2.
-	MaxGas int `json:"max_gas" mapstructure:"max_gas"`
+	MaxGas uint64 `koanf:"max_gas"`
 
-	// Address of the OasysStateCommitmentChain contract.
-	VerifierAddress string `json:"verifier_address" mapstructure:"verifier_address"`
+	// Address of the OasysStateCommitmentChainVerifier contract.
+	SCCVerifierAddress string `koanf:"scc_verifier_address"`
+
+	// Address of the OasysL2OutputOracleVerifier contract.
+	L2OOVerifierAddress string `koanf:"l2oo_verifier_address"`
 
 	// Address of the Multicall2 contract.
-	Multicall2Address string `json:"multicall2_address" mapstructure:"multicall2_address"`
+	UseMulticall     bool   `koanf:"use_multicall"`
+	MulticallAddress string `koanf:"multicall_address"`
 
-	Targets []struct {
-		// Chain ID of the Verse-Layer.
-		ChainID uint64 `json:"chain_id"     mapstructure:"chain_id"     validate:"required"`
+	// List of verses to submit signatures
+	Targets []*SubmitterTarget `validate:"dive"`
+}
 
-		// Name of the wallet to send transaction.
-		Wallet string `json:"wallet" validate:"required"`
-	} `json:"targets" validate:"dive"`
+type SubmitterTarget struct {
+	// Chain ID of the Verse-Layer.
+	ChainID uint64 `koanf:"chain_id" validate:"required"`
+
+	// Name of the wallet to send transaction.
+	Wallet string `validate:"required"`
+}
+
+func (c *Submitter) MultiplyGas(base uint64) uint64 {
+	return uint64(float64(base) * c.GasMultiplier)
 }
 
 type Beacon struct {
 	// Whether to enable worker.
-	Enable bool `json:"enable"`
+	Enable bool
 
 	// URL of beacon.
-	Endpoint string `json:"endpoint" validate:"omitempty,url"`
+	Endpoint string `validate:"omitempty,url"`
 
 	// Interval for send beacon.
-	Interval time.Duration `json:"interval"`
+	Interval time.Duration
 }
 
 type Database struct {
 	// File path of the SQLite database.
-	Path string `json:"path" mapstructure:"path"`
+	Path string
 
 	// Slow query log configurations.
-	LongQueryTime       time.Duration `json:"long_query_time"        mapstructure:"long_query_time"`
-	MinExaminedRowLimit int           `json:"min_examined_row_limit" mapstructure:"min_examined_row_limit"`
+	LongQueryTime       time.Duration `koanf:"long_query_time"`
+	MinExaminedRowLimit int           `koanf:"min_examined_row_limit"`
 }
 
 type Metrics struct {
 	// Whether to pprof server.
-	Enable bool `json:"enable"`
+	Enable bool
 
 	// Address and port to listen.
-	Listen string `json:"listen" validate:"hostname_port"`
+	Listen string `validate:"hostname_port"`
 
 	// The URL used to retrieve metrics.
-	Endpoint string `json:"endpoint"`
+	Endpoint string
 
 	// The type of metrics collector.
-	Type string `json:"type"`
+	Type string
 
 	// Metric name prefix.
-	Prefix string `json:"prefix"`
+	Prefix string
 }
 
 type Debug struct {
-	Pprof Pprof `json:"pprof" validate:"dive"`
+	Pprof Pprof
 }
 
 type Pprof struct {
 	// Whether to pprof server.
-	Enable bool `json:"enable"`
+	Enable bool
 
 	// Address and port to listen.
-	Listen string `json:"listen" validate:"hostname_port"`
+	Listen string `validate:"hostname_port"`
 
 	BasicAuth struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	} `json:"basic_auth" mapstructure:"basic_auth"`
+		Username string
+		Password string
+	} `koanf:"basic_auth"`
 
 	// Turn on block profiling with the given rate.
-	BlockProfileRate int `json:"block_profile_rate" mapstructure:"block_profile_rate"`
+	BlockProfileRate int `koanf:"block_profile_rate"`
 
 	// Turn on memory profiling with the given rate.
-	MemProfileRate int `json:"mem_profile_rate" mapstructure:"mem_profile_rate"`
+	MemProfileRate int `koanf:"mem_profile_rate"`
 }

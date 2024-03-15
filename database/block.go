@@ -8,14 +8,12 @@ import (
 	"gorm.io/gorm"
 )
 
-type BlockDatabase struct {
-	db *gorm.DB
-}
+type BlockDB db
 
 // Return the specific block.
-func (db *BlockDatabase) Find(number uint64) (*Block, error) {
+func (db *BlockDB) Find(number uint64) (*Block, error) {
 	var row Block
-	tx := db.db.
+	tx := db.rawdb.
 		Where("number = ?", number).
 		First(&row)
 
@@ -26,9 +24,9 @@ func (db *BlockDatabase) Find(number uint64) (*Block, error) {
 }
 
 // Return the highest block.
-func (db *BlockDatabase) FindHighest() (*Block, error) {
+func (db *BlockDB) FindHighest() (*Block, error) {
 	var rows []*Block
-	tx := db.db.
+	tx := db.rawdb.
 		Order("number DESC").
 		Limit(1).
 		Find(&rows) // `First()` is sorted by id, so `Find()` is used.
@@ -42,12 +40,12 @@ func (db *BlockDatabase) FindHighest() (*Block, error) {
 }
 
 // Returns blocks for uncollected event logs(order by block number).
-func (db *BlockDatabase) FindUncollecteds(limit int) ([]*Block, error) {
-	tx := db.db.
+func (db *BlockDB) FindUncollecteds(limit int) ([]*Block, error) {
+	tx := db.rawdb.
 		Order("number ASC").
 		Limit(limit)
 
-	if number, err := findCollectedBlock(db.db); err != nil {
+	if number, err := findCollectedBlock(db.rawdb); err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
 		}
@@ -66,14 +64,14 @@ func (db *BlockDatabase) FindUncollecteds(limit int) ([]*Block, error) {
 }
 
 // Save the new block.
-func (db *BlockDatabase) SaveNewBlock(number uint64, hash common.Hash) error {
-	tx := db.db.Create(&Block{Number: number, Hash: hash})
+func (db *BlockDB) Save(number uint64, hash common.Hash) error {
+	tx := db.rawdb.Create(&Block{Number: number, Hash: hash})
 	return tx.Error
 }
 
 // Save event log collected block.
-func (db *BlockDatabase) SaveCollected(number uint64, hash common.Hash) error {
-	return db.db.Transaction(func(tx *gorm.DB) error {
+func (db *BlockDB) SaveCollected(number uint64, hash common.Hash) error {
+	return db.rawdb.Transaction(func(tx *gorm.DB) error {
 		block, err := newDB(tx).Block.Find(number)
 		if err != nil {
 			return fmt.Errorf("failed to find the target block: %w", err)
@@ -87,8 +85,8 @@ func (db *BlockDatabase) SaveCollected(number uint64, hash common.Hash) error {
 }
 
 // Delete blocks after the number.
-func (db *BlockDatabase) Deletes(after uint64) error {
-	return db.db.Transaction(func(txdb *gorm.DB) error {
+func (db *BlockDB) Deletes(after uint64) error {
+	return db.rawdb.Transaction(func(txdb *gorm.DB) error {
 		tx := txdb.
 			Where("number >= ?", after).
 			Delete(&Block{})

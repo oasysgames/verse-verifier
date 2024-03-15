@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
+	httphelper "github.com/oasysgames/oasys-optimism-verifier/testhelper/http"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -23,7 +23,7 @@ func TestVerseDiscovery(t *testing.T) {
 
 func (s *VerseDiscoveryTestSuite) TestDiscover() {
 	// setup test client
-	client := testhelper.NewTestHTTPClient(func(req *http.Request) *http.Response {
+	client := httphelper.NewTestHTTPClient(func(req *http.Request) *http.Response {
 		s.Equal("https://example.com/", req.URL.String())
 		return &http.Response{
 			StatusCode: 200,
@@ -55,17 +55,17 @@ func (s *VerseDiscoveryTestSuite) TestDiscover() {
 	sub1 := discovery.Subscribe(context.Background())
 
 	var (
-		wg           sync.WaitGroup
-		gots0, gots1 []*Verse
+		wg         sync.WaitGroup
+		got0, got1 []*Verse
 	)
-	wg.Add(4)
+	wg.Add(2)
 	go func() {
 		for {
 			select {
 			case got := <-sub0.Next():
-				gots0 = append(gots0, got)
+				got0 = got
 			case got := <-sub1.Next():
-				gots1 = append(gots1, got)
+				got1 = got
 			}
 			wg.Done()
 		}
@@ -91,12 +91,12 @@ func (s *VerseDiscoveryTestSuite) TestDiscover() {
 		},
 	}
 
-	s.Len(gots0, 2)
-	s.Len(gots1, 2)
+	s.Len(got0, 2)
+	s.Len(got1, 2)
 
-	s.Equal(want0, *gots0[0])
-	s.Equal(want0, *gots1[0])
+	s.Equal(want0, *got0[0])
+	s.Equal(want0, *got1[0])
 
-	s.Equal(want1, *gots0[1])
-	s.Equal(want1, *gots1[1])
+	s.Equal(want1, *got0[1])
+	s.Equal(want1, *got1[1])
 }

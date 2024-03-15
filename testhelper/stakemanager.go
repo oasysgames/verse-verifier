@@ -12,7 +12,6 @@ type StakeManagerMock struct {
 	Operators  []common.Address
 	Stakes     []*big.Int
 	Candidates []bool
-	NewCursor  *big.Int
 }
 
 func (b *StakeManagerMock) GetTotalStake(
