@@ -80,8 +80,11 @@ func mustNewConfigLoader(cmd *cobra.Command) *configLoader {
 		{
 			name: "p2p",
 			flags: map[string]func(name string){
-				"listens":   argConfigFlag(&cfg.P2P.Listens, f.StringSliceVar, "libp2p multi-addresses to listen"),
-				"bootnodes": argConfigFlag(&cfg.P2P.Bootnodes, f.StringSliceVar, "Initial node list"),
+				"listens":           argConfigFlag(&cfg.P2P.Listens, f.StringSliceVar, "libp2p multi-addresses to listen"),
+				"bootnodes":         argConfigFlag(&cfg.P2P.Bootnodes, f.StringSliceVar, "Initial node list"),
+				"append_announce":   argConfigFlag(&cfg.P2P.AppendAnnounce, f.StringSliceVar, "Additional multi-addresses to advertise"),
+				"no_announce":       argConfigFlag(&cfg.P2P.NoAnnounce, f.StringSliceVar, "Multi-addresses not advertised"),
+				"connection_filter": argConfigFlag(&cfg.P2P.ConnectionFilter, f.StringSliceVar, "Multi-addresses that filter dial or receive connections"),
 			},
 		},
 		{

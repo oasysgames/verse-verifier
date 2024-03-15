@@ -79,6 +79,15 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigFromYAML() {
 		bootnodes:
 			- bootnode0
 			- bootnode1
+		append_announce:
+			- appendann0
+			- appendann1
+		no_announce:
+			- noann0
+			- noann1
+		connection_filter:
+			- connfil0
+			- connfil1
 
 	verifier:
 		enable: true
@@ -131,6 +140,23 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigWithP2PCliArgs() {
 	got := s.executeWithCliArgs([]string{
 		"--config.p2p.bootnodes", "bootnode0",
 		"--config.p2p.bootnodes", "bootnode1",
+		"--config.p2p.append_announce", "appendann0",
+		"--config.p2p.append_announce", "appendann1",
+		"--config.p2p.no_announce", "noann0",
+		"--config.p2p.no_announce", "noann1",
+		"--config.p2p.connection_filter", "connfil0",
+		"--config.p2p.connection_filter", "connfil1",
+	})
+	s.Equal(want, got)
+
+	// test if default values can be removed
+	want = s.configWithMinCliArgs()
+	want.P2P.NoAnnounce = []string{}
+	want.P2P.ConnectionFilter = []string{}
+
+	got = s.executeWithCliArgs([]string{
+		"--config.p2p.no_announce", "",
+		"--config.p2p.connection_filter", "",
 	})
 	s.Equal(want, got)
 }
@@ -361,6 +387,9 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 
 func (s *ConfigLoaderTestSuite) applyP2PCliArgs(c *config.Config) {
 	c.P2P.Bootnodes = []string{"bootnode0", "bootnode1"}
+	c.P2P.AppendAnnounce = []string{"appendann0", "appendann1"}
+	c.P2P.NoAnnounce = []string{"noann0", "noann1"}
+	c.P2P.ConnectionFilter = []string{"connfil0", "connfil1"}
 }
 
 func (s *ConfigLoaderTestSuite) applyVerseCliArgs(c *config.Config) {
