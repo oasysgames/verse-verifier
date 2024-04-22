@@ -3,10 +3,10 @@ package version
 import "fmt"
 
 const (
-	Major = 0
+	Major = 1
 	Minor = 0
-	Patch = 11
-	Meta  = "dev1"
+	Patch = 0
+	Meta  = ""
 )
 
 func SemVer() string {
