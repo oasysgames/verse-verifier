@@ -2,6 +2,7 @@
 datastore: /home/geth/.oasvlfy
 
 # Keystore directory path
+# When using a plaintext private key, it is not necessary.
 keystore: /home/geth/.ethereum/keystore
 
 wallets:
@@ -9,6 +10,9 @@ wallets:
   signer:
     address: '0x'
     # password: /home/geth/.ethereum/password.txt
+
+    # Use a plaintext private key
+    # plain: '0x'
 
   # Wallet used by Submitter (gas is required)
   # submitter:

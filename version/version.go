@@ -3,9 +3,9 @@ package version
 import "fmt"
 
 const (
-	Major = 0
+	Major = 1
 	Minor = 0
-	Patch = 10
+	Patch = 0
 	Meta  = ""
 )
 

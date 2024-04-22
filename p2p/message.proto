@@ -24,14 +24,16 @@ message OptimismSignature {
   string id = 1;
   string previous_id = 2;
   bytes signer = 3;
-  bytes scc = 4;
-  uint64 batch_index = 5;
-  bytes batch_root = 6;
-  uint64 batch_size = 7;
-  uint64 prev_total_elements = 8;
-  bytes extra_data = 9;
+  bytes contract = 4;
+  uint64 rollup_index = 5;
+  bytes rollup_hash = 6;
   bool approved = 10;
   bytes signature = 11;
+
+  // These are fields that do not exist in OPStack and will be removed.
+  uint64 batch_size = 7 [ deprecated = true ];
+  uint64 prev_total_elements = 8 [ deprecated = true ];
+  bytes extra_data = 9 [ deprecated = true ];
 }
 
 message OptimismSignatureExchange {

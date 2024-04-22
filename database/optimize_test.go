@@ -16,7 +16,7 @@ type OptimizeDatabaseTestSuite struct {
 
 func (s *OptimizeDatabaseTestSuite) TestRepairOvertakingSignatures() {
 	signer := s.createSigner()
-	scc := s.createSCC()
+	contract := s.createContract()
 	ids := []string{
 		"01GSSK5XTCZD5ZCXR5E487F1Q1", //  0
 		"01GSSK5XTDBST5SJZ68JRX35CV", //  1
@@ -55,16 +55,16 @@ func (s *OptimizeDatabaseTestSuite) TestRepairOvertakingSignatures() {
 			ID:          id,
 			PreviousID:  prevID,
 			Signer:      *signer,
-			OptimismScc: *scc,
-			BatchIndex:  uint64(i),
-			BatchRoot:   s.RandHash(),
+			Contract:    *contract,
+			RollupIndex: uint64(i),
+			RollupHash:  s.RandHash(),
 			Signature:   RandSignature(),
 		}
-		s.NoDBError(s.rawdb.Create(sig))
+		s.NoDBError(s.db.rawdb.Create(sig))
 	}
 
 	var rows []*OptimismSignature
-	tx := s.rawdb.Where("id < previous_id").Order("id")
+	tx := s.db.rawdb.Where("id < previous_id").Order("id")
 
 	// check if overtaking
 	tx.Find(&rows)
@@ -81,14 +81,14 @@ func (s *OptimizeDatabaseTestSuite) TestRepairOvertakingSignatures() {
 	s.Less(actual2.ID, actual2.PreviousID)
 
 	// run repair
-	s.db.Optimism.repairOvertakingSignatures(signer.Address)
+	s.db.OPSignature.repairOvertakingSignatures(signer.Address)
 
 	// check if repaired
 	tx.Find(&rows)
 	s.Len(rows, 0)
 
-	actual1, _ = s.db.Optimism.FindSignatureByID(actual1.ID)
-	actual2, _ = s.db.Optimism.FindSignatureByID(actual2.ID)
+	actual1, _ = s.db.OPSignature.FindByID(actual1.ID)
+	actual2, _ = s.db.OPSignature.FindByID(actual2.ID)
 
 	s.Equal(actual1.PreviousID, "01GSSK5XTGB76GRS6Q88PV5YY2")
 	s.Greater(actual1.ID, actual1.PreviousID)
@@ -99,7 +99,7 @@ func (s *OptimizeDatabaseTestSuite) TestRepairOvertakingSignatures() {
 
 func (s *OptimizeDatabaseTestSuite) TestRepairMissingPrevID() {
 	signer := s.createSigner()
-	scc := s.createSCC()
+	contract := s.createContract()
 	ids := []string{
 		"01GSSK5XTCZD5ZCXR5E487F1Q1", //  0
 		"01GSSK5XTDBST5SJZ68JRX35CV", //  1
@@ -140,17 +140,17 @@ func (s *OptimizeDatabaseTestSuite) TestRepairMissingPrevID() {
 			ID:          id,
 			PreviousID:  prevID,
 			Signer:      *signer,
-			OptimismScc: *scc,
-			BatchIndex:  uint64(i),
-			BatchRoot:   s.RandHash(),
+			Contract:    *contract,
+			RollupIndex: uint64(i),
+			RollupHash:  s.RandHash(),
 			Signature:   RandSignature(),
 		}
-		s.NoDBError(s.rawdb.Create(sig))
+		s.NoDBError(s.db.rawdb.Create(sig))
 	}
 
 	var rows []*OptimismSignature
-	sub := s.rawdb.Model(&OptimismSignature{}).Select("id")
-	tx := s.rawdb.
+	sub := s.db.rawdb.Model(&OptimismSignature{}).Select("id")
+	tx := s.db.rawdb.
 		Where("previous_id != ''").
 		Where("previous_id NOT IN (?)", sub).
 		Order("id")
@@ -168,14 +168,14 @@ func (s *OptimizeDatabaseTestSuite) TestRepairMissingPrevID() {
 	s.Equal(actual2.PreviousID, "01GT065ZW542460G75SPMJ2BC0")
 
 	// run repair
-	s.db.Optimism.repairMissingPrevID(signer.Address)
+	s.db.OPSignature.repairMissingPrevID(signer.Address)
 
 	// check if repaired
 	tx.Find(&rows)
 	s.Len(rows, 0)
 
-	actual1, _ = s.db.Optimism.FindSignatureByID(actual1.ID)
-	actual2, _ = s.db.Optimism.FindSignatureByID(actual2.ID)
+	actual1, _ = s.db.OPSignature.FindByID(actual1.ID)
+	actual2, _ = s.db.OPSignature.FindByID(actual2.ID)
 
 	s.Equal(actual1.PreviousID, "01GSSK5XTGB76GRS6Q88PV5YY2")
 	s.Greater(actual1.ID, actual1.PreviousID)

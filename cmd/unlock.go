@@ -32,9 +32,9 @@ func init() {
 }
 
 func runUnlockCmd(cmd *cobra.Command, args []string) {
-	conf, err := loadConfig(cmd)
+	conf, err := globalConfigLoader.load()
 	if err != nil {
-		util.Exit(1, "Failed to load configuration file: %s\n", err)
+		util.Exit(1, "Failed to load configuration: %s\n", err)
 	}
 
 	name, err := cmd.Flags().GetString(nameFlag)
