@@ -215,4 +215,4 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/libp2p/go-libp2p v0.20.3 => github.com/ironbeer/go-libp2p v0.20.3-2024020502
+replace github.com/libp2p/go-libp2p v0.35.0 => github.com/oasysgames/go-libp2p v0.35.0-patch0
