@@ -17,7 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/oasysgames/oasys-optimism-verifier/beacon"
 	"github.com/oasysgames/oasys-optimism-verifier/cmd/ipccmd"
 	"github.com/oasysgames/oasys-optimism-verifier/collector"
