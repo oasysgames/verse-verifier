@@ -25,7 +25,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
-	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
+	pb "github.com/oasysgames/oasys-optimism-verifier/proto/p2p/v1/gen"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/semaphore"
