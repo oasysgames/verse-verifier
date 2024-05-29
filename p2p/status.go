@@ -64,7 +64,9 @@ func NewHostStatus(h host.Host) (*HostStatus, error) {
 	sort.Strings(s.Addresses)
 
 	// set `Protocols`
-	s.Protocols = h.Mux().Protocols()
+	for _, proto := range h.Mux().Protocols() {
+		s.Protocols = append(s.Protocols, string(proto))
+	}
 	sort.Strings(s.Protocols)
 
 	// set `Connections`
@@ -112,7 +114,10 @@ func NewHostStatus(h host.Host) (*HostStatus, error) {
 		sort.Strings(pinfo.Addresses)
 
 		// set `Peers[].Protocols`
-		pinfo.Protocols, _ = h.Peerstore().GetProtocols(id)
+		peerProtocols, _ := h.Peerstore().GetProtocols(id)
+		for _, proto := range peerProtocols {
+			pinfo.Protocols = append(pinfo.Protocols, string(proto))
+		}
 		sort.Strings(pinfo.Protocols)
 	}
 	sort.Slice(s.Peers, func(i, j int) bool {

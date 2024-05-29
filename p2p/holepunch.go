@@ -74,7 +74,7 @@ func (ht *holePunchHelper) Available(host host.Host) bool {
 		return false
 	}
 	for _, p := range host.Mux().Protocols() {
-		if p == string(holepunch.Protocol) {
+		if p == holepunch.Protocol {
 			return true
 		}
 	}
@@ -182,7 +182,7 @@ func (ht *holePunchHelper) checkSupportHolePunch(host host.Host, remote peer.ID)
 	}
 
 	for _, p := range protos {
-		if p == string(holepunch.Protocol) {
+		if p == holepunch.Protocol {
 			return nil
 		}
 	}
