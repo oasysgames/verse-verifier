@@ -14,7 +14,7 @@ require (
 	github.com/libp2p/go-libp2p v0.35.0
 	github.com/libp2p/go-libp2p-core v0.16.1
 	github.com/libp2p/go-libp2p-kad-dht v0.25.2
-	github.com/libp2p/go-libp2p-pubsub v0.7.1
+	github.com/libp2p/go-libp2p-pubsub v0.11.0
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/lmittmann/w3 v0.10.0
 	github.com/multiformats/go-multiaddr v0.12.4
@@ -98,6 +98,7 @@ require (
 	github.com/hashicorp/go-bexpr v0.1.10 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4 // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.2.4 // indirect
