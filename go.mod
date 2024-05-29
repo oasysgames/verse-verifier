@@ -216,3 +216,5 @@ require (
 )
 
 replace github.com/libp2p/go-libp2p v0.35.0 => github.com/oasysgames/go-libp2p v0.35.0-patch0
+
+replace github.com/ethereum/go-ethereum v1.14.3 => github.com/ironbeer/go-ethereum v1.14.3-patch0

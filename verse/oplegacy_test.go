@@ -67,8 +67,11 @@ func (s *OPLegacyTestSuite) TestVerify() {
 		nonce, err := s.Verse.PendingNonceAt(ctx, s.SignableVerse.Signer())
 		s.Nil(err)
 
-		unsigned := types.NewTransaction(nonce, s.RandAddress(),
-			common.Big1, 21_000, big.NewInt(875_000_000), nil)
+		gasPrice, err := s.SignableVerse.BaseGasPrice(ctx, nil)
+		s.Nil(err)
+
+		unsigned := types.NewTransaction(
+			nonce, s.RandAddress(), common.Big1, 21_000, gasPrice, nil)
 
 		_, err = s.SignableVerse.SendTxWithSign(ctx, unsigned)
 		s.Nil(err)

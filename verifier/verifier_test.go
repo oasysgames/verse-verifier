@@ -51,8 +51,8 @@ func (s *VerifierTestSuite) TestVerify() {
 		wantApproved  bool
 	}{
 		{
-			"0xa32f22db573ecdc5eafbb5d1cc99b51ebc603f26bb0becac52e46157eddbe005",
-			"0x5e76dc899e8957f1c952cf9063133909325e22935cab519b9d2d33fd3521583a15b0c5d741e9b3c56e7043c149c3b34443935ca99115f49f3a10e6592556ec421c",
+			"0x9ad778e5c9936769419b31119fb0bbc9d7b66c88ee10f0986ce46a6d302792b7",
+			"0xa01df213459635dcd05e84b1828ba26b9469d52bf2860698437ac466d0e9afba5bda3efa378d9c36ca9eb7f4ce87f2aad73deeea357d7dba141d3469d095bb8c1c",
 			true,
 		},
 		{
@@ -191,21 +191,21 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 
 func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.Header) {
 	ctx := context.Background()
+	to := common.HexToAddress("0x09ad74977844F513E61AdE2B50b0C06268A4f6d7")
 
 	nonce, err := s.SignableVerse.PendingNonceAt(ctx, s.SignableVerse.Signer())
 	s.NoError(err)
 
 	for i := 0; i < count; i++ {
-		tx := types.NewTransaction(
-			nonce+uint64(i),
-			common.HexToAddress("0x09ad74977844F513E61AdE2B50b0C06268A4f6d7"),
-			common.Big0,
-			uint64(21_000),
-			big.NewInt(875_000_000),
-			nil)
-		signedTx, _ := s.SignableVerse.SignTx(tx)
+		gasPrice, err := s.SignableVerse.BaseGasPrice(ctx, nil)
+		s.Nil(err)
 
-		err := s.SignableVerse.SendTransaction(ctx, signedTx)
+		unsigned := types.NewTransaction(
+			nonce+uint64(i), to, common.Big0, 21_000, gasPrice, nil)
+		signed, err := s.SignableVerse.SignTx(unsigned)
+		s.Nil(err)
+
+		err = s.SignableVerse.SendTransaction(ctx, signed)
 		s.NoError(err)
 
 		h, err := s.SignableVerse.HeaderByHash(ctx, s.SignableVerse.Commit())
