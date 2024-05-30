@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"net/http"
 	"os"
@@ -58,11 +57,16 @@ func init() {
 func runStartCmd(cmd *cobra.Command, args []string) {
 	log.Info(fmt.Sprintf("Start %s", commandName), "version", version.SemVer())
 
-	ctx, stop := signal.NotifyContext(context.Background(),
-		syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		defer cancel()
+		sig := <-c
+		log.Info("Received signal, stopping...", "signal", sig)
+	}()
 
-	s := mustNewServer()
+	s := mustNewServer(ctx)
 
 	// start metrics server
 	s.mustStartMetrics(ctx)
@@ -121,7 +125,7 @@ type server struct {
 	discoveredVerses chan []*config.Verse
 }
 
-func mustNewServer() *server {
+func mustNewServer(ctx context.Context) *server {
 	var err error
 
 	s := &server{
@@ -144,6 +148,13 @@ func mustNewServer() *server {
 	// construct hub-layer client
 	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC); err != nil {
 		log.Crit("Failed to construct hub-layer client", "err", err)
+	}
+
+	// Make sue the s.hub can connect to the chain
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+	if _, err := s.hub.BlockNumber(ctx); err != nil {
+		log.Crit("Failed to connect to the hub-layer chain", "err", err)
 	}
 
 	// construct stakemanager cache
@@ -202,12 +213,16 @@ func (s *server) mustStartIPC(ctx context.Context, depends []func(context.Contex
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ipc.Start(ctx)
+		ipc.Start()
 	}()
 
 	for _, dep := range depends {
 		dep(ctx, ipc)
 	}
+
+	<-ctx.Done()
+	log.Info("Shutting down IPC server")
+	ipc.Close()
 }
 
 func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
@@ -542,7 +557,7 @@ func (s *server) startBeacon(ctx context.Context) {
 }
 
 func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 
 	if err == nil {
 		dec, peerID, err := p2p.DecodePrivateKey(string(data))
@@ -572,7 +587,7 @@ func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
 		return nil, err
 	}
 
-	err = ioutil.WriteFile(filename, []byte(enc), 0644)
+	err = os.WriteFile(filename, []byte(enc), 0644)
 	if err != nil {
 		log.Error("Failed to write p2p private key", "err", err)
 		return nil, err
@@ -630,7 +645,7 @@ func (s *server) mustLoadSigners(ctx context.Context, ipc *ipc.IPCServer) {
 			}
 
 			if wallet.Password != "" {
-				pw, err := ioutil.ReadFile(wallet.Password)
+				pw, err := os.ReadFile(wallet.Password)
 				if err != nil {
 					log.Crit("Failed to read password file",
 						"name", name, "address", address, "err", err)

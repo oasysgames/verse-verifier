@@ -40,7 +40,7 @@ func NewCache(sm IStakeManager) *Cache {
 }
 
 func (c *Cache) RefreshLoop(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(time.Second * 3)
+	ticker := time.NewTicker(time.Second * 60 * 3)
 	defer ticker.Stop()
 
 	for {

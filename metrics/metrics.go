@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"net/http"
+	"time"
 
 	logger "github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
@@ -27,21 +28,22 @@ func Initialize(cfg_ *config.Metrics) {
 	}
 }
 
-func ListenAndServe(parent context.Context) error {
+func ListenAndServe(ctx context.Context) error {
 	log.Info("Started metrics server", "listen", cfg.Listen, "endpoint", cfg.Endpoint)
 
-	ctx, cancel := context.WithCancel(parent)
-	var err error
+	msvr := &http.Server{Addr: cfg.Listen, Handler: mux}
 	go func() {
-		defer cancel()
-		err = http.ListenAndServe(cfg.Listen, mux)
+		if err := msvr.ListenAndServe(); err != nil {
+			log.Error("Failed to start metrics server", "err", err)
+		}
 	}()
 
-	select {
-	case <-parent.Done():
-		log.Info("Worker stopped")
-		return nil
-	case <-ctx.Done():
-		return err
+	<-ctx.Done()
+	log.Info("Shutting down metrics server")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := msvr.Shutdown(ctx); err != nil {
+		log.Error("Failed to shutdown metrics server", err)
 	}
+	return nil
 }

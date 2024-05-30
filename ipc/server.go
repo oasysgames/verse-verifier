@@ -1,7 +1,6 @@
 package ipc
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -47,37 +46,45 @@ func (s *IPCServer) SetHandler(id int, handler Handler) {
 	}
 }
 
-func (s *IPCServer) Start(ctx context.Context) {
-	go func() {
-		for {
-			func() {
-				msg, err := s.s.Read()
-				if err != nil {
-					s.log.Error("Read error", "err", err)
-					s.reConnect()
-					return
-				}
+func (s *IPCServer) Start() {
+	s.log.Info("IPC server started", "sockname", s.sockname)
 
-				if msg.MsgType == -1 {
-					s.log.Debug("Status changed", "status", msg.Status)
-					return
-				}
-
-				// message type -2 is an error, these won't automatically cause the recieve channel to close.
-				if msg.MsgType == -2 {
-					return
-				}
-
-				if handler, ok := s.handlers.Load(msg.MsgType); ok {
-					handler.(Handler)(s, msg.Data)
-				}
-			}()
+	for {
+		msg, err := s.s.Read()
+		if err != nil {
+			s.log.Error("Read error", "err", err)
+			s.reConnect()
+			continue
 		}
-	}()
 
-	s.log.Info("Worker started", "sockname", s.sockname)
-	<-ctx.Done()
-	s.log.Info("Worker stopped")
+		if msg.MsgType == -1 {
+			s.log.Debug("Status changed", "sockname", s.sockname, "status", msg.Status)
+			if msg.Status == "Closed" || msg.Status == "Closing" {
+				s.log.Info("IPC server closed", "sockname", s.sockname)
+				return
+			}
+			if msg.Status == "Error" {
+				s.log.Error("Error recieved", "sockname", s.sockname, "err", string(msg.Data))
+				s.reConnect()
+				continue
+			}
+			continue
+		}
+
+		// message type -2 is an error, these won't automatically cause the recieve channel to close.
+		if msg.MsgType == -2 {
+			s.log.Warn("Error recieved", "sockname", s.sockname, "err", string(msg.Data))
+			continue
+		}
+
+		if handler, ok := s.handlers.Load(msg.MsgType); ok {
+			handler.(Handler)(s, msg.Data)
+		}
+	}
+}
+
+func (s *IPCServer) Close() {
+	s.s.Close()
 }
 
 func (s *IPCServer) Write(msgType int, message []byte) error {

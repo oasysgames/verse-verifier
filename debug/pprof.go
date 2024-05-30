@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"runtime"
+	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
@@ -35,7 +36,7 @@ func NewPprofServer(cfg *config.Pprof) *PprofServer {
 	}
 }
 
-func (w *PprofServer) ListenAndServe(parent context.Context) error {
+func (w *PprofServer) ListenAndServe(ctx context.Context) error {
 	w.log.Info("Started pprof server",
 		"listen", w.cfg.Listen,
 		"username", w.cfg.BasicAuth.Username,
@@ -43,20 +44,21 @@ func (w *PprofServer) ListenAndServe(parent context.Context) error {
 		"block-profile-rate", w.cfg.BlockProfileRate,
 		"mem-profile-rate", w.cfg.MemProfileRate)
 
-	ctx, cancel := context.WithCancel(parent)
-	var err error
+	psrv := &http.Server{Addr: w.cfg.Listen, Handler: w.mux}
 	go func() {
-		defer cancel()
-		err = http.ListenAndServe(w.cfg.Listen, w.mux)
+		if err := psrv.ListenAndServe(); err != nil {
+			w.log.Error("Failed to start pprof server", "err", err)
+		}
 	}()
 
-	select {
-	case <-parent.Done():
-		w.log.Info("Worker stopped")
-		return nil
-	case <-ctx.Done():
-		return err
+	<-ctx.Done()
+	w.log.Info("Sutting down pprof server")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := psrv.Shutdown(ctx); err != nil {
+		w.log.Error("Failed to shutdown pprof server", err)
 	}
+	return nil
 }
 
 func wrapBasicAuth(username, password string) func(origin http.HandlerFunc) http.HandlerFunc {
