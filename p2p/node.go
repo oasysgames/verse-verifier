@@ -891,6 +891,13 @@ func (w *Node) showBootstrapLog() {
 	if w.cfg.RelayClient.Enable {
 		w.log.Info("Enabled circuit relay client, relay nodes: " + strings.Join(w.cfg.RelayClient.RelayNodes, ","))
 	}
+	if w.cfg.ExperimentalLanDHT.Loopback {
+		w.log.Warn("[Experimental/LanDHT] Enabled loopback")
+	}
+	if len(w.cfg.ExperimentalLanDHT.Bootnodes) > 0 {
+		w.log.Warn("[Experimental/LanDHT] Bootnodes: " +
+			strings.Join(w.cfg.ExperimentalLanDHT.Bootnodes, ","))
+	}
 	w.log.Info("Worker started", "id", w.h.ID(),
 		"publish-interval", w.cfg.PublishInterval,
 		"stream-timeout", w.cfg.StreamTimeout,

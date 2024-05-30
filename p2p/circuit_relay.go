@@ -80,7 +80,7 @@ func circuitRelayClientOpts(cfg *config.P2P) (libp2p.Option, error) {
 
 	relayNodes := rc.RelayNodes
 	if len(relayNodes) == 0 {
-		log.Warn("Relay node not configured, using bootnodes as relay nodes instead")
+		log.Info("Relay node not configured, using bootnodes as relay nodes instead")
 		relayNodes = cfg.Bootnodes
 	}
 

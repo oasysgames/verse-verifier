@@ -571,9 +571,12 @@ func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 	priv, _, _, _ := GenerateKeyPair()
 	cfg := &config.P2P{
 		Listens:         []string{"/ip4/127.0.0.1/tcp/" + s.findPort(5)},
-		Bootnodes:       bootnodes,
 		PublishInterval: 0,
 		StreamTimeout:   3 * time.Second,
+		ExperimentalLanDHT: struct {
+			Loopback  bool
+			Bootnodes []string
+		}{Loopback: true, Bootnodes: bootnodes},
 	}
 	cfg.OutboundLimits.Concurrency = 10
 	cfg.OutboundLimits.Throttling = 500

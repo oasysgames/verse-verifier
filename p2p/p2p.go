@@ -71,7 +71,7 @@ func NewHost(
 	})
 
 	// Construct libp2p DHT.
-	dht, err := newRouting(ctx, h, append(cfg.Bootnodes, cfg.RelayClient.RelayNodes...))
+	dht, err := newRouting(ctx, cfg, h)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("failed to construct DHT: %w", err)
 	}
@@ -160,12 +160,37 @@ func userOptions(cfg *config.P2P) (opts []libp2p.Option, hpHelper HolePunchHelpe
 	return opts, hpHelper, nil
 }
 
-func newRouting(ctx context.Context, h host.Host, bootstrapPeers []string) (routing.Routing, error) {
+func newRouting(
+	ctx context.Context,
+	cfg *config.P2P,
+	h host.Host,
+) (routing.Routing, error) {
 	opts := []kaddht.Option{
 		kaddht.Datastore(dssync.MutexWrap(ds.NewMapDatastore())),
-		kaddht.BootstrapPeers(ConvertPeers(bootstrapPeers)...),
 	}
-	return dual.New(ctx, h, dual.DHTOption(opts...))
+
+	// options for the WanDHT
+	wanBootnodes := ConvertPeers(append(cfg.Bootnodes, cfg.RelayClient.RelayNodes...))
+	wanOpts := []kaddht.Option{
+		kaddht.BootstrapPeers(wanBootnodes...),
+	}
+
+	// options for the LanDHT
+	lanOpts := []kaddht.Option{}
+	if cfg.ExperimentalLanDHT.Loopback {
+		lanOpts = append(lanOpts, kaddht.AddressFilter(nil))
+	}
+	if len(cfg.ExperimentalLanDHT.Bootnodes) > 0 {
+		lanBootnodes := ConvertPeers(cfg.ExperimentalLanDHT.Bootnodes)
+		lanOpts = append(lanOpts, kaddht.BootstrapPeers(lanBootnodes...))
+	}
+
+	return dual.New(
+		ctx, h,
+		dual.DHTOption(opts...),
+		dual.WanDHTOption(wanOpts...),
+		dual.LanDHTOption(lanOpts...),
+	)
 }
 
 // Convert libp2p multi-address string to peer.AddrInfo.
