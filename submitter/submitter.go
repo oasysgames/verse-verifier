@@ -226,10 +226,14 @@ func (w *Submitter) sendMulticallTx(
 		},
 	}
 
-	var calls []multicall2.Multicall2Call
+	var (
+		calls       []multicall2.Multicall2Call
+		shortageErr *StakeAmountShortage
+	)
 	for i := 0; i < w.cfg.BatchSize; i++ {
 		rows, err := iter.next()
-		if _, ok := err.(*StakeAmountShortage); ok {
+		if t, ok := err.(*StakeAmountShortage); ok {
+			shortageErr = t
 			break
 		} else if err != nil {
 			log.Error("Failed to find signatures", "err", err)
@@ -266,7 +270,11 @@ func (w *Submitter) sendMulticallTx(
 		}
 	}
 	if len(calls) == 0 {
-		log.Info("No calldata")
+		if shortageErr != nil {
+			log.Error("No calldata", "err", shortageErr)
+		} else {
+			log.Info("No calldata")
+		}
 		return nil, nil
 	}
 
