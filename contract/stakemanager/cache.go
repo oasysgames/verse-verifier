@@ -40,18 +40,32 @@ func NewCache(sm IStakeManager) *Cache {
 }
 
 func (c *Cache) RefreshLoop(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(time.Second * 60 * 3)
-	defer ticker.Stop()
+	var (
+		// Fire the first tick instantly
+		ticker      = time.NewTicker(0)
+		isFirstTick = true
+	)
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("Stake cache refresh loop stopped")
+			ticker.Stop()
 			return
 		case <-ticker.C:
+			if isFirstTick {
+				isFirstTick = false
+				if err := c.Refresh(ctx); err != nil {
+					// Exit if the first refresh faild, because the following refresh higly likely fail
+					log.Crit("Failed to refresh stake cache", "err", err)
+				}
+				// Set the correct interval
+				ticker.Reset(interval)
+				continue
+			}
+
 			if err := c.Refresh(ctx); err != nil {
 				log.Error("Failed to refresh", "err", err)
-			} else {
-				ticker.Reset(interval)
 			}
 		}
 	}

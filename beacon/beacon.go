@@ -40,7 +40,7 @@ func NewBeaconWorker(
 }
 
 func (w *BeaconWorker) Start(ctx context.Context) {
-	w.log.Info("Worker started",
+	w.log.Info("Beacon worker started",
 		"endpoint", w.conf.Endpoint, "interval", w.conf.Interval)
 
 	tick := util.NewTicker(w.conf.Interval, 1)
@@ -49,7 +49,7 @@ func (w *BeaconWorker) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			w.log.Info("Worker stopped")
+			w.log.Info("Beacon worker stopped")
 			return
 		case <-tick.C:
 			if err := w.work(ctx); err == nil {

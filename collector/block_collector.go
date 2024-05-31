@@ -38,7 +38,7 @@ func NewBlockCollector(
 func (w *BlockCollector) Start(
 	ctx context.Context,
 ) {
-	w.log.Info("Worker started", "interval", w.cfg.Interval, "block-limit", w.cfg.BlockLimit)
+	w.log.Info("Block collector started", "interval", w.cfg.Interval, "block-limit", w.cfg.BlockLimit)
 
 	ticker := time.NewTicker(w.cfg.Interval)
 	defer ticker.Stop()
@@ -46,7 +46,7 @@ func (w *BlockCollector) Start(
 	for {
 		select {
 		case <-ctx.Done():
-			w.log.Info("Worker stopped")
+			w.log.Info("Block collector stopped")
 			return
 		case <-ticker.C:
 			w.work(ctx)

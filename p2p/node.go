@@ -183,7 +183,7 @@ func (w *Node) Start(ctx context.Context) {
 
 	w.showBootstrapLog()
 	wg.Wait()
-	w.log.Info("Worker stopped")
+	w.log.Info("P2P node stopped")
 }
 
 func (w *Node) PeerID() peer.ID                  { return w.h.ID() }

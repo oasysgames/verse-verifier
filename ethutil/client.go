@@ -91,18 +91,26 @@ type signableClient struct {
 	signer  Signer
 }
 
-func NewSignableClient(chainId *big.Int, rpc string, signer Signer) (SignableClient, error) {
-	c, err := NewClient(rpc)
-	if err != nil {
-		return nil, err
-	}
-
+func NewSignableClient(chainId *big.Int, c Client, signer Signer) SignableClient {
 	return &signableClient{
 		Client:  c,
 		chainId: chainId,
 		signer:  signer,
-	}, nil
+	}
 }
+
+// func NewSignableClient(chainId *big.Int, rpc string, signer Signer) (SignableClient, error) {
+// 	c, err := NewClient(rpc)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	return &signableClient{
+// 		Client:  c,
+// 		chainId: chainId,
+// 		signer:  signer,
+// 	}, nil
+// }
 
 func (c *signableClient) ChainID() *big.Int {
 	return new(big.Int).Set(c.chainId)
