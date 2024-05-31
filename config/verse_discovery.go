@@ -15,9 +15,8 @@ type VerseDiscovery struct {
 	client          *http.Client
 	url             string
 	refreshInterval time.Duration
-
-	topic *util.Topic
-	log   log.Logger
+	topic           *util.Topic
+	log             log.Logger
 }
 
 func NewVerseDiscovery(
@@ -34,11 +33,12 @@ func NewVerseDiscovery(
 	}
 }
 
+// NOTE: deplicated
 func (w *VerseDiscovery) Start(ctx context.Context) {
 	w.log.Info("Worker started", "endpoint", w.url, "interval", w.refreshInterval)
 
 	for {
-		if w.work(ctx) == nil {
+		if w.Work(ctx) == nil {
 			break
 		} else if ctx.Err() != nil {
 			return
@@ -55,7 +55,7 @@ func (w *VerseDiscovery) Start(ctx context.Context) {
 			w.log.Info("Worker stopped")
 			return
 		case <-tick.C:
-			w.work(ctx)
+			w.Work(ctx)
 		}
 	}
 }
@@ -70,7 +70,7 @@ func (w *VerseDiscovery) Subscribe(ctx context.Context) *VerseSubscription {
 	return &VerseSubscription{Cancel: cancel, ch: ch}
 }
 
-func (w *VerseDiscovery) work(ctx context.Context) error {
+func (w *VerseDiscovery) Work(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 

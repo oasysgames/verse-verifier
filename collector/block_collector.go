@@ -49,12 +49,12 @@ func (w *BlockCollector) Start(
 			w.log.Info("Block collector stopped")
 			return
 		case <-ticker.C:
-			w.work(ctx)
+			w.Work(ctx)
 		}
 	}
 }
 
-func (w *BlockCollector) work(ctx context.Context) {
+func (w *BlockCollector) Work(ctx context.Context) {
 	// get local highest block
 	start := uint64(1)
 	if highest, err := w.db.Block.FindHighest(); err == nil {

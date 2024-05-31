@@ -24,6 +24,8 @@ type Verifier struct {
 	topic    *util.Topic
 	tasks    sync.Map
 	log      log.Logger
+	wg       *util.WorkerGroup
+	running  *sync.Map
 }
 
 // Returns the new verifier.
@@ -38,9 +40,12 @@ func NewVerifier(
 		l1Signer: l1Signer,
 		topic:    util.NewTopic(),
 		log:      log.New("worker", "verifier"),
+		wg:       util.NewWorkerGroup(cfg.Concurrency),
+		running:  &sync.Map{},
 	}
 }
 
+// NOTE: deplicated
 // Start verifier.
 func (w *Verifier) Start(ctx context.Context) {
 	w.log.Info(
@@ -86,6 +91,30 @@ func (w *Verifier) Start(ctx context.Context) {
 			})
 		}
 	}
+}
+
+func (w *Verifier) Work(ctx context.Context) {
+	w.tasks.Range(func(key, val interface{}) bool {
+		workerID := key.(common.Address).Hex()
+		task := val.(verse.VerifiableVerse)
+
+		// deduplication
+		if _, ok := w.running.Load(workerID); ok {
+			return true
+		}
+		w.running.Store(workerID, 1)
+
+		if !w.wg.Has(workerID) {
+			worker := func(ctx context.Context, rname string, data interface{}) {
+				defer w.running.Delete(rname)
+				w.work(ctx, data.(verse.VerifiableVerse))
+			}
+			w.wg.AddWorker(ctx, workerID, worker)
+		}
+
+		w.wg.Enqueue(workerID, task)
+		return true
+	})
 }
 
 func (w *Verifier) L1Signer() ethutil.SignableClient {

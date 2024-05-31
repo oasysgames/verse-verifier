@@ -52,12 +52,12 @@ func (w *EventCollector) Start(ctx context.Context) {
 			w.log.Info("Event collector stopped")
 			return
 		case <-ticker.C:
-			w.work(ctx)
+			w.Work(ctx)
 		}
 	}
 }
 
-func (w *EventCollector) work(ctx context.Context) {
+func (w *EventCollector) Work(ctx context.Context) {
 	for {
 		// get new blocks from database
 		blocks, err := w.db.Block.FindUncollecteds(w.cfg.EventFilterLimit)
