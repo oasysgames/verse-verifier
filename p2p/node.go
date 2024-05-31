@@ -13,19 +13,19 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/libp2p/go-libp2p-core/metrics"
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/routing"
 	ps "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/routing"
 	msgio "github.com/libp2p/go-msgio"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
-	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
+	pb "github.com/oasysgames/oasys-optimism-verifier/proto/p2p/v1/gen"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/semaphore"
@@ -890,6 +890,13 @@ func (w *Node) showBootstrapLog() {
 	}
 	if w.cfg.RelayClient.Enable {
 		w.log.Info("Enabled circuit relay client, relay nodes: " + strings.Join(w.cfg.RelayClient.RelayNodes, ","))
+	}
+	if w.cfg.ExperimentalLanDHT.Loopback {
+		w.log.Warn("[Experimental/LanDHT] Enabled loopback")
+	}
+	if len(w.cfg.ExperimentalLanDHT.Bootnodes) > 0 {
+		w.log.Warn("[Experimental/LanDHT] Bootnodes: " +
+			strings.Join(w.cfg.ExperimentalLanDHT.Bootnodes, ","))
 	}
 	w.log.Info("Worker started", "id", w.h.ID(),
 		"publish-interval", w.cfg.PublishInterval,

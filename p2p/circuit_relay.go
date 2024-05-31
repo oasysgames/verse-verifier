@@ -5,8 +5,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 )
@@ -81,7 +80,7 @@ func circuitRelayClientOpts(cfg *config.P2P) (libp2p.Option, error) {
 
 	relayNodes := rc.RelayNodes
 	if len(relayNodes) == 0 {
-		log.Warn("Relay node not configured, using bootnodes as relay nodes instead")
+		log.Info("Relay node not configured, using bootnodes as relay nodes instead")
 		relayNodes = cfg.Bootnodes
 	}
 
@@ -94,10 +93,5 @@ func circuitRelayClientOpts(cfg *config.P2P) (libp2p.Option, error) {
 		}
 	}
 
-	relayOpts := []autorelay.Option{
-		autorelay.WithCircuitV1Support(),
-		autorelay.WithStaticRelays(relayNodeAddrs),
-	}
-
-	return libp2p.EnableAutoRelay(relayOpts...), nil
+	return libp2p.EnableAutoRelayWithStaticRelays(relayNodeAddrs), nil
 }

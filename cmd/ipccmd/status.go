@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/oasysgames/oasys-optimism-verifier/ipc"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p"
 	"github.com/oasysgames/oasys-optimism-verifier/util"

@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
-	"github.com/oasysgames/oasys-optimism-verifier/p2p/pb"
+	pb "github.com/oasysgames/oasys-optimism-verifier/proto/p2p/v1/gen"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
@@ -571,9 +571,12 @@ func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 	priv, _, _, _ := GenerateKeyPair()
 	cfg := &config.P2P{
 		Listens:         []string{"/ip4/127.0.0.1/tcp/" + s.findPort(5)},
-		Bootnodes:       bootnodes,
 		PublishInterval: 0,
 		StreamTimeout:   3 * time.Second,
+		ExperimentalLanDHT: struct {
+			Loopback  bool
+			Bootnodes []string
+		}{Loopback: true, Bootnodes: bootnodes},
 	}
 	cfg.OutboundLimits.Concurrency = 10
 	cfg.OutboundLimits.Throttling = 500
