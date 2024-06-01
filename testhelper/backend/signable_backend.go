@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/account"
 )
@@ -62,8 +63,6 @@ func (c *SignableBackend) TransactOpts(ctx context.Context) *bind.TransactOpts {
 		Signer: func(a common.Address, tx *types.Transaction) (*types.Transaction, error) {
 			return c.signer.SignTx(tx, c.ChainID())
 		},
-		GasPrice: big.NewInt(875_000_000),
-		GasLimit: 500_000_000,
 	}
 }
 
@@ -88,4 +87,13 @@ func (c *SignableBackend) SendTxWithSign(
 	}
 	c.Commit()
 	return signed, nil
+}
+
+// Returns the base fee of the block plus 1 gwei
+func (c *SignableBackend) BaseGasPrice(ctx context.Context, number *big.Int) (*big.Int, error) {
+	head, err := c.HeaderByNumber(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	return new(big.Int).Add(head.BaseFee, big.NewInt(params.GWei)), nil
 }
