@@ -335,6 +335,12 @@ type P2P struct {
 		// Maximum time to send signatures to a peer.
 		MaxSendTime time.Duration `koanf:"max_send_time"`
 	} `koanf:"inbound_limits"`
+
+	// Options for go-libp2p-kad-dht/LanDHT
+	ExperimentalLanDHT struct {
+		Loopback  bool
+		Bootnodes []string
+	} `koanf:"experimental_lan_dht"`
 }
 
 type IPC struct {

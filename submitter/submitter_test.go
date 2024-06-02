@@ -106,7 +106,8 @@ func (s *SubmitterTestSuite) TestSubmit() {
 	s.Hub.Commit()
 
 	// assert multicall transaction
-	mcallTx := s.Hub.Blockchain().CurrentBlock().Transactions()[0]
+	currBlock, _ := s.Hub.Client().BlockByNumber(ctx, nil)
+	mcallTx := currBlock.Transactions()[0]
 	sender, _ := s.Hub.TxSender(mcallTx)
 	s.Equal(s.task.L1Signer().Signer(), sender)
 	s.Equal(s.MulticallAddr, *mcallTx.To())

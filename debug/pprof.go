@@ -35,17 +35,14 @@ func NewPprofServer(cfg *config.Pprof) (*PprofServer, *http.Server) {
 	}, &http.Server{Addr: cfg.Listen, Handler: mux}
 }
 
-func (w *PprofServer) ListenAndServe(ctx context.Context, psvr *http.Server) {
+func (w *PprofServer) ListenAndServe(ctx context.Context, psvr *http.Server) error {
 	w.log.Info("Started pprof server",
 		"listen", w.cfg.Listen,
 		"username", w.cfg.BasicAuth.Username,
 		"password", w.cfg.BasicAuth.Password,
 		"block-profile-rate", w.cfg.BlockProfileRate,
 		"mem-profile-rate", w.cfg.MemProfileRate)
-
-	if err := psvr.ListenAndServe(); err != nil {
-		w.log.Error("Failed to start pprof server", "err", err)
-	}
+	return psvr.ListenAndServe()
 }
 
 func wrapBasicAuth(username, password string) func(origin http.HandlerFunc) http.HandlerFunc {

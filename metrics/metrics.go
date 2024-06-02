@@ -29,10 +29,7 @@ func Initialize(cfg_ *config.Metrics) *http.Server {
 	return &http.Server{Addr: cfg.Listen, Handler: mux}
 }
 
-func ListenAndServe(ctx context.Context, msvr *http.Server) {
+func ListenAndServe(ctx context.Context, msvr *http.Server) error {
 	log.Info("Started metrics server", "listen", cfg.Listen, "endpoint", cfg.Endpoint)
-
-	if err := msvr.ListenAndServe(); err != nil {
-		log.Error("Failed to start metrics server", "err", err)
-	}
+	return msvr.ListenAndServe()
 }

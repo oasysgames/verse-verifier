@@ -3,8 +3,11 @@ package main
 import (
 	"os"
 
+	"log/slog"
+
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/cmd"
+	"github.com/oasysgames/oasys-optimism-verifier/logger"
 )
 
 func main() {
@@ -13,13 +16,16 @@ func main() {
 }
 
 func setupLogger() {
-	level := log.LvlInfo
+	level := slog.LevelInfo
 	if os.Getenv("DEBUG") != "" {
-		level = log.LvlDebug
+		level = slog.LevelDebug
 	}
+	output := os.Stdout
+	useColor := true
 
-	logHandler := log.StreamHandler(os.Stdout, log.TerminalFormat(true))
-	logHandler = log.LvlFilterHandler(level, logHandler)
-	logHandler = log.CallerFileHandler(logHandler)
-	log.Root().SetHandler(logHandler)
+	var handler slog.Handler
+	handler = log.NewTerminalHandlerWithLevel(output, level, useColor)
+	handler = logger.NewCallerHandler(handler)
+
+	log.SetDefault(log.NewLogger(handler))
 }

@@ -16,7 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/oasysgames/oasys-optimism-verifier/beacon"
 	"github.com/oasysgames/oasys-optimism-verifier/cmd/ipccmd"
 	"github.com/oasysgames/oasys-optimism-verifier/collector"
@@ -88,6 +88,11 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	s.setupSubmitter()
 	s.mustSetupBeacon()
 
+	// Fetch the total stake and the stakes synchronously
+	if err := s.smcache.Refresh(ctx); err != nil {
+		// Exit if the first refresh faild, because the following refresh higly likely fail
+		log.Crit("Failed to refresh stake cache", "err", err)
+	}
 	// start cache updater
 	go func() {
 		// NOTE: Don't add wait group, as no need to guarantee the completion
@@ -213,7 +218,9 @@ func (s *server) mustStartMetrics(ctx context.Context) {
 	s.msvr = metrics.Initialize(&s.conf.Metrics)
 	go func() {
 		// NOTE: Don't add wait group, as no need to guarantee the completion
-		metrics.ListenAndServe(ctx, s.msvr)
+		if err := metrics.ListenAndServe(ctx, s.msvr); err != nil {
+			log.Crit("Failed to start metrics server", "err", err)
+		}
 	}()
 }
 
@@ -227,7 +234,9 @@ func (s *server) mustStartPprof(ctx context.Context) {
 
 	go func() {
 		// NOTE: Don't add wait group, as no need to guarantee the completion
-		ps.ListenAndServe(ctx, s.psvr)
+		if err := ps.ListenAndServe(ctx, s.psvr); err != nil {
+			log.Crit("Failed to start pprof server", "err", err)
+		}
 	}()
 }
 
@@ -338,6 +347,7 @@ func (s *server) mustSetupVerifier() {
 	if !ok {
 		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
 	}
+
 	l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
 	s.verifier = verifier.NewVerifier(&s.conf.Verifier, s.db, l1Signer)
 }
@@ -515,6 +525,7 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 					log.Error("Wallet for the Submitter not found", "wallet", tg.Wallet)
 					continue
 				}
+
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
 				s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
 			}
@@ -549,7 +560,9 @@ func (s *server) startBeacon(ctx context.Context) {
 	if s.bw == nil {
 		return
 	}
-	s.bw.Start(ctx)
+	go func() {
+		s.bw.Start(ctx)
+	}()
 }
 
 func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
