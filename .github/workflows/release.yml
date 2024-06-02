@@ -8,111 +8,10 @@ on:
 jobs:
   build:
     name: Build
-    strategy:
-      matrix:
-        os: [linux]
-        arch: [amd64, arm64]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
-
-      - name: Setup Go 1.18
-        if: matrix.arch == 'amd64'
-        uses: actions/setup-go@v1
-        with:
-          go-version: 1.18
-
-      - name: Build Binary - ${{ matrix.os }} ${{ matrix.arch }}
-        if: matrix.arch == 'amd64'
-        run: |
-          go get -v -t -d ./...
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=1 \
-            go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"' -buildvcs=false
-
-      - name: Build Binary - ${{ matrix.os }} ${{ matrix.arch }}
-        if: matrix.arch == 'arm64'
-        run: |
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-          docker run --rm -t \
-            -v ${{ github.workspace }}:${{ github.workspace }} \
-            -w ${{ github.workspace }} \
-            -e GOOS=${{ matrix.os }} -e GOARCH=${{ matrix.arch }} -e CGO_ENABLED=1 \
-            arm64v8/golang:1.18-buster \
-              go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"' -buildvcs=false
-
-      - name: Compress Binary
-        run: zip oasvlfy-${{ matrix.os }}-${{ matrix.arch }}.zip ./oasvlfy
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: ${{ github.ref_name }}
-          path: oasvlfy-${{ matrix.os }}-${{ matrix.arch }}.zip
-
-  release:
-    name: Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
-
-      - name: Download Artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: ${{ github.ref_name }}
-          path: artifacts
-
-      - name: Create sha256sums.txt
-        run: (cd artifacts && sha256sum *) > sha256sums.txt
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          draft: true
-
-      - name: Upload Asset - Linux x86_64
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/oasvlfy-linux-amd64.zip
-          asset_name: oasvlfy-${{ github.ref_name }}-linux-amd64.zip
-          asset_content_type: application/zip
-
-      - name: Upload Asset - Linux arm64
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/oasvlfy-linux-arm64.zip
-          asset_name: oasvlfy-${{ github.ref_name }}-linux-arm64.zip
-          asset_content_type: application/zip
-
-      - name: Upload Asset - sha256sums.txt
-        uses: actions/upload-release-asset@v1.0.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: sha256sums.txt
-          asset_name: sha256sums.txt
-          asset_content_type: text/plain
-
-  container:
-    name: Container
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
@@ -127,13 +26,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build
-        uses: docker/build-push-action@v2
+      - name: Cache Docker Layers
+        uses: actions/cache@v4
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository }}/verse-verifier:${{ github.ref_name }}
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx
+          restore-keys: ${{ runner.os }}-buildx-
 
       - name: Build and Push
         uses: docker/bake-action@v4
@@ -145,5 +43,45 @@ jobs:
           IMAGE_TAGS: ${{ github.ref_name }}
         with:
           files: docker-bake.hcl
-          set: '*.platform=linux/amd64,linux/arm64'
           push: true
+          set: |
+            *.platform=linux/amd64,linux/arm64
+            *.cache-from=type=local,src=/tmp/.buildx-cache
+            *.cache-to=type=local,dest=/tmp/.buildx-cache,mode=max
+            binaries.output=type=local,dest=./binaries
+
+      - name: Compress Binaries
+        run: |
+          (cd binaries/linux_amd64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-amd64.zip 
+          (cd binaries/linux_arm64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-arm64.zip
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.ref_name }}
+          path: oasvlfy-*.zip
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.ref_name }}
+          path: artifacts
+
+      - name: Create sha256sums.txt
+        run: (cd artifacts && sha256sum *) > sha256sums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: true
+          files: |
+            artifacts/*.zip
+            sha256sums.txt
