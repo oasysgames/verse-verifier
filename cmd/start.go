@@ -88,6 +88,11 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	s.setupSubmitter()
 	s.mustSetupBeacon()
 
+	// Fetch the total stake and the stakes synchronously
+	if err := s.smcache.Refresh(ctx); err != nil {
+		// Exit if the first refresh faild, because the following refresh higly likely fail
+		log.Crit("Failed to refresh stake cache", "err", err)
+	}
 	// start cache updater
 	go func() {
 		s.smcache.RefreshLoop(ctx, time.Hour)
@@ -322,15 +327,7 @@ func (s *server) mustSetupVerifier() {
 		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
 	}
 
-	// l1Signer, err := ethutil.NewSignableClient(
-	// 	new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, signer)
-	// if err != nil {
-	// 	log.Crit("Failed to construct verifier", "err", err)
-	// }
 	l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-
-	// TODO: confirm connection tak
-
 	s.verifier = verifier.NewVerifier(&s.conf.Verifier, s.db, l1Signer)
 }
 
@@ -531,13 +528,6 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 					continue
 				}
 
-				// l1Signer, err := ethutil.NewSignableClient(
-				// 	new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, signer)
-				// if err != nil {
-				// 	log.Error("Failed to construct hub-layer client", "err", err)
-				// } else {
-				// 	s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
-				// }
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
 				s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
 			}
@@ -572,7 +562,9 @@ func (s *server) startBeacon(ctx context.Context) {
 	if s.bw == nil {
 		return
 	}
-	s.bw.Start(ctx)
+	go func() {
+		s.bw.Start(ctx)
+	}()
 }
 
 func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
