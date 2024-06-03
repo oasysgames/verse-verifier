@@ -29,7 +29,7 @@ variable "PLATFORMS" {
 }
 
 group "default" {
-  targets = ["verse-verifier"]
+  targets = ["verse-verifier", "binaries"]
 }
 
 target "verse-verifier" {
@@ -41,4 +41,14 @@ target "verse-verifier" {
   }
   platforms = split(",", PLATFORMS)
   tags = [for tag in split(",", IMAGE_TAGS) : "${REGISTRY}/${REPOSITORY}:${tag}"]
+}
+
+target "binaries" {
+  dockerfile = "Dockerfile"
+  target = "binaries"
+  context = "."
+  args = {
+    VERSION = "${GIT_VERSION}"
+  }
+  platforms = split(",", PLATFORMS)
 }
