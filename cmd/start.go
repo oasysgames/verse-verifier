@@ -461,7 +461,9 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 			case verses := <-s.discoveredVerses:
 				s.verseDiscoveryHandler(verses)
 			case <-discTick.C:
-				disc.Work(ctx)
+				if err := disc.Work(ctx); err != nil {
+					log.Error("Failed to work verse discovery", "err", err)
+				}
 			case s.discoveredVerses <- <-sub.Next():
 				// publish the subscribed verses
 			}
