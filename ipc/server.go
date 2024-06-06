@@ -59,11 +59,10 @@ func (s *IPCServer) Start() {
 
 		if msg.MsgType == -1 {
 			s.log.Debug("Status changed", "sockname", s.sockname, "status", msg.Status)
-			if msg.Status == "Closed" || msg.Status == "Closing" {
+			if msg.Status == "Closed" || msg.Status == "Closing" || s.s.StatusCode() == goipc.Closed || s.s.StatusCode() == goipc.Closing {
 				s.log.Info("IPC server closed", "sockname", s.sockname)
 				return
-			}
-			if msg.Status == "Error" {
+			} else if msg.Status == "Error" || s.s.StatusCode() == goipc.Error {
 				s.log.Error("Error recieved", "sockname", s.sockname, "err", string(msg.Data))
 				s.reConnect()
 				continue
