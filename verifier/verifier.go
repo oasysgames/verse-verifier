@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -45,78 +44,6 @@ func NewVerifier(
 	}
 }
 
-// NOTE: deplicated
-// Start verifier.
-func (w *Verifier) Start(ctx context.Context) {
-	w.log.Info(
-		"Worker started",
-		"signer", w.l1Signer.Signer(),
-		"interval", w.cfg.Interval,
-		"state-collect-limit", w.cfg.StateCollectLimit,
-		"concurrency", w.cfg.Concurrency,
-	)
-
-	wg := util.NewWorkerGroup(w.cfg.Concurrency)
-	running := &sync.Map{}
-
-	tick := time.NewTicker(w.cfg.Interval)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			w.log.Info("Verifier stopped")
-			return
-		case <-tick.C:
-			w.tasks.Range(func(key, val interface{}) bool {
-				workerID := key.(common.Address).Hex()
-				task := val.(verse.VerifiableVerse)
-
-				// deduplication
-				if _, ok := running.Load(workerID); ok {
-					return true
-				}
-				running.Store(workerID, 1)
-
-				if !wg.Has(workerID) {
-					worker := func(ctx context.Context, rname string, data interface{}) {
-						defer running.Delete(rname)
-						w.work(ctx, data.(verse.VerifiableVerse))
-					}
-					wg.AddWorker(ctx, workerID, worker)
-				}
-
-				wg.Enqueue(workerID, task)
-				return true
-			})
-		}
-	}
-}
-
-func (w *Verifier) Work(ctx context.Context) {
-	w.tasks.Range(func(key, val interface{}) bool {
-		workerID := key.(common.Address).Hex()
-		task := val.(verse.VerifiableVerse)
-
-		// deduplication
-		if _, ok := w.running.Load(workerID); ok {
-			return true
-		}
-		w.running.Store(workerID, 1)
-
-		if !w.wg.Has(workerID) {
-			worker := func(ctx context.Context, rname string, data interface{}) {
-				defer w.running.Delete(rname)
-				w.work(ctx, data.(verse.VerifiableVerse))
-			}
-			w.wg.AddWorker(ctx, workerID, worker)
-		}
-
-		w.wg.Enqueue(workerID, task)
-		return true
-	})
-}
-
 func (w *Verifier) L1Signer() ethutil.SignableClient {
 	return w.l1Signer
 }
@@ -145,6 +72,30 @@ func (w *Verifier) SubscribeNewSignature(ctx context.Context) *SignatureSubscrip
 		ch <- data.(*database.OptimismSignature)
 	})
 	return &SignatureSubscription{Cancel: cancel, ch: ch}
+}
+
+func (w *Verifier) Work(ctx context.Context) {
+	w.tasks.Range(func(key, val interface{}) bool {
+		workerID := key.(common.Address).Hex()
+		task := val.(verse.VerifiableVerse)
+
+		// deduplication
+		if _, ok := w.running.Load(workerID); ok {
+			return true
+		}
+		w.running.Store(workerID, 1)
+
+		if !w.wg.Has(workerID) {
+			worker := func(ctx context.Context, rname string, data interface{}) {
+				defer w.running.Delete(rname)
+				w.work(ctx, data.(verse.VerifiableVerse))
+			}
+			w.wg.AddWorker(ctx, workerID, worker)
+		}
+
+		w.wg.Enqueue(workerID, task)
+		return true
+	})
 }
 
 func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse) {

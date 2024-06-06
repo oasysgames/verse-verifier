@@ -33,33 +33,6 @@ func NewVerseDiscovery(
 	}
 }
 
-// NOTE: deplicated
-func (w *VerseDiscovery) Start(ctx context.Context) {
-	w.log.Info("Worker started", "endpoint", w.url, "interval", w.refreshInterval)
-
-	for {
-		if w.Work(ctx) == nil {
-			break
-		} else if ctx.Err() != nil {
-			return
-		}
-		time.Sleep(5 * time.Second)
-	}
-
-	tick := time.NewTicker(w.refreshInterval)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			w.log.Info("Worker stopped")
-			return
-		case <-tick.C:
-			w.Work(ctx)
-		}
-	}
-}
-
 func (w *VerseDiscovery) Subscribe(ctx context.Context) *VerseSubscription {
 	ch := make(chan []*Verse)
 	cancel := w.topic.Subscribe(ctx, func(ctx context.Context, data interface{}) {

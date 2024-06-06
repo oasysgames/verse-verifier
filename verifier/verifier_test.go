@@ -24,6 +24,7 @@ type VerifierTestSuite struct {
 
 	verifier *Verifier
 	task     verse.VerifiableVerse
+	stopWork context.CancelFunc
 }
 
 func TestVerifier(t *testing.T) {
@@ -42,9 +43,28 @@ func (s *VerifierTestSuite) SetupTest() {
 
 	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)
 	s.verifier.AddTask(s.task)
+
+	ctx := context.Background()
+	ctx, s.stopWork = context.WithCancel(ctx)
+
+	go func() {
+		tick := time.NewTicker(s.verifier.cfg.Interval)
+		defer tick.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				s.verifier.Work(ctx)
+			}
+		}
+	}()
 }
 
 func (s *VerifierTestSuite) TestVerify() {
+	defer s.stopWork()
+
 	cases := []struct {
 		batchRoot     string
 		wantSignature string
@@ -81,7 +101,7 @@ func (s *VerifierTestSuite) TestVerify() {
 	}
 
 	// subscribe new signature
-	subscribes := s.startAndWait(len(cases))
+	subscribes := s.waitPublished(len(cases))
 
 	// assert
 	for batchIndex, tt := range cases {
@@ -101,6 +121,8 @@ func (s *VerifierTestSuite) TestVerify() {
 }
 
 func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
+	defer s.stopWork()
+
 	batches := s.Range(0, 10)
 	batchSize := 5
 	invalidBatch := 6
@@ -131,7 +153,7 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 		s.NoError(err)
 
 		// run verification
-		sigs := s.startAndWait(1)
+		sigs := s.waitPublished(1)
 		s.Len(sigs, 1)
 		s.Equal(merkleRoot[:], sigs[0].RollupHash[:])
 		createds[batchIdx] = sigs[0]
@@ -148,7 +170,7 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 	}
 
 	// run `deleteInvalidSignature`, but nothing happens
-	s.Len(s.startAndWait(1), 0)
+	s.Len(s.waitPublished(1), 0)
 
 	signer := s.SignableHub.Signer()
 	contract := s.task.RollupContract()
@@ -173,7 +195,7 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 		database.RandSignature())
 
 	// run `deleteInvalidSignature`
-	s.Len(s.startAndWait(len(batches)-invalidBatch), len(batches)-invalidBatch)
+	s.Len(s.waitPublished(len(batches)-invalidBatch), len(batches)-invalidBatch)
 
 	gots, _ = s.DB.OPSignature.Find(nil, &signer, &contract, nil, 100, 0)
 	s.Equal(len(batches), len(gots))
@@ -216,8 +238,8 @@ func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.H
 	return headers
 }
 
-func (s *VerifierTestSuite) startAndWait(count int) []*database.OptimismSignature {
-	ctx, candel := context.WithTimeout(context.Background(), time.Second/5)
+func (s *VerifierTestSuite) waitPublished(count int) []*database.OptimismSignature {
+	ctx, candel := context.WithTimeout(context.Background(), time.Second/3)
 	defer candel()
 
 	sub := s.verifier.SubscribeNewSignature(ctx)
@@ -238,11 +260,8 @@ func (s *VerifierTestSuite) startAndWait(count int) []*database.OptimismSignatur
 				}
 			}
 		}
-
 	}()
 
-	go s.verifier.Start(ctx)
 	<-ctx.Done()
-
 	return published
 }
