@@ -83,6 +83,7 @@ func (s *IPCServer) Start() {
 }
 
 func (s *IPCServer) Close() {
+	s.log.Info("IPC server closing", "status", s.s.Status())
 	s.s.Close()
 }
 

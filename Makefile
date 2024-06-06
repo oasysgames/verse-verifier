@@ -1,5 +1,5 @@
 build:
-	go build -o bin/oasvlfy
+	go build -o bin/oasvlfy .
 
 fmt:
 	go fmt ./...
