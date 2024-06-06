@@ -161,19 +161,13 @@ func (w *Node) Start(ctx context.Context) {
 	defer w.sub.Cancel()
 	w.h.SetStreamHandler(streamProtocol, w.newStreamHandler(ctx))
 
-	wg := &sync.WaitGroup{}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.meterLoop(ctx)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.publishLoop(ctx)
-	}()
+	var (
+		wg            sync.WaitGroup
+		publishTicker = time.NewTicker(w.cfg.PublishInterval)
+		meterTicker   = time.NewTicker(time.Second * 60)
+	)
+	defer publishTicker.Stop()
+	defer meterTicker.Stop()
 
 	wg.Add(1)
 	go func() {
@@ -182,8 +176,26 @@ func (w *Node) Start(ctx context.Context) {
 	}()
 
 	w.showBootstrapLog()
-	wg.Wait()
-	w.log.Info("P2P node stopped")
+
+	for {
+		select {
+		case <-ctx.Done():
+			w.log.Info("P2P node stopping...")
+			wg.Wait()
+			return
+		case <-publishTicker.C:
+			w.publishLatestSignatures(ctx)
+		case <-meterTicker.C:
+			nwstat := newNetworkStatus(w.h)
+			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
+			w.meterUDPConnections.Set(float64(nwstat.connections.udp))
+			w.meterRelayConnections.Set(float64(nwstat.connections.relay))
+			w.meterRelayHopStreams.Set(float64(nwstat.streams.hop))
+			w.meterRelayStopStreams.Set(float64(nwstat.streams.stop))
+			w.meterVerifierStreams.Set(float64(nwstat.streams.verifier))
+			w.meterPeers.Set(float64(w.h.Peerstore().Peers().Len()))
+		}
+	}
 }
 
 func (w *Node) PeerID() peer.ID                  { return w.h.ID() }
