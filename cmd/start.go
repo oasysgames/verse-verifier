@@ -221,6 +221,7 @@ func (s *server) mustStartMetrics(ctx context.Context) {
 		if err := metrics.ListenAndServe(ctx, s.msvr); err != nil {
 			log.Crit("Failed to start metrics server", "err", err)
 		}
+		log.Info("Metrics server have exited listening", "addr", s.conf.Metrics.Listen)
 	}()
 }
 
@@ -237,6 +238,7 @@ func (s *server) mustStartPprof(ctx context.Context) {
 		if err := ps.ListenAndServe(ctx, s.psvr); err != nil {
 			log.Crit("Failed to start pprof server", "err", err)
 		}
+		log.Info("pprof server have exited listening", "addr", s.conf.Debug.Pprof.Listen)
 	}()
 }
 
@@ -253,7 +255,9 @@ func (s *server) mustStartIPC(ctx context.Context, depends []func(context.Contex
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		s.ipc.Start()
+		log.Info("IPC server has stopped, decrement wait group")
 	}()
 
 	for _, dep := range depends {
@@ -292,7 +296,9 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		s.p2p.Start(ctx)
+		log.Info("P2P node has stopped, decrement wait group")
 	}()
 }
 
@@ -323,7 +329,11 @@ func (s *server) startCollector(ctx context.Context) {
 
 	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer func() {
+			defer s.wg.Done()
+
+			log.Info("Block collector has stopped, decrement wait group")
+		}()
 
 		for {
 			select {
@@ -380,7 +390,11 @@ func (s *server) startVerifier(ctx context.Context) {
 
 	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer func() {
+			defer s.wg.Done()
+
+			log.Info("Verifier has stopped, decrement wait group")
+		}()
 
 		for {
 			select {
@@ -425,7 +439,9 @@ func (s *server) startSubmitter(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		s.submitter.Start(ctx)
+		log.Info("Submitter has stopped, decrement wait group")
 	}()
 }
 
@@ -452,7 +468,11 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		for {
-			defer s.wg.Done()
+			defer func() {
+				defer s.wg.Done()
+
+				log.Info("Verse discovery has stopped, decrement wait group")
+			}()
 
 			select {
 			case <-ctx.Done():

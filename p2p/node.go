@@ -157,6 +157,7 @@ func NewNode(
 }
 
 func (w *Node) Start(ctx context.Context) {
+	defer w.h.Close()
 	defer w.topic.Close()
 	defer w.sub.Cancel()
 	w.h.SetStreamHandler(streamProtocol, w.newStreamHandler(ctx))
@@ -830,7 +831,7 @@ func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, er
 	}
 
 	// Note: `WithUseTransient` is required to open a stream via circuit relay.
-	s, err := w.h.NewStream(network.WithUseTransient(ctx, streamProtocol), peer, streamProtocol)
+	s, err := w.h.NewStream(network.WithAllowLimitedConn(ctx, streamProtocol), peer, streamProtocol)
 	if err != nil {
 		w.log.Error("Failed to open stream", "peer", peer, "err", err)
 		w.meterStreamOpenErrs.Incr()
