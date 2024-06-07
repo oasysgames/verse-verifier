@@ -177,6 +177,8 @@ func mustNewServer(ctx context.Context) *server {
 		log.Crit("Failed to load configuration", "err", err)
 	}
 
+	log.Info("Loaded configuration", "conf", s.conf)
+
 	// setup database
 	if s.conf.Database.Path == "" {
 		s.conf.Database.Path = s.conf.DatabasePath()
@@ -319,12 +321,6 @@ func (s *server) startCollector(ctx context.Context) {
 		return
 	}
 
-	log.Info("Block collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
-	log.Info("Event collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
-
-	ticker := time.NewTicker(s.conf.Verifier.Interval)
-	defer ticker.Stop()
-
 	s.wg.Add(1)
 	go func() {
 		defer func() {
@@ -332,6 +328,12 @@ func (s *server) startCollector(ctx context.Context) {
 
 			log.Info("Block collector has stopped, decrement wait group")
 		}()
+
+		ticker := time.NewTicker(s.conf.Verifier.Interval)
+		defer ticker.Stop()
+
+		log.Info("Block collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
+		log.Info("Event collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
 
 		for {
 			select {

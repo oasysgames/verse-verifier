@@ -911,7 +911,7 @@ func (w *Node) showBootstrapLog() {
 		w.log.Warn("[Experimental/LanDHT] Bootnodes: " +
 			strings.Join(w.cfg.ExperimentalLanDHT.Bootnodes, ","))
 	}
-	w.log.Info("Worker started", "id", w.h.ID(),
+	w.log.Info("P2P node started", "id", w.h.ID(),
 		"publish-interval", w.cfg.PublishInterval,
 		"stream-timeout", w.cfg.StreamTimeout,
 		"outbound-limits-concurrency", w.cfg.OutboundLimits.Concurrency,
