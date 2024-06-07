@@ -52,12 +52,12 @@ func (w *EventCollector) Start(ctx context.Context) {
 			w.log.Info("Event collector stopped")
 			return
 		case <-ticker.C:
-			w.work(ctx)
+			w.Work(ctx)
 		}
 	}
 }
 
-func (w *EventCollector) work(ctx context.Context) {
+func (w *EventCollector) Work(ctx context.Context) {
 	for {
 		// get new blocks from database
 		blocks, err := w.db.Block.FindUncollecteds(w.cfg.EventFilterLimit)
@@ -80,6 +80,8 @@ func (w *EventCollector) work(ctx context.Context) {
 		if len(logs) == 0 {
 			w.log.Debug("No event log", "start", start, "end", end)
 		}
+
+		w.log.Info("Collected event logs", "start", start.Number, "end", end.Number)
 
 		if err = w.db.Transaction(func(tx *database.Database) error {
 			for _, log := range logs {
@@ -127,7 +129,7 @@ func (w *EventCollector) handleRollupedEvent(txdb *database.Database, e *verse.R
 	eventDB := e.EventDB(txdb)
 
 	log := e.Logger(w.log)
-	log.Info("New rollup event")
+	log.Debug("New rollup event")
 
 	// delete the `OptimismState` records in consideration of chain reorganization
 	rows, err := eventDB.Deletes(e.Log.Address, e.RollupIndex)
@@ -186,7 +188,7 @@ func (w *EventCollector) handleDeletedEvent(txdb *database.Database, e *verse.De
 // Handler for rollup verified event.
 func (w *EventCollector) handleVerifiedEvent(txdb *database.Database, e *verse.VerifiedEvent) error {
 	log := e.Logger(w.log)
-	log.Info("New rollup verified event")
+	log.Debug("New rollup verified event")
 
 	err := txdb.OPContract.SaveNextIndex(e.Log.Address, e.RollupIndex+1)
 	if err != nil {

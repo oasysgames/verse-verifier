@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"runtime"
-	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
@@ -17,7 +16,7 @@ type PprofServer struct {
 	log log.Logger
 }
 
-func NewPprofServer(cfg *config.Pprof) *PprofServer {
+func NewPprofServer(cfg *config.Pprof) (*PprofServer, *http.Server) {
 	runtime.SetBlockProfileRate(cfg.BlockProfileRate)
 	runtime.MemProfileRate = cfg.MemProfileRate
 
@@ -33,32 +32,17 @@ func NewPprofServer(cfg *config.Pprof) *PprofServer {
 		cfg: cfg,
 		mux: mux,
 		log: log.New("worker", "pprof"),
-	}
+	}, &http.Server{Addr: cfg.Listen, Handler: mux}
 }
 
-func (w *PprofServer) ListenAndServe(ctx context.Context) error {
+func (w *PprofServer) ListenAndServe(ctx context.Context, psvr *http.Server) error {
 	w.log.Info("Started pprof server",
 		"listen", w.cfg.Listen,
 		"username", w.cfg.BasicAuth.Username,
 		"password", w.cfg.BasicAuth.Password,
 		"block-profile-rate", w.cfg.BlockProfileRate,
 		"mem-profile-rate", w.cfg.MemProfileRate)
-
-	psrv := &http.Server{Addr: w.cfg.Listen, Handler: w.mux}
-	go func() {
-		if err := psrv.ListenAndServe(); err != nil {
-			w.log.Error("Failed to start pprof server", "err", err)
-		}
-	}()
-
-	<-ctx.Done()
-	w.log.Info("Sutting down pprof server")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := psrv.Shutdown(ctx); err != nil {
-		w.log.Error("Failed to shutdown pprof server", err)
-	}
-	return nil
+	return psvr.ListenAndServe()
 }
 
 func wrapBasicAuth(username, password string) func(origin http.HandlerFunc) http.HandlerFunc {

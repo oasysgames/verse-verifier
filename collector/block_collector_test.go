@@ -43,7 +43,7 @@ func (s *BlockCollectorTestSuite) TestCollectNewBlocks() {
 	}
 
 	// collect blocks
-	worker.work(context.Background())
+	worker.Work(context.Background())
 
 	// assert
 	gots, _ := s.db.Block.FindUncollecteds(20)
@@ -67,7 +67,7 @@ func (s *BlockCollectorTestSuite) TestHandleReorganization() {
 	worker := NewBlockCollector(&config.Verifier{Interval: 0, BlockLimit: 2}, s.db, rb)
 
 	// collect blocks
-	worker.work(context.Background())
+	worker.Work(context.Background())
 
 	// assert
 	gots, _ := s.db.Block.FindUncollecteds(20)
@@ -79,7 +79,7 @@ func (s *BlockCollectorTestSuite) TestHandleReorganization() {
 
 	// reorg occurred
 	rb.reorg()
-	worker.work(context.Background())
+	worker.Work(context.Background())
 
 	// assert
 	gots, _ = s.db.Block.FindUncollecteds(20)
@@ -90,7 +90,7 @@ func (s *BlockCollectorTestSuite) TestHandleReorganization() {
 	}
 
 	// collect reorganized blocks
-	worker.work(context.Background())
+	worker.Work(context.Background())
 
 	// assert
 	gots, _ = s.db.Block.FindUncollecteds(20)

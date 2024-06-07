@@ -95,6 +95,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	}
 	// start cache updater
 	go func() {
+		// NOTE: Don't add wait group, as no need to guarantee the completion
 		s.smcache.RefreshLoop(ctx, time.Hour)
 	}()
 
@@ -110,55 +111,73 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	<-ctx.Done()
 	log.Info("Shutting down all workers")
 
+	// Shutdown metrics server
+	if s.msvr != nil {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.msvr.Shutdown(c)
+	}
+	// Shutdown pprof server
+	if s.psvr != nil {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.psvr.Shutdown(c)
+	}
+	// Shutdown ipc server
+	if s.ipc != nil {
+		s.ipc.Close()
+	}
+
 	var (
 		// time limit until all worker stop
 		limit       = time.Second * 60
 		wc, wcancel = context.WithTimeout(context.Background(), limit)
 		isTimeout   = true
 	)
-
 	go func() {
 		s.wg.Wait()
 		isTimeout = false
 		wcancel()
 	}()
 
+	// all worker stopped or timeout
 	<-wc.Done()
-
 	if isTimeout {
 		log.Crit("Worker stopping time limit has elapsed", "limit", limit)
 	}
-
 	log.Info("All workers stopped")
 }
 
 type server struct {
-	wg               sync.WaitGroup
-	conf             *config.Config
-	db               *database.Database
-	signers          map[string]ethutil.Signer
-	hub              ethutil.Client
-	smcache          *stakemanager.Cache
-	p2p              *p2p.Node
-	blockCollector   *collector.BlockCollector
-	eventCollector   *collector.EventCollector
-	verifier         *verifier.Verifier
-	submitter        *submitter.Submitter
-	bw               *beacon.BeaconWorker
-	discoveredVerses chan []*config.Verse
+	wg             sync.WaitGroup
+	conf           *config.Config
+	db             *database.Database
+	signers        map[string]ethutil.Signer
+	hub            ethutil.Client
+	smcache        *stakemanager.Cache
+	p2p            *p2p.Node
+	blockCollector *collector.BlockCollector
+	eventCollector *collector.EventCollector
+	verifier       *verifier.Verifier
+	submitter      *submitter.Submitter
+	bw             *beacon.BeaconWorker
+	msvr           *http.Server
+	psvr           *http.Server
+	ipc            *ipc.IPCServer
 }
 
 func mustNewServer(ctx context.Context) *server {
 	var err error
 
 	s := &server{
-		signers:          map[string]ethutil.Signer{},
-		discoveredVerses: make(chan []*config.Verse),
+		signers: map[string]ethutil.Signer{},
 	}
 
 	if s.conf, err = globalConfigLoader.load(); err != nil {
 		log.Crit("Failed to load configuration", "err", err)
 	}
+
+	log.Info("Loaded configuration", "conf", s.conf)
 
 	// setup database
 	if s.conf.Database.Path == "" {
@@ -196,14 +215,13 @@ func (s *server) mustStartMetrics(ctx context.Context) {
 		return
 	}
 
-	metrics.Initialize(&s.conf.Metrics)
-
-	s.wg.Add(1)
+	s.msvr = metrics.Initialize(&s.conf.Metrics)
 	go func() {
-		defer s.wg.Done()
-		if err := metrics.ListenAndServe(ctx); err != nil {
+		// NOTE: Don't add wait group, as no need to guarantee the completion
+		if err := metrics.ListenAndServe(ctx, s.msvr); err != nil {
 			log.Crit("Failed to start metrics server", "err", err)
 		}
+		log.Info("Metrics server have exited listening", "addr", s.conf.Metrics.Listen)
 	}()
 }
 
@@ -212,14 +230,15 @@ func (s *server) mustStartPprof(ctx context.Context) {
 		return
 	}
 
-	ps := debug.NewPprofServer(&s.conf.Debug.Pprof)
+	var ps *debug.PprofServer
+	ps, s.psvr = debug.NewPprofServer(&s.conf.Debug.Pprof)
 
-	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
-		if err := ps.ListenAndServe(ctx); err != nil {
+		// NOTE: Don't add wait group, as no need to guarantee the completion
+		if err := ps.ListenAndServe(ctx, s.psvr); err != nil {
 			log.Crit("Failed to start pprof server", "err", err)
 		}
+		log.Info("pprof server have exited listening", "addr", s.conf.Debug.Pprof.Listen)
 	}()
 }
 
@@ -228,24 +247,22 @@ func (s *server) mustStartIPC(ctx context.Context, depends []func(context.Contex
 		log.Crit("IPC socket name is required")
 	}
 
-	ipc, err := ipc.NewIPCServer(s.conf.IPC.Sockname)
-	defer ipc.Close()
-	if err != nil {
+	var err error
+	if s.ipc, err = ipc.NewIPCServer(s.conf.IPC.Sockname); err != nil {
 		log.Crit("Failed to start ipc server", "err", err)
 	}
 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ipc.Start()
+
+		s.ipc.Start()
+		log.Info("IPC server has stopped, decrement wait group")
 	}()
 
 	for _, dep := range depends {
-		dep(ctx, ipc)
+		dep(ctx, s.ipc)
 	}
-
-	<-ctx.Done()
-	log.Info("Shut down IPC server")
 }
 
 func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
@@ -279,7 +296,9 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		s.p2p.Start(ctx)
+		log.Info("P2P node has stopped, decrement wait group")
 	}()
 }
 
@@ -298,23 +317,34 @@ func (s *server) mustSetupCollector() {
 }
 
 func (s *server) startCollector(ctx context.Context) {
-	// start block collector
-	if s.blockCollector != nil {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.blockCollector.Start(ctx)
-		}()
+	if s.blockCollector == nil || s.eventCollector == nil {
+		return
 	}
 
-	// start event collector
-	if s.eventCollector != nil {
-		s.wg.Add(1)
-		go func() {
+	s.wg.Add(1)
+	go func() {
+		defer func() {
 			defer s.wg.Done()
-			s.eventCollector.Start(ctx)
+			log.Info("Block collector has stopped, decrement wait group")
 		}()
-	}
+
+		ticker := time.NewTicker(s.conf.Verifier.Interval)
+		defer ticker.Stop()
+
+		log.Info("Block collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
+		log.Info("Event collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("Block collector stopped")
+				return
+			case <-ticker.C:
+				s.blockCollector.Work(ctx)
+				s.eventCollector.Work(ctx)
+			}
+		}
+	}()
 }
 
 func (s *server) mustSetupVerifier() {
@@ -338,44 +368,39 @@ func (s *server) startVerifier(ctx context.Context) {
 
 	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
-		s.verifier.Start(ctx)
-	}()
+		defer func() {
+			defer s.wg.Done()
+			log.Info("Verifier has stopped, decrement wait group")
+		}()
 
-	// start database optimizer
-	go func() {
-		// optimize database every hour
-		tick := util.NewTicker(s.conf.Verifier.OptimizeInterval, 1)
-		defer tick.Stop()
+		// Start verifier ticker
+		vTick := time.NewTicker(s.conf.Verifier.Interval)
+		defer vTick.Stop()
 
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("Database optimise loop stopped")
-				return
-			case <-tick.C:
-				log.Info("Optimize database")
-				s.db.OPSignature.RepairPreviousID(s.verifier.L1Signer().Signer())
-			}
-		}
-	}()
-
-	// publish new signature via p2p
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
-		sub := s.verifier.SubscribeNewSignature(ctx)
+		// Subscribe new signature from validators
+		var (
+			sub        = s.verifier.SubscribeNewSignature(ctx)
+			subscribes = map[common.Address]*database.OptimismSignature{}
+		)
 		defer sub.Cancel()
 
+		// Publish new signature via p2p
 		debounce := time.NewTicker(time.Second * 5)
 		defer debounce.Stop()
 
-		subscribes := map[common.Address]*database.OptimismSignature{}
+		// Optimize database every hour
+		dbTick := util.NewTicker(s.conf.Verifier.OptimizeInterval, 1)
+		defer dbTick.Stop()
+
+		log.Info("Verifier started", "signer", s.verifier.L1Signer().Signer())
+
 		for {
 			select {
 			case <-ctx.Done():
+				log.Info("Verifier stopped")
 				return
+			case <-vTick.C:
+				s.verifier.Work(ctx)
 			case sig := <-sub.Next():
 				subscribes[sig.Signer.Address] = sig
 			case <-debounce.C:
@@ -388,6 +413,9 @@ func (s *server) startVerifier(ctx context.Context) {
 				}
 				s.p2p.PublishSignatures(ctx, publishes)
 				subscribes = map[common.Address]*database.OptimismSignature{}
+			case <-dbTick.C:
+				log.Info("Optimize database")
+				s.db.OPSignature.RepairPreviousID(s.verifier.L1Signer().Signer())
 			}
 		}
 	}()
@@ -409,63 +437,53 @@ func (s *server) startSubmitter(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		s.submitter.Start(ctx)
+		log.Info("Submitter has stopped, decrement wait group")
 	}()
 }
 
 func (s *server) startVerseDiscovery(ctx context.Context) {
-	// run discovery handler
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
-		// read verses from the configuration
-		go func() {
-			s.discoveredVerses <- s.conf.VerseLayer.Directs
-		}()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case verses := <-s.discoveredVerses:
-				s.verseDiscoveryHandler(verses)
-			}
-		}
-	}()
-
-	// start dynamic discovery
 	if s.conf.VerseLayer.Discovery.Endpoint == "" {
+		// read verses from the configuration only, if the discovery endpoint is not set
+		s.verseDiscoveryHandler(s.conf.VerseLayer.Directs)
 		return
 	}
 
+	// dinamically discovered verses
 	disc := config.NewVerseDiscovery(
 		http.DefaultClient,
 		s.conf.VerseLayer.Discovery.Endpoint,
-		s.conf.VerseLayer.Discovery.RefreshInterval)
+		s.conf.VerseLayer.Discovery.RefreshInterval,
+	)
 
-	// run worker
 	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer func() {
+			defer s.wg.Done()
+			log.Info("Verse discovery has stopped, decrement wait group")
+		}()
 
-		time.Sleep(time.Second)
-		disc.Start(ctx)
-	}()
+		discTick := time.NewTicker(s.conf.VerseLayer.Discovery.RefreshInterval)
+		defer discTick.Stop()
 
-	// publish subscribed verses to verifier and submitter
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
+		// Subscribed verses to verifier and submitter
 		sub := disc.Subscribe(ctx)
 		defer sub.Cancel()
+
+		log.Info("Verse discovery started", "endpoint", s.conf.VerseLayer.Discovery.Endpoint, "interval", s.conf.VerseLayer.Discovery.RefreshInterval)
 
 		for {
 			select {
 			case <-ctx.Done():
+				log.Info("Verse discovery stopped")
 				return
-			case s.discoveredVerses <- <-sub.Next():
+			case verses := <-sub.Next():
+				s.verseDiscoveryHandler(verses)
+			case <-discTick.C:
+				if err := disc.Work(ctx); err != nil {
+					log.Error("Failed to work verse discovery", "err", err)
+				}
 			}
 		}
 	}()

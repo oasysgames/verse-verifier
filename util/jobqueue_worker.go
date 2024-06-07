@@ -13,6 +13,7 @@ type JobQueueWorker struct {
 	queue   []interface{}
 	notify  chan struct{}
 	mu      *sync.Mutex
+	close   chan struct{}
 }
 
 func NewQueueWorker(workerCtx context.Context, handler Handler) *JobQueueWorker {
@@ -22,6 +23,7 @@ func NewQueueWorker(workerCtx context.Context, handler Handler) *JobQueueWorker 
 		queue:   []interface{}{},
 		notify:  make(chan struct{}),
 		mu:      &sync.Mutex{},
+		close:   make(chan struct{}),
 	}
 }
 
@@ -30,12 +32,18 @@ func (w *JobQueueWorker) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-w.close:
+			return
 		case <-w.notify:
 			if data := w.shift(); data != nil {
 				w.handler(ctx, data)
 			}
 		}
 	}
+}
+
+func (w *JobQueueWorker) Close() {
+	close(w.close)
 }
 
 func (w *JobQueueWorker) Enqueue(data interface{}) {

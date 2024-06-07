@@ -72,8 +72,22 @@ func (s *VerseDiscoveryTestSuite) TestDiscover() {
 	}()
 
 	// start discovery
-	go discovery.Start(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		tick := time.NewTicker(discovery.refreshInterval)
+		defer tick.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				discovery.Work(ctx)
+			}
+		}
+	}()
 	wg.Wait()
+	cancel()
 
 	// assert
 	want0 := Verse{

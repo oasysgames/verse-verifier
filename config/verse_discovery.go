@@ -15,9 +15,8 @@ type VerseDiscovery struct {
 	client          *http.Client
 	url             string
 	refreshInterval time.Duration
-
-	topic *util.Topic
-	log   log.Logger
+	topic           *util.Topic
+	log             log.Logger
 }
 
 func NewVerseDiscovery(
@@ -34,32 +33,6 @@ func NewVerseDiscovery(
 	}
 }
 
-func (w *VerseDiscovery) Start(ctx context.Context) {
-	w.log.Info("Worker started", "endpoint", w.url, "interval", w.refreshInterval)
-
-	for {
-		if w.work(ctx) == nil {
-			break
-		} else if ctx.Err() != nil {
-			return
-		}
-		time.Sleep(5 * time.Second)
-	}
-
-	tick := time.NewTicker(w.refreshInterval)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			w.log.Info("Worker stopped")
-			return
-		case <-tick.C:
-			w.work(ctx)
-		}
-	}
-}
-
 func (w *VerseDiscovery) Subscribe(ctx context.Context) *VerseSubscription {
 	ch := make(chan []*Verse)
 	cancel := w.topic.Subscribe(ctx, func(ctx context.Context, data interface{}) {
@@ -70,13 +43,13 @@ func (w *VerseDiscovery) Subscribe(ctx context.Context) *VerseSubscription {
 	return &VerseSubscription{Cancel: cancel, ch: ch}
 }
 
-func (w *VerseDiscovery) work(ctx context.Context) error {
+func (w *VerseDiscovery) Work(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	data, err := w.fetch(ctx)
 	if err != nil {
-		w.log.Error("Request failed", "err", err)
+		w.log.Error("Discovery request failed", "err", err)
 		return err
 	}
 

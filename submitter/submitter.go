@@ -47,7 +47,7 @@ func NewSubmitter(
 }
 
 func (w *Submitter) Start(ctx context.Context) {
-	w.log.Info("Worker started",
+	w.log.Info("Submitter started",
 		"interval", w.cfg.Interval,
 		"concurrency", w.cfg.Concurrency,
 		"confirmations", w.cfg.Confirmations,

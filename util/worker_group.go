@@ -41,6 +41,16 @@ func (sw *WorkerGroup) AddWorker(
 	sw.workers.Store(name, w)
 }
 
+func (sw *WorkerGroup) RemoveWorker(name string) {
+	if !sw.Has(name) {
+		return
+	}
+	if w := sw.get(name); w != nil {
+		w.Close()
+		sw.workers.Delete(name)
+	}
+}
+
 func (sw *WorkerGroup) Enqueue(name string, data interface{}) {
 	if w := sw.get(name); w != nil {
 		w.Enqueue(data)

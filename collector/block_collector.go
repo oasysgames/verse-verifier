@@ -49,12 +49,12 @@ func (w *BlockCollector) Start(
 			w.log.Info("Block collector stopped")
 			return
 		case <-ticker.C:
-			w.work(ctx)
+			w.Work(ctx)
 		}
 	}
 }
 
-func (w *BlockCollector) work(ctx context.Context) {
+func (w *BlockCollector) Work(ctx context.Context) {
 	// get local highest block
 	start := uint64(1)
 	if highest, err := w.db.Block.FindHighest(); err == nil {
@@ -78,8 +78,10 @@ func (w *BlockCollector) work(ctx context.Context) {
 	}
 
 	if end == start {
+		w.log.Info("New block header is corrected", "number", start, "hash", latestHeader.Hash())
 		w.saveHeaders(ctx, []*types.Header{latestHeader})
 	} else {
+		w.log.Info("Will collect new block headers", "start", start, "end", end)
 		w.batchCollect(ctx, start, end)
 	}
 }
@@ -136,7 +138,7 @@ func (w *BlockCollector) batchCollect(ctx context.Context, start, end uint64) {
 		}
 
 		size := len(headers)
-		w.log.Info(
+		w.log.Debug(
 			"New blocks",
 			"len", size, "elapsed", time.Since(st),
 			"start", headers[0].Number, "end", headers[size-1].Number)

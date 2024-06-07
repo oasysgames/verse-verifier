@@ -4,3 +4,4 @@
 .env*
 /tmp
 node_modules/
+bin/

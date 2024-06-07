@@ -42,7 +42,7 @@ func (s *EventCollectorTestSuite) TestHandleRollupedEvent() {
 	}
 
 	// collect `StateBatchAppended` events
-	s.collector.work(context.Background())
+	s.collector.Work(context.Background())
 
 	// assert
 	for i := range s.Range(0, len(emits)) {
@@ -69,7 +69,7 @@ func (s *EventCollectorTestSuite) TestHandleDeletedEvent() {
 	}
 
 	// collect `StateBatchAppended` events
-	s.collector.work(ctx)
+	s.collector.Work(ctx)
 
 	// create signature records
 	var creates []*database.OptimismSignature
@@ -97,7 +97,7 @@ func (s *EventCollectorTestSuite) TestHandleDeletedEvent() {
 	s.Mining()
 
 	// collect `StateBatchDeleted` events
-	s.collector.work(ctx)
+	s.collector.Work(ctx)
 
 	// assert
 	for i := range s.Range(0, 10) {
@@ -125,7 +125,7 @@ func (s *EventCollectorTestSuite) TestHandleVerifiedEvent() {
 	}
 
 	// collect `EmitStateBatchVerified` events
-	s.collector.work(context.Background())
+	s.collector.Work(context.Background())
 
 	// assert
 	scc, _ := s.DB.OPContract.FindOrCreate(s.SCCAddr)
@@ -146,7 +146,7 @@ func (s *EventCollectorTestSuite) TestIgnoreOtherEvent() {
 	}
 
 	// collect `StateBatchAppended` events
-	s.collector.work(ctx)
+	s.collector.Work(ctx)
 
 	// assert
 	for i := range s.Range(0, 20) {
@@ -169,7 +169,7 @@ func (s *EventCollectorTestSuite) TestHandleReorganization() {
 	}
 
 	// collect `StateBatchAppended` events
-	s.collector.work(ctx)
+	s.collector.Work(ctx)
 
 	// create signature records
 	var creates []*database.OptimismSignature
@@ -189,7 +189,7 @@ func (s *EventCollectorTestSuite) TestHandleReorganization() {
 
 	// simulate chain reorganization
 	s.EmitStateBatchAppended(4)
-	s.collector.work(ctx)
+	s.collector.Work(ctx)
 
 	// assert
 	for i := range s.Range(0, len(emits)) {
