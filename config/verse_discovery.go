@@ -49,7 +49,7 @@ func (w *VerseDiscovery) Work(ctx context.Context) error {
 
 	data, err := w.fetch(ctx)
 	if err != nil {
-		w.log.Error("Request failed", "err", err)
+		w.log.Error("Discovery request failed", "err", err)
 		return err
 	}
 

@@ -55,7 +55,7 @@ func (w *BeaconWorker) Start(ctx context.Context) {
 			if err := w.work(ctx); err == nil {
 				w.log.Info("Sent beacon")
 			} else {
-				w.log.Error("Request failed", "err", err)
+				w.log.Error("Beacon request failed", "err", err)
 			}
 		}
 	}

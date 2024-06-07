@@ -73,14 +73,10 @@ func (op *verifiableOPStack) Verify(
 	if !ok {
 		return false, errors.New("not OpstackProposal event")
 	}
-
-	log := op.Logger(base).New("index", row.L2OutputIndex)
-
 	// verify storage proof of L2ToL1MessagePasser
 	output, err := GetOpstackOutputV0(ctx, op.L2Client(),
 		OpstackPredeploys.L2ToL1MessagePasser, []string{}, row.L2BlockNumber)
 	if err != nil {
-		log.Error("Failed to l2output", "err", err)
 		return false, err
 	}
 

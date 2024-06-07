@@ -188,7 +188,7 @@ func (w *EventCollector) handleDeletedEvent(txdb *database.Database, e *verse.De
 // Handler for rollup verified event.
 func (w *EventCollector) handleVerifiedEvent(txdb *database.Database, e *verse.VerifiedEvent) error {
 	log := e.Logger(w.log)
-	log.Info("New rollup verified event")
+	log.Debug("New rollup verified event")
 
 	err := txdb.OPContract.SaveNextIndex(e.Log.Address, e.RollupIndex+1)
 	if err != nil {

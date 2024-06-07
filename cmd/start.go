@@ -325,7 +325,6 @@ func (s *server) startCollector(ctx context.Context) {
 	go func() {
 		defer func() {
 			defer s.wg.Done()
-
 			log.Info("Block collector has stopped, decrement wait group")
 		}()
 
@@ -367,34 +366,33 @@ func (s *server) startVerifier(ctx context.Context) {
 		return
 	}
 
-	log.Info("Verifier started", "signer", s.verifier.L1Signer().Signer())
-
-	// Start verifier ticker
-	vTick := time.NewTicker(s.conf.Verifier.Interval)
-	defer vTick.Stop()
-
-	// Subscribe new signature from validators
-	var (
-		sub        = s.verifier.SubscribeNewSignature(ctx)
-		subscribes = map[common.Address]*database.OptimismSignature{}
-	)
-	defer sub.Cancel()
-
-	// Publish new signature via p2p
-	debounce := time.NewTicker(time.Second * 5)
-	defer debounce.Stop()
-
-	// Optimize database every hour
-	dbTick := util.NewTicker(s.conf.Verifier.OptimizeInterval, 1)
-	defer dbTick.Stop()
-
 	s.wg.Add(1)
 	go func() {
 		defer func() {
 			defer s.wg.Done()
-
 			log.Info("Verifier has stopped, decrement wait group")
 		}()
+
+		// Start verifier ticker
+		vTick := time.NewTicker(s.conf.Verifier.Interval)
+		defer vTick.Stop()
+
+		// Subscribe new signature from validators
+		var (
+			sub        = s.verifier.SubscribeNewSignature(ctx)
+			subscribes = map[common.Address]*database.OptimismSignature{}
+		)
+		defer sub.Cancel()
+
+		// Publish new signature via p2p
+		debounce := time.NewTicker(time.Second * 5)
+		defer debounce.Stop()
+
+		// Optimize database every hour
+		dbTick := util.NewTicker(s.conf.Verifier.OptimizeInterval, 1)
+		defer dbTick.Stop()
+
+		log.Info("Verifier started", "signer", s.verifier.L1Signer().Signer())
 
 		for {
 			select {
@@ -456,26 +454,26 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	disc := config.NewVerseDiscovery(
 		http.DefaultClient,
 		s.conf.VerseLayer.Discovery.Endpoint,
-		s.conf.VerseLayer.Discovery.RefreshInterval)
-
-	discTick := time.NewTicker(s.conf.VerseLayer.Discovery.RefreshInterval)
-	defer discTick.Stop()
-
-	// Subscribed verses to verifier and submitter
-	sub := disc.Subscribe(ctx)
-	defer sub.Cancel()
-
-	log.Info("Verse discovery started", "endpoint", s.conf.VerseLayer.Discovery.Endpoint, "interval", s.conf.VerseLayer.Discovery.RefreshInterval)
+		s.conf.VerseLayer.Discovery.RefreshInterval,
+	)
 
 	s.wg.Add(1)
 	go func() {
+		defer func() {
+			defer s.wg.Done()
+			log.Info("Verse discovery has stopped, decrement wait group")
+		}()
+
+		discTick := time.NewTicker(s.conf.VerseLayer.Discovery.RefreshInterval)
+		defer discTick.Stop()
+
+		// Subscribed verses to verifier and submitter
+		sub := disc.Subscribe(ctx)
+		defer sub.Cancel()
+
+		log.Info("Verse discovery started", "endpoint", s.conf.VerseLayer.Discovery.Endpoint, "interval", s.conf.VerseLayer.Discovery.RefreshInterval)
+
 		for {
-			defer func() {
-				defer s.wg.Done()
-
-				log.Info("Verse discovery has stopped, decrement wait group")
-			}()
-
 			select {
 			case <-ctx.Done():
 				log.Info("Verse discovery stopped")
