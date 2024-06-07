@@ -149,30 +149,28 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 }
 
 type server struct {
-	wg               sync.WaitGroup
-	conf             *config.Config
-	db               *database.Database
-	signers          map[string]ethutil.Signer
-	hub              ethutil.Client
-	smcache          *stakemanager.Cache
-	p2p              *p2p.Node
-	blockCollector   *collector.BlockCollector
-	eventCollector   *collector.EventCollector
-	verifier         *verifier.Verifier
-	submitter        *submitter.Submitter
-	bw               *beacon.BeaconWorker
-	discoveredVerses chan []*config.Verse
-	msvr             *http.Server
-	psvr             *http.Server
-	ipc              *ipc.IPCServer
+	wg             sync.WaitGroup
+	conf           *config.Config
+	db             *database.Database
+	signers        map[string]ethutil.Signer
+	hub            ethutil.Client
+	smcache        *stakemanager.Cache
+	p2p            *p2p.Node
+	blockCollector *collector.BlockCollector
+	eventCollector *collector.EventCollector
+	verifier       *verifier.Verifier
+	submitter      *submitter.Submitter
+	bw             *beacon.BeaconWorker
+	msvr           *http.Server
+	psvr           *http.Server
+	ipc            *ipc.IPCServer
 }
 
 func mustNewServer(ctx context.Context) *server {
 	var err error
 
 	s := &server{
-		signers:          map[string]ethutil.Signer{},
-		discoveredVerses: make(chan []*config.Verse),
+		signers: map[string]ethutil.Signer{},
 	}
 
 	if s.conf, err = globalConfigLoader.load(); err != nil {
@@ -465,6 +463,8 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	sub := disc.Subscribe(ctx)
 	defer sub.Cancel()
 
+	log.Info("Verse discovery started", "endpoint", s.conf.VerseLayer.Discovery.Endpoint, "interval", s.conf.VerseLayer.Discovery.RefreshInterval)
+
 	s.wg.Add(1)
 	go func() {
 		for {
@@ -478,14 +478,12 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 			case <-ctx.Done():
 				log.Info("Verse discovery stopped")
 				return
-			case verses := <-s.discoveredVerses:
+			case verses := <-sub.Next():
 				s.verseDiscoveryHandler(verses)
 			case <-discTick.C:
 				if err := disc.Work(ctx); err != nil {
 					log.Error("Failed to work verse discovery", "err", err)
 				}
-			case s.discoveredVerses <- <-sub.Next():
-				// publish the subscribed verses
 			}
 		}
 	}()
