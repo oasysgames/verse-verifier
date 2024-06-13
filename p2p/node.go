@@ -56,6 +56,9 @@ type Node struct {
 	ignoreSigners   map[common.Address]int
 	stakemanager    *stakemanager.Cache
 
+	// TODO: better to move to suitable config struct
+	pruneRollupIndexDepth uint64
+
 	topic *ps.Topic
 	sub   *ps.Subscription
 	log   log.Logger
@@ -98,6 +101,7 @@ func NewNode(
 	hubLayerChainID uint64,
 	ignoreSigners []common.Address,
 	stakemanager *stakemanager.Cache,
+	pruneRollupIndexDepth uint64,
 ) (*Node, error) {
 	_, topic, sub, err := setupPubSub(context.Background(), host, pubsubTopic)
 	if err != nil {
@@ -117,6 +121,8 @@ func NewNode(
 		topic:           topic,
 		sub:             sub,
 		log:             log.New("worker", "p2p"),
+
+		pruneRollupIndexDepth: pruneRollupIndexDepth,
 
 		outboundSem: semaphore.NewWeighted(int64(cfg.OutboundLimits.Concurrency)),
 		inboundSem:  semaphore.NewWeighted(int64(cfg.InboundLimits.Concurrency)),
@@ -160,14 +166,15 @@ func (w *Node) Start(ctx context.Context) {
 	defer w.h.Close()
 	defer w.topic.Close()
 	defer w.sub.Cancel()
+	// NOTE: Remain read stream to maintain backwards compatibility
 	w.h.SetStreamHandler(streamProtocol, w.newStreamHandler(ctx))
 
 	var (
-		wg            sync.WaitGroup
-		publishTicker = time.NewTicker(w.cfg.PublishInterval)
-		meterTicker   = time.NewTicker(time.Second * 60)
+		wg sync.WaitGroup
+		// publishTicker = time.NewTicker(w.cfg.PublishInterval)
+		meterTicker = time.NewTicker(time.Second * 60)
 	)
-	defer publishTicker.Stop()
+	// defer publishTicker.Stop()
 	defer meterTicker.Stop()
 
 	wg.Add(1)
@@ -184,8 +191,8 @@ func (w *Node) Start(ctx context.Context) {
 			w.log.Info("P2P node stopping...")
 			wg.Wait()
 			return
-		case <-publishTicker.C:
-			w.publishLatestSignatures(ctx)
+		// case <-publishTicker.C:
+		// 	w.publishLatestSignatures(ctx)
 		case <-meterTicker.C:
 			nwstat := newNetworkStatus(w.h)
 			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
@@ -204,6 +211,7 @@ func (w *Node) Host() host.Host                  { return w.h }
 func (w *Node) Routing() routing.Routing         { return w.dht }
 func (w *Node) HolePunchHelper() HolePunchHelper { return w.hpHelper }
 
+// Deprecated
 func (w *Node) meterLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
@@ -225,6 +233,7 @@ func (w *Node) meterLoop(ctx context.Context) {
 	}
 }
 
+// Deprecated
 func (w *Node) publishLoop(ctx context.Context) {
 	ticker := time.NewTicker(w.cfg.PublishInterval)
 	defer ticker.Stop()
@@ -290,7 +299,8 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 					procs.Store(rname, job)
 					defer procs.Delete(rname)
 
-					w.handleOptimismSignatureExchangeFromPubSub(job.ctx, job.peer, job.remote)
+					// w.handleOptimismSignatureExchangeFromPubSub(job.ctx, job.peer, job.remote)
+					w.handleOptimismSignatureExchangeFromPubSub2(job.ctx, job.peer, job.remote)
 					w.meterPubsubJobs.Decr()
 				})
 				w.meterPubsubWorkers.Incr()
@@ -472,6 +482,56 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	}
 
 	w.handleOptimismSignatureExchangeResponses(ctx, s)
+}
+
+func (w *Node) handleOptimismSignatureExchangeFromPubSub2(
+	ctx context.Context,
+	sender peer.ID,
+	remote *pb.OptimismSignature,
+) bool {
+	signer := common.BytesToAddress(remote.Signer)
+	logctx := []interface{}{
+		"peer", sender,
+		"signer", signer,
+		"remote-latest-id", remote.Id,
+		"remote-latest-previous-id", remote.PreviousId,
+		"remote-latest-index", remote.RollupIndex,
+	}
+
+	if err := verifySignature(w.hubLayerChainID, remote); err != nil {
+		w.log.Error("Invalid signature", append(logctx, "err", err)...)
+		return false
+	}
+
+	local, err := w.db.OPSignature.FindLatestsBySigner(signer, 1, 0)
+	if err != nil {
+		w.log.Error("Failed to find the latest signature", append(logctx, "err", err)...)
+		return false
+	} else if len(local) > 0 && strings.Compare(local[0].ID, remote.Id) == 1 {
+		// fully synchronized or less than local
+		w.log.Debug("Skip already possess signature", append(logctx, "local-latest-id", local[0].ID)...)
+		return false
+	} else if len(local) > 0 && remote.RollupIndex < local[0].RollupIndex-w.pruneRollupIndexDepth {
+		// ignore old signature
+		w.log.Info("Ignored old signature", append(logctx, "local-latest-index", local[0].RollupIndex)...)
+		return false
+	}
+
+	// save signature
+	if _, err := w.db.OPSignature.Save(
+		&remote.Id, &remote.PreviousId,
+		signer,
+		common.BytesToAddress(remote.Contract),
+		remote.RollupIndex,
+		common.BytesToHash(remote.RollupHash),
+		remote.Approved,
+		database.BytesSignature(remote.Signature),
+	); err != nil {
+		w.log.Error("Failed to save signature", append(logctx, "err", err)...)
+		return false
+	}
+
+	return true
 }
 
 func (w *Node) handleOptimismSignatureExchangeRequest(

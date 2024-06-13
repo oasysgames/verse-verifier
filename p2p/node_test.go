@@ -45,6 +45,8 @@ type NodeTestSuite struct {
 	sigs map[common.Address]map[common.Address][]*database.OptimismSignature
 
 	bootnode, node1, node2 *Node
+
+	pruneRollupIndexDepth uint64
 }
 
 func (s *NodeTestSuite) SetupTest() {
@@ -59,6 +61,7 @@ func (s *NodeTestSuite) SetupTest() {
 	s.contract1 = s.RandAddress()
 	s.contract2 = s.RandAddress()
 	s.sigs = map[common.Address]map[common.Address][]*database.OptimismSignature{}
+	s.pruneRollupIndexDepth = 50
 
 	backends := []*backend.SignableBackend{s.b0, s.b1, s.b2}
 	signers := []common.Address{s.signer0, s.signer1}
@@ -301,6 +304,27 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 
 	gots15 := reads[15].GetEom()
 	s.NotNil(gots15)
+}
+
+func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub2() {
+	// succeed to save signature
+	msg := toProtoBufSig(s.sigs[s.signer0][s.contract0][49])
+	saved := s.node2.handleOptimismSignatureExchangeFromPubSub2(context.Background(), s.node1.h.ID(), msg)
+	s.True(saved)
+	got, err := s.node2.db.OPSignature.FindByID(msg.Id)
+	s.NoError(err)
+	s.Equal(msg.Id, got.ID)
+
+	// saving duplicate signature
+	saved = s.node2.handleOptimismSignatureExchangeFromPubSub2(context.Background(), s.node1.h.ID(), msg)
+	s.False(saved)
+
+	// saving too old signature
+	msg = toProtoBufSig(s.sigs[s.signer0][s.contract0][0])
+	saved = s.node2.handleOptimismSignatureExchangeFromPubSub2(context.Background(), s.node1.h.ID(), msg)
+	s.False(saved)
+	_, err = s.node2.db.OPSignature.FindByID(msg.Id)
+	s.ErrorIs(err, database.ErrNotFound)
 }
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
@@ -586,7 +610,7 @@ func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 	host, dht, bwm, hpHelper, _ := NewHost(context.Background(), cfg, priv)
 
 	worker, _ := NewNode(cfg, db, host, dht, bwm, hpHelper,
-		s.b0.ChainID().Uint64(), []common.Address{}, s.stakemanager)
+		s.b0.ChainID().Uint64(), []common.Address{}, s.stakemanager, s.pruneRollupIndexDepth)
 	host.SetStreamHandler(streamProtocol,
 		worker.newStreamHandler(context.Background()))
 

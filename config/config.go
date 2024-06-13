@@ -65,13 +65,14 @@ func Defaults() map[string]interface{} {
 
 		"ipc.sockname": "oasvlfy",
 
-		"verifier.interval":              15 * time.Second,
-		"verifier.concurrency":           50,
-		"verifier.block_limit":           1000,
-		"verifier.event_filter_limit":    1000,
-		"verifier.state_collect_limit":   1000,
-		"verifier.state_collect_timeout": 15 * time.Second,
-		"verifier.db_optimize_interval":  time.Hour,
+		"verifier.interval":                 15 * time.Second,
+		"verifier.concurrency":              50,
+		"verifier.block_limit":              1000,
+		"verifier.event_filter_limit":       1000,
+		"verifier.state_collect_limit":      1000,
+		"verifier.state_collect_timeout":    15 * time.Second,
+		"verifier.db_optimize_interval":     time.Hour,
+		"verifier.prune_rollup_index_depth": 4096,
 
 		"submitter.interval":              15 * time.Second,
 		"submitter.concurrency":           50,
@@ -375,6 +376,9 @@ type Verifier struct {
 
 	// Interval to optimize database.
 	OptimizeInterval time.Duration `koanf:"db_optimize_interval"`
+
+	// Depth of rollup index eligible for pruning.
+	PruneRollupIndexDepth uint64 `koanf:"prune_rollup_index_depth"`
 }
 
 type Submitter struct {

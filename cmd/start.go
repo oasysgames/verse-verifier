@@ -83,7 +83,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	})
 
 	// setup workers
-	s.mustSetupCollector()
+	// s.mustSetupCollector()
 	s.mustSetupVerifier()
 	s.setupSubmitter()
 	s.mustSetupBeacon()
@@ -100,10 +100,10 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	}()
 
 	// start workers
-	s.startCollector(ctx)
-	s.startVerifier(ctx)
+	// s.startCollector(ctx)
+	// s.startVerifier(ctx)
 	s.startSubmitter(ctx)
-	s.startVerseDiscovery(ctx)
+	// s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
 	log.Info("All workers started")
 
@@ -284,8 +284,7 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 		ignoreSigners = append(ignoreSigners, signer.From())
 	}
 
-	s.p2p, err = p2p.NewNode(&s.conf.P2P, s.db, host, dht, bwm,
-		hpHelper, s.conf.HubLayer.ChainID, ignoreSigners, s.smcache)
+	s.p2p, err = p2p.NewNode(&s.conf.P2P, s.db, host, dht, bwm, hpHelper, s.conf.HubLayer.ChainID, ignoreSigners, s.smcache, s.conf.Verifier.PruneRollupIndexDepth)
 	if err != nil {
 		log.Crit("Failed to construct p2p node", "err", err)
 	}
@@ -374,8 +373,8 @@ func (s *server) startVerifier(ctx context.Context) {
 		}()
 
 		// Start verifier ticker
-		vTick := time.NewTicker(s.conf.Verifier.Interval)
-		defer vTick.Stop()
+		// vTick := time.NewTicker(s.conf.Verifier.Interval)
+		// defer vTick.Stop()
 
 		// Subscribe new signature from validators
 		var (
@@ -399,8 +398,8 @@ func (s *server) startVerifier(ctx context.Context) {
 			case <-ctx.Done():
 				log.Info("Verifier stopped")
 				return
-			case <-vTick.C:
-				s.verifier.Work(ctx)
+			// case <-vTick.C:
+			// s.verifier.Work(ctx)
 			case sig := <-sub.Next():
 				subscribes[sig.Signer.Address] = sig
 			case <-debounce.C:
