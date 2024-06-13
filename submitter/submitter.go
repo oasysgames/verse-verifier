@@ -47,14 +47,6 @@ func NewSubmitter(
 }
 
 func (w *Submitter) Start(ctx context.Context) {
-	wg := &sync.WaitGroup{}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.workLoop(ctx)
-	}()
-
 	w.log.Info("Worker started",
 		"interval", w.cfg.Interval,
 		"concurrency", w.cfg.Concurrency,
@@ -66,9 +58,7 @@ func (w *Submitter) Start(ctx context.Context) {
 		"l2oo-verifier", w.cfg.L2OOVerifierAddress,
 		"use-multicall", w.cfg.UseMulticall,
 		"multicall", w.cfg.MulticallAddress)
-
-	wg.Wait()
-	w.log.Info("Worker stopped")
+	w.workLoop(ctx)
 }
 
 func (w *Submitter) workLoop(ctx context.Context) {
@@ -81,6 +71,7 @@ func (w *Submitter) workLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			w.log.Info("Submitter stopped")
 			return
 		case <-tick.C:
 			w.tasks.Range(func(key, val any) bool {

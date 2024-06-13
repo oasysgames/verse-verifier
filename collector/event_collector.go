@@ -40,7 +40,7 @@ func NewEventCollector(
 }
 
 func (w *EventCollector) Start(ctx context.Context) {
-	w.log.Info("Worker started",
+	w.log.Info("Event collector started",
 		"interval", w.cfg.Interval, "event-filter-limit", w.cfg.EventFilterLimit)
 
 	ticker := time.NewTicker(w.cfg.Interval)
@@ -49,7 +49,7 @@ func (w *EventCollector) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			w.log.Info("Worker stopped")
+			w.log.Info("Event collector stopped")
 			return
 		case <-ticker.C:
 			w.work(ctx)

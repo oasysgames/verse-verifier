@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"net/http"
 	"os"
@@ -58,11 +57,16 @@ func init() {
 func runStartCmd(cmd *cobra.Command, args []string) {
 	log.Info(fmt.Sprintf("Start %s", commandName), "version", version.SemVer())
 
-	ctx, stop := signal.NotifyContext(context.Background(),
-		syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	sigC := make(chan os.Signal, 1)
+	signal.Notify(sigC, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		defer cancel()
+		sig := <-sigC
+		log.Info("Received signal, stopping...", "signal", sig)
+	}()
 
-	s := mustNewServer()
+	s := mustNewServer(ctx)
 
 	// start metrics server
 	s.mustStartMetrics(ctx)
@@ -84,11 +88,13 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	s.setupSubmitter()
 	s.mustSetupBeacon()
 
+	// Fetch the total stake and the stakes synchronously
+	if err := s.smcache.Refresh(ctx); err != nil {
+		// Exit if the first refresh faild, because the following refresh higly likely fail
+		log.Crit("Failed to refresh stake cache", "err", err)
+	}
 	// start cache updater
-	s.smcache.Refresh(ctx) // first time synchronous
-	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
 		s.smcache.RefreshLoop(ctx, time.Hour)
 	}()
 
@@ -98,11 +104,32 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	s.startSubmitter(ctx)
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
-	log.Info("Start all workers")
+	log.Info("All workers started")
 
 	// wait for signal
-	s.wg.Wait()
-	log.Info("Stopped all workers")
+	<-ctx.Done()
+	log.Info("Shutting down all workers")
+
+	var (
+		// time limit until all worker stop
+		limit       = time.Second * 60
+		wc, wcancel = context.WithTimeout(context.Background(), limit)
+		isTimeout   = true
+	)
+
+	go func() {
+		s.wg.Wait()
+		isTimeout = false
+		wcancel()
+	}()
+
+	<-wc.Done()
+
+	if isTimeout {
+		log.Crit("Worker stopping time limit has elapsed", "limit", limit)
+	}
+
+	log.Info("All workers stopped")
 }
 
 type server struct {
@@ -121,7 +148,7 @@ type server struct {
 	discoveredVerses chan []*config.Verse
 }
 
-func mustNewServer() *server {
+func mustNewServer(ctx context.Context) *server {
 	var err error
 
 	s := &server{
@@ -144,6 +171,13 @@ func mustNewServer() *server {
 	// construct hub-layer client
 	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC); err != nil {
 		log.Crit("Failed to construct hub-layer client", "err", err)
+	}
+
+	// Make sue the s.hub can connect to the chain
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+	if _, err := s.hub.BlockNumber(ctx); err != nil {
+		log.Crit("Failed to connect to the hub-layer chain", "err", err)
 	}
 
 	// construct stakemanager cache
@@ -195,6 +229,7 @@ func (s *server) mustStartIPC(ctx context.Context, depends []func(context.Contex
 	}
 
 	ipc, err := ipc.NewIPCServer(s.conf.IPC.Sockname)
+	defer ipc.Close()
 	if err != nil {
 		log.Crit("Failed to start ipc server", "err", err)
 	}
@@ -202,12 +237,15 @@ func (s *server) mustStartIPC(ctx context.Context, depends []func(context.Contex
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ipc.Start(ctx)
+		ipc.Start()
 	}()
 
 	for _, dep := range depends {
 		dep(ctx, ipc)
 	}
+
+	<-ctx.Done()
+	log.Info("Shut down IPC server")
 }
 
 func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
@@ -289,12 +327,7 @@ func (s *server) mustSetupVerifier() {
 		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
 	}
 
-	l1Signer, err := ethutil.NewSignableClient(
-		new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, signer)
-	if err != nil {
-		log.Crit("Failed to construct verifier", "err", err)
-	}
-
+	l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
 	s.verifier = verifier.NewVerifier(&s.conf.Verifier, s.db, l1Signer)
 }
 
@@ -310,10 +343,7 @@ func (s *server) startVerifier(ctx context.Context) {
 	}()
 
 	// start database optimizer
-	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
-
 		// optimize database every hour
 		tick := util.NewTicker(s.conf.Verifier.OptimizeInterval, 1)
 		defer tick.Stop()
@@ -321,8 +351,10 @@ func (s *server) startVerifier(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				log.Info("Database optimise loop stopped")
 				return
 			case <-tick.C:
+				log.Info("Optimize database")
 				s.db.OPSignature.RepairPreviousID(s.verifier.L1Signer().Signer())
 			}
 		}
@@ -496,13 +528,8 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 					continue
 				}
 
-				l1Signer, err := ethutil.NewSignableClient(
-					new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.conf.HubLayer.RPC, signer)
-				if err != nil {
-					log.Error("Failed to construct hub-layer client", "err", err)
-				} else {
-					s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
-				}
+				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
+				s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
 			}
 		}
 	}
@@ -517,6 +544,8 @@ func (s *server) mustSetupBeacon() {
 	if !ok {
 		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
 	}
+
+	// TODO: make sure the endpoint(s.conf.Beacon.Endpoint) is reachable here
 
 	s.bw = beacon.NewBeaconWorker(
 		&s.conf.Beacon,
@@ -533,16 +562,13 @@ func (s *server) startBeacon(ctx context.Context) {
 	if s.bw == nil {
 		return
 	}
-
-	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
 		s.bw.Start(ctx)
 	}()
 }
 
 func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 
 	if err == nil {
 		dec, peerID, err := p2p.DecodePrivateKey(string(data))
@@ -572,7 +598,7 @@ func getOrCreateP2PKey(filename string) (crypto.PrivKey, error) {
 		return nil, err
 	}
 
-	err = ioutil.WriteFile(filename, []byte(enc), 0644)
+	err = os.WriteFile(filename, []byte(enc), 0644)
 	if err != nil {
 		log.Error("Failed to write p2p private key", "err", err)
 		return nil, err
@@ -630,7 +656,7 @@ func (s *server) mustLoadSigners(ctx context.Context, ipc *ipc.IPCServer) {
 			}
 
 			if wallet.Password != "" {
-				pw, err := ioutil.ReadFile(wallet.Password)
+				pw, err := os.ReadFile(wallet.Password)
 				if err != nil {
 					log.Crit("Failed to read password file",
 						"name", name, "address", address, "err", err)

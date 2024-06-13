@@ -60,7 +60,7 @@ func (w *Verifier) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			w.log.Info("Worker stopped")
+			w.log.Info("Verifier stopped")
 			return
 		case <-tick.C:
 			w.tasks.Range(func(key, val interface{}) bool {
