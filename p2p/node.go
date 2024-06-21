@@ -163,47 +163,50 @@ func NewNode(
 }
 
 func (w *Node) Start(ctx context.Context) {
-	defer w.h.Close()
-	defer w.topic.Close()
-	defer w.sub.Cancel()
 	// NOTE: Remain read stream to maintain backwards compatibility
 	w.h.SetStreamHandler(streamProtocol, w.newStreamHandler(ctx))
 
-	var (
-		wg sync.WaitGroup
-		// publishTicker = time.NewTicker(w.cfg.PublishInterval)
-		meterTicker = time.NewTicker(time.Second * 60)
-	)
-	// defer publishTicker.Stop()
-	defer meterTicker.Stop()
+	// var (
+	// 	wg sync.WaitGroup
+	// 	// publishTicker = time.NewTicker(w.cfg.PublishInterval)
+	// 	meterTicker = time.NewTicker(time.Second * 60)
+	// )
+	// // defer publishTicker.Stop()
+	// defer meterTicker.Stop()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.subscribeLoop(ctx)
-	}()
+	// wg.Add(1)
+	// go func() {
+	// 	defer wg.Done()
+	// 	w.subscribeLoop(ctx)
+	// }()
 
-	w.showBootstrapLog()
+	// w.showBootstrapLog()
 
-	for {
-		select {
-		case <-ctx.Done():
-			w.log.Info("P2P node stopping...")
-			wg.Wait()
-			return
-		// case <-publishTicker.C:
-		// 	w.publishLatestSignatures(ctx)
-		case <-meterTicker.C:
-			nwstat := newNetworkStatus(w.h)
-			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
-			w.meterUDPConnections.Set(float64(nwstat.connections.udp))
-			w.meterRelayConnections.Set(float64(nwstat.connections.relay))
-			w.meterRelayHopStreams.Set(float64(nwstat.streams.hop))
-			w.meterRelayStopStreams.Set(float64(nwstat.streams.stop))
-			w.meterVerifierStreams.Set(float64(nwstat.streams.verifier))
-			w.meterPeers.Set(float64(w.h.Peerstore().Peers().Len()))
-		}
-	}
+	// for {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		w.log.Info("P2P node stopping...")
+	// 		wg.Wait()
+	// 		return
+	// 	// case <-publishTicker.C:
+	// 	// 	w.publishLatestSignatures(ctx)
+	// 	case <-meterTicker.C:
+	// 		nwstat := newNetworkStatus(w.h)
+	// 		w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
+	// 		w.meterUDPConnections.Set(float64(nwstat.connections.udp))
+	// 		w.meterRelayConnections.Set(float64(nwstat.connections.relay))
+	// 		w.meterRelayHopStreams.Set(float64(nwstat.streams.hop))
+	// 		w.meterRelayStopStreams.Set(float64(nwstat.streams.stop))
+	// 		w.meterVerifierStreams.Set(float64(nwstat.streams.verifier))
+	// 		w.meterPeers.Set(float64(w.h.Peerstore().Peers().Len()))
+	// 	}
+	// }
+}
+
+func (w *Node) Stop() {
+	w.h.Close()
+	w.topic.Close()
+	w.sub.Cancel()
 }
 
 func (w *Node) PeerID() peer.ID                  { return w.h.ID() }
@@ -262,7 +265,8 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 	procs := &sync.Map{}
 
 	for {
-		peer, msg, err := subscribe(ctx, w.sub, w.h.ID())
+		var msg pb.PubSub
+		peer, err := subscribe(ctx, w.sub, w.h.ID(), &msg)
 		if errors.Is(err, context.Canceled) {
 			// worker stopped
 			return
@@ -1052,19 +1056,17 @@ func closeStream(s network.Stream) {
 }
 
 // Publish new message.
-func publish(ctx context.Context, topic *ps.Topic, m *pb.PubSub) error {
+func publish(ctx context.Context, topic *ps.Topic, m proto.Message) error {
 	data, err := proto.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("failed to marshal pubsub message: %w", err)
 	}
-
 	if data, err = compress(data); err != nil {
 		return fmt.Errorf("failed to compress pubsub message: %w", err)
 	}
 	if err := topic.Publish(ctx, data); err != nil {
 		return fmt.Errorf("failed to publish message: %w", err)
 	}
-
 	return nil
 }
 
@@ -1074,27 +1076,27 @@ func subscribe(
 	ctx context.Context,
 	sub *ps.Subscription,
 	self peer.ID,
-) (peer.ID, *pb.PubSub, error) {
+	msg proto.Message,
+) (peer.ID, error) {
 	recv, err := sub.Next(ctx)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to subscribe pubsub message: %w", err)
+		return "", fmt.Errorf("failed to subscribe pubsub message: %w", err)
 	}
 
 	if recv.ReceivedFrom == self || recv.GetFrom() == self {
-		return "", nil, errSelfMessage
+		return "", errSelfMessage
 	}
 
 	data, err := decompress(recv.Data)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to decompress pubsub message: %w", err)
+		return "", fmt.Errorf("failed to decompress pubsub message: %w", err)
 	}
 
-	var m pb.PubSub
-	if err = proto.Unmarshal(data, &m); err != nil {
-		return "", nil, fmt.Errorf("failed to unmarshal pubsub message: %w", err)
+	if err = proto.Unmarshal(data, msg); err != nil {
+		return "", fmt.Errorf("failed to unmarshal pubsub message: %w", err)
 	}
 
-	return recv.GetFrom(), &m, nil
+	return recv.GetFrom(), nil
 }
 
 func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error {

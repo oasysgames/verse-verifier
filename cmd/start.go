@@ -425,7 +425,10 @@ func (s *server) setupSubmitter() {
 		return
 	}
 
-	s.submitter = submitter.NewSubmitter(&s.conf.Submitter, s.db, s.smcache)
+	var err error
+	if s.submitter, err = submitter.NewSubmitter(&s.conf.Submitter, s.db, nil, s.smcache, s.signers, s.hub, s.conf.HubLayer.ChainID); err != nil {
+		log.Crit("Failed to construct Submitter", "err", err)
+	}
 }
 
 func (s *server) startSubmitter(ctx context.Context) {
@@ -436,6 +439,30 @@ func (s *server) startSubmitter(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
+		// // Add rollup submission tasks which are in the configuration
+		// for _, tg := range s.conf.Submitter.Targets {
+		// 	signer, ok := s.signers[tg.Wallet]
+		// 	if !ok {
+		// 		log.Error("Wallet for the Submitter not found", "wallet", tg.Wallet)
+		// 		continue
+		// 	}
+
+		// 	var (
+		// 		l1Signer       = ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
+		// 		factory        verse.VerseFactory
+		// 		verifyContract common.Address
+		// 	)
+		// 	if tg.IsLegacy {
+		// 		factory = verse.NewOPLegacy
+		// 		verifyContract = common.HexToAddress(s.conf.Submitter.SCCVerifierAddress)
+		// 	} else {
+		// 		factory = verse.NewOPStack
+		// 		verifyContract = common.HexToAddress(s.conf.Submitter.L2OOVerifierAddress)
+		// 	}
+		// 	verse := factory(s.db, s.hub, common.HexToAddress(tg.VerifyContract))
+		// 	s.submitter.AddTask(verse.WithTransactable(l1Signer, verifyContract))
+		// }
 
 		s.submitter.Start(ctx)
 		log.Info("Submitter has stopped, decrement wait group")

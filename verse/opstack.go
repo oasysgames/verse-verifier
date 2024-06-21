@@ -121,6 +121,10 @@ func (op *transactableOPStack) Transact(
 	)
 }
 
+func (op *opstack) IsLegacy() bool {
+	return false
+}
+
 func findOutputProposed(
 	ctx context.Context,
 	lo *l2oo.OasysL2OutputOracle,

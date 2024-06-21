@@ -43,7 +43,8 @@ func (s *SubmitterTestSuite) SetupTest() {
 	}
 
 	// Setup submitter
-	s.submitter = NewSubmitter(&config.Submitter{
+	var err error
+	s.submitter, err = NewSubmitter(&config.Submitter{
 		Interval:         0,
 		Concurrency:      0,
 		Confirmations:    0,
@@ -52,7 +53,8 @@ func (s *SubmitterTestSuite) SetupTest() {
 		MaxGas:           500_000_000,
 		UseMulticall:     true, // TODO
 		MulticallAddress: s.MulticallAddr.String(),
-	}, s.DB, stakemanager.NewCache(s.StakeManager))
+	}, s.DB, nil, stakemanager.NewCache(s.StakeManager), nil, nil, 0)
+	s.Require().NoError(err)
 
 	s.task = verse.
 		NewOPLegacy(s.DB, s.Hub, s.SCCAddr).

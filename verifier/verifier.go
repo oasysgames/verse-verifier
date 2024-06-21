@@ -11,6 +11,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
+	pb "github.com/oasysgames/oasys-optimism-verifier/proto/p2p/v2/gen"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 )
@@ -41,6 +42,25 @@ func NewVerifier(
 		log:      log.New("worker", "verifier"),
 		wg:       util.NewWorkerGroup(cfg.Concurrency),
 		running:  &sync.Map{},
+	}
+}
+
+func (w *Verifier) Start(ctx context.Context, subscReqC chan *pb.ReqSubmitterTopicSub, sigReqC chan *pb.ReqOptimismSignature) {
+	w.log.Info("Start verifier")
+	go w.start(ctx, subscReqC, sigReqC)
+}
+
+func (w *Verifier) start(ctx context.Context, subscReqC chan *pb.ReqSubmitterTopicSub, sigReqC chan *pb.ReqOptimismSignature) {
+	for {
+		select {
+		case <-ctx.Done():
+			w.log.Info("Verifier is stopped")
+			return
+		case req := <-subscReqC:
+
+		case req := <-sigReqC:
+			w.handleSignatureRequest(ctx, req)
+		}
 	}
 }
 
@@ -96,6 +116,59 @@ func (w *Verifier) Work(ctx context.Context) {
 		w.wg.Enqueue(workerID, task)
 		return true
 	})
+}
+
+func (w *Verifier) cleanOptimismSignatures(contract common.Address, highestVerifiedIndex uint64) {
+	// TODO: remove magic number 32
+	// Keep alredy verified signatures for 32 rollup indexes, to support read/write enabled versions.
+	var deleteIndex uint64
+	if highestVerifiedIndex > 32 {
+		deleteIndex = highestVerifiedIndex - 32
+	}
+	if _, err := w.db.OPSignature.DeleteOlds(contract, deleteIndex); err != nil {
+		w.log.Error("Failed to delete old signatures", "err", err)
+	}
+	w.log.Debug("Deleted old signatures", "contract", contract.Hex(), "delete-index", deleteIndex)
+}
+
+func (w *Verifier) handleSignatureRequest(ctx context.Context, req *pb.ReqOptimismSignature) {
+	log := w.log.New("req", req)
+	log.Info("Handle signature request")
+
+	// Delete old signatures
+	w.cleanOptimismSignatures(common.BytesToAddress(req.Contract), req.HighestVerifiedIndex)
+
+	signer := w.l1Signer.Signer()
+	contract := common.HexToAddress(req.Contract)
+	rollupIndex := req.RollupIndex
+
+	sigs, err := w.db.OPSignature.Find(nil, &signer, &contract, &rollupIndex, 1, 0)
+	if err != nil {
+		log.Error("Failed to find signatures", "err", err)
+		return
+	} else if len(sigs) == 0 {
+		log.Debug("No signature")
+		return
+	}
+
+	log.Debug("Found signature", "signature", sigs[0].Signature.Hex())
+
+	msg := database.NewMessage(&database.RollupEvent{
+		Contract:    contract,
+		RollupIndex: rollupIndex,
+		RollupHash:  common.Hash{},
+		Approve:     true,
+		ChainID:     w.l1Signer.ChainID(),
+	}, w.l1Signer.ChainID(), true)
+	if err := msg.VerifySigner(sigs[0].Signature[:], signer); err != nil {
+		log.Error("Failed to verify signature", "err", err)
+		return
+	}
+
+	res := &pb.ResOptimismSignature{
+		Signature: sigs[0].Signature.Hex(),
+	}
+	req.ResCh <- res
 }
 
 func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse) {

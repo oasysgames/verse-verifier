@@ -166,6 +166,10 @@ func (op *transactableOPLegacy) Transact(
 	)
 }
 
+func (op *oplegacy) IsLegacy() bool {
+	return true
+}
+
 var (
 	// See: https://github.com/oasysgames/oasys-optimism/blob/134491cc2cd9ec588bbaad7697beaf74deddece7/packages/contracts/contracts/libraries/utils/Lib_MerkleTree.sol#L29-L46
 	merkleDefaults    []common.Hash

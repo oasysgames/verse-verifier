@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -74,9 +75,12 @@ func Defaults() map[string]interface{} {
 		"verifier.db_optimize_interval":     time.Hour,
 		"verifier.prune_rollup_index_depth": 4096,
 
-		"submitter.interval":              15 * time.Second,
+		// The minimum interval for Verse v0 is 15 seconds.
+		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
+		// Balance the two by setting the default to 30 seconds.
+		"submitter.interval":              30 * time.Second,
 		"submitter.concurrency":           50,
-		"submitter.confirmations":         6,
+		"submitter.confirmations":         3, // 3 confirmations are enough for the current L1.
 		"submitter.gas_multiplier":        1.1,
 		"submitter.batch_size":            20,
 		"submitter.max_gas":               5_000_000,
@@ -152,7 +156,26 @@ func MustNewDefaultConfig() *Config {
 }
 
 func Validate(conf *Config) error {
-	return validate.Struct(conf)
+	if err := validate.Struct(conf); err != nil {
+		return err
+	}
+	if conf.Submitter.Enable {
+		if len(conf.Submitter.Targets) == 0 {
+			return errors.New("submitter.targets must be set")
+		}
+		for _, target := range conf.Submitter.Targets {
+			if target.Wallet == "" {
+				return errors.New("submitter.targets.wallet must be set")
+			}
+			if target.RPC == "" {
+				return errors.New("submitter.targets.rpc must be set")
+			}
+			if target.VerifyContract == "" {
+				return errors.New("submitter.targets.verify_contract must be set")
+			}
+		}
+	}
+	return nil
 }
 
 // App configuration.
@@ -423,6 +446,15 @@ type SubmitterTarget struct {
 
 	// Name of the wallet to send transaction.
 	Wallet string `validate:"required"`
+
+	// RPC of the Verse (mainnet: replica, testnet: origin)
+	RPC string `validate:"url"`
+
+	// Whether the target chain is a legacy chain.
+	IsLegacy bool `koanf:"is_legacy"`
+
+	// Address of the SCC or L2OO contract.
+	VerifyContract string
 }
 
 func (c *Submitter) MultiplyGas(base uint64) uint64 {
