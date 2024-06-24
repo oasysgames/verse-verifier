@@ -21,6 +21,7 @@ type Verse interface {
 	NextIndex(opts *bind.CallOpts) (*big.Int, error)
 	WithVerifiable(l2Client ethutil.Client) VerifiableVerse
 	WithTransactable(l1Signer ethutil.SignableClient, verifyContract common.Address) TransactableVerse
+	IsLegacy() bool
 }
 
 type VerifiableVerse interface {
@@ -103,6 +104,8 @@ func (v *transactableVerse) Transact(
 ) (*types.Transaction, error) {
 	panic("not implemented")
 }
+
+func (v *verse) IsLegacy() bool { return false }
 
 type VerseFactory func(
 	db *database.Database,

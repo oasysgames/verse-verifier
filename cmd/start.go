@@ -102,7 +102,7 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	// start workers
 	s.startCollector(ctx)
 	s.startVerifier(ctx)
-	s.startSubmitter(ctx)
+	// s.startSubmitter(ctx)
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
 	log.Info("All workers started")
@@ -126,6 +126,10 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	// Shutdown ipc server
 	if s.ipc != nil {
 		s.ipc.Close()
+	}
+	// Shutdown p2p v2 node
+	if s.p2pV2 != nil {
+		s.p2pV2.Close()
 	}
 
 	var (
@@ -156,6 +160,7 @@ type server struct {
 	hub            ethutil.Client
 	smcache        *stakemanager.Cache
 	p2p            *p2p.Node
+	p2pV2          *p2p.Node2
 	blockCollector *collector.BlockCollector
 	eventCollector *collector.EventCollector
 	verifier       *verifier.Verifier
@@ -290,6 +295,13 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 		log.Crit("Failed to construct p2p node", "err", err)
 	}
 
+	if s.conf.P2P.EnableNodeV2 {
+		s.p2pV2, err = p2p.NewNode2(ctx, s.p2p, p2p.WithIsHandlingSignatureRequest(true), p2p.WithIsHandlingPublishedSignatures(true))
+		if err != nil {
+			log.Crit("Failed to construct p2p node v2", "err", err)
+		}
+	}
+
 	ipc.SetHandler(ipccmd.PingCmd.NewHandler(ctx, s.p2p.Host(), s.p2p.HolePunchHelper()))
 	ipc.SetHandler(ipccmd.StatusCmd.NewHandler(s.p2p.Host()))
 
@@ -297,7 +309,11 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	go func() {
 		defer s.wg.Done()
 
-		s.p2p.Start(ctx)
+		if s.conf.P2P.EnableNodeV2 {
+			s.p2pV2.Start(ctx)
+		} else {
+			s.p2p.Start(ctx)
+		}
 		log.Info("P2P node has stopped, decrement wait group")
 	}()
 }
@@ -425,8 +441,11 @@ func (s *server) setupSubmitter() {
 	if !s.conf.Submitter.Enable {
 		return
 	}
+	if !s.conf.P2P.EnableNodeV2 {
+		log.Crit("Submitter requires P2P Node V2")
+	}
 
-	s.submitter = submitter.NewSubmitter(&s.conf.Submitter, s.db, s.smcache)
+	s.submitter = submitter.NewSubmitter(&s.conf.Submitter, s.db, s.p2pV2, s.smcache)
 }
 
 func (s *server) startSubmitter(ctx context.Context) {
@@ -446,7 +465,7 @@ func (s *server) startSubmitter(ctx context.Context) {
 func (s *server) startVerseDiscovery(ctx context.Context) {
 	if s.conf.VerseLayer.Discovery.Endpoint == "" {
 		// read verses from the configuration only, if the discovery endpoint is not set
-		s.verseDiscoveryHandler(s.conf.VerseLayer.Directs)
+		s.verseDiscoveryHandler(ctx, s.conf.VerseLayer.Directs)
 		return
 	}
 
@@ -479,7 +498,7 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 				log.Info("Verse discovery stopped")
 				return
 			case verses := <-sub.Next():
-				s.verseDiscoveryHandler(verses)
+				s.verseDiscoveryHandler(ctx, verses)
 			case <-discTick.C:
 				if err := disc.Work(ctx); err != nil {
 					log.Error("Failed to work verse discovery", "err", err)
@@ -489,7 +508,7 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	}()
 }
 
-func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
+func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.Verse) {
 	if s.verifier == nil && s.submitter == nil {
 		log.Warn("Both Verifier and Submitter are disabled")
 		return
@@ -547,7 +566,8 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 				}
 
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-				s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
+				// s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
+				s.submitter.AddVerse(ctx, x.verse.WithTransactable(l1Signer, x.verify))
 			}
 		}
 	}

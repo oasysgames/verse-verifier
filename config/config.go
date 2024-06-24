@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -62,6 +63,7 @@ func Defaults() map[string]interface{} {
 		"p2p.inbound_limits.concurrency":   10,
 		"p2p.inbound_limits.throttling":    500,
 		"p2p.inbound_limits.max_send_time": 30 * time.Second,
+		"p2p.enable_node_v2":               true,
 
 		"ipc.sockname": "oasvlfy",
 
@@ -73,9 +75,12 @@ func Defaults() map[string]interface{} {
 		"verifier.state_collect_timeout": 15 * time.Second,
 		"verifier.db_optimize_interval":  time.Hour,
 
-		"submitter.interval":              15 * time.Second,
+		// The minimum interval for Verse v0 is 15 seconds.
+		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
+		// Balance the two by setting the default to 30 seconds.
+		"submitter.interval":              30 * time.Second,
 		"submitter.concurrency":           50,
-		"submitter.confirmations":         6,
+		"submitter.confirmations":         3, // 3 confirmations are enough for the current L1.
 		"submitter.gas_multiplier":        1.1,
 		"submitter.batch_size":            20,
 		"submitter.max_gas":               5_000_000,
@@ -151,6 +156,11 @@ func MustNewDefaultConfig() *Config {
 }
 
 func Validate(conf *Config) error {
+	if conf.Verifier.Enable {
+		if conf.P2P.EnableNodeV2 {
+			return fmt.Errorf("verifier not yet supported on v2 node")
+		}
+	}
 	return validate.Struct(conf)
 }
 
@@ -341,6 +351,9 @@ type P2P struct {
 		Loopback  bool
 		Bootnodes []string
 	} `koanf:"experimental_lan_dht"`
+
+	// Enable v2 node.
+	EnableNodeV2 bool `koanf:"enable_node_v2"`
 }
 
 type IPC struct {

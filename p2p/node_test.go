@@ -532,7 +532,8 @@ func (s *NodeTestSuite) TestPublishLatestSignatures() {
 	go func() {
 		defer cancel()
 
-		peerID, m, err := subscribe(ctx, s.node2.sub, s.node2.h.ID())
+		var m pb.PubSub
+		peerID, err := subscribe(ctx, s.node2.sub, s.node2.h.ID(), &m)
 		if err != nil {
 			s.Fail(err.Error())
 		}

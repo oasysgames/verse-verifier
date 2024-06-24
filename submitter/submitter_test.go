@@ -52,7 +52,7 @@ func (s *SubmitterTestSuite) SetupTest() {
 		MaxGas:           500_000_000,
 		UseMulticall:     true, // TODO
 		MulticallAddress: s.MulticallAddr.String(),
-	}, s.DB, stakemanager.NewCache(s.StakeManager))
+	}, s.DB, nil, stakemanager.NewCache(s.StakeManager))
 
 	s.task = verse.
 		NewOPLegacy(s.DB, s.Hub, s.SCCAddr).

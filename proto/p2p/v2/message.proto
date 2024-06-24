@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package message.v2;
+
+option go_package = "./gen";
+
+// NOTE: replace verse discovory to this common topic in the future.
+// Msg body for the common topic.
+message MsgCommonTopic {
+  oneof body {
+    bytes                misc                    = 1;
+    ReqSubmitterTopicSub req_submitter_topic_sub = 2;
+  }
+}
+
+message ReqSubmitterTopicSub {
+  uint64 chain_id = 1;
+  string rpc      = 2;
+  bytes  contract = 3;
+  bool   isLegacy = 4;
+}
+
+// Msg body for the Submitter topic.
+message MsgSubmitterTopic {
+  oneof body {
+    bytes                misc                   = 1;
+    ReqOptimismSignature req_optimism_signature = 2;
+    PubOptimismSignature pub_optimism_signature = 3;
+  }
+}
+
+message ReqOptimismSignature {
+  uint64 rollup_index           = 1;
+  uint64 highest_verified_index = 2;
+  bytes  contract               = 3;
+  bool   isLegacy               = 4;
+}
+
+message PubOptimismSignature {
+  // Publishes a list of signatures the sender has.
+  repeated OptimismSignature signatures = 1;
+}
+
+// Copied from v1/message.proto
+message OptimismSignature {
+  string id           = 1;
+  string previous_id  = 2;
+  bytes  signer       = 3;
+  bytes  contract     = 4;
+  uint64 rollup_index = 5;
+  bytes  rollup_hash  = 6;
+  bool   approved     = 10;
+  bytes  signature    = 11;
+
+  // These are fields that do not exist in OPStack and will be removed.
+  uint64 batch_size          = 7 [deprecated = true];
+  uint64 prev_total_elements = 8 [deprecated = true];
+  bytes  extra_data          = 9 [deprecated = true];
+}

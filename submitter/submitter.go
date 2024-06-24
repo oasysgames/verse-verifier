@@ -1,7 +1,10 @@
 package submitter
 
 import (
+	"errors"
+	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
+	"github.com/oasysgames/oasys-optimism-verifier/p2p"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 	"golang.org/x/net/context"
@@ -25,9 +29,14 @@ const (
 	minTxGas  = 24871      // Multicall minimum gas
 )
 
+var (
+	ErrNoSignatures = errors.New("no signatures")
+)
+
 type Submitter struct {
 	cfg          *config.Submitter
 	db           *database.Database
+	p2p          *p2p.Node2
 	stakemanager *stakemanager.Cache
 	tasks        sync.Map
 	log          log.Logger
@@ -36,11 +45,13 @@ type Submitter struct {
 func NewSubmitter(
 	cfg *config.Submitter,
 	db *database.Database,
+	p2p *p2p.Node2,
 	stakemanager *stakemanager.Cache,
 ) *Submitter {
 	return &Submitter{
 		cfg:          cfg,
 		db:           db,
+		p2p:          p2p,
 		stakemanager: stakemanager,
 		log:          log.New("worker", "submitter"),
 	}
@@ -59,6 +70,67 @@ func (w *Submitter) Start(ctx context.Context) {
 		"use-multicall", w.cfg.UseMulticall,
 		"multicall", w.cfg.MulticallAddress)
 	w.workLoop(ctx)
+}
+
+func (w *Submitter) AddVerse(ctx context.Context, verse verse.TransactableVerse) {
+	// subscribe committer topic to request signatures
+	w.p2p.SubscribeSubmitterTopic(ctx, verse.L1Signer().ChainID().Uint64())
+	// Start submitting loop
+	// 1. Request signatures every interval
+	// 2. Submit verify tx if enough signatures are collected
+	go w.startSubmitter(ctx, verse)
+}
+
+func (w *Submitter) startSubmitter(ctx context.Context, verse verse.TransactableVerse) {
+	var (
+		chainId  = verse.L1Signer().ChainID().Uint64()
+		tick     = time.NewTicker(w.cfg.Interval)
+		contract = verse.RollupContract()
+		isLegacy = verse.IsLegacy()
+	)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			w.log.Info("Submitting work stopped", "chainId", chainId)
+			return
+		case <-tick.C:
+			nextIndex, err := w.work(ctx, verse)
+			if errors.Is(err, ErrNoSignatures) {
+				// Request signatures, as no signatures are found
+				// Means that verification requests are not being sent or not delivered to other peers.
+				w.log.Debug("Requesting signatures", "nextIndex", nextIndex, "chainId", chainId)
+				var highestVerifiedIndex uint64
+				if 0 < nextIndex {
+					// Assume the right before the nextIndex is already verified
+					highestVerifiedIndex = nextIndex - 1
+				}
+				if err := w.p2p.PublishSignatureRequest(ctx, chainId, nextIndex, highestVerifiedIndex, contract[:], isLegacy); err != nil {
+					w.log.Error("Failed to request signatures", "nextIndex", nextIndex, "chainId", chainId, "err", err)
+					// try again
+					continue
+				}
+				if _, err := w.db.OPSignature.DeleteOlds(verse.RollupContract(), highestVerifiedIndex); err != nil {
+					w.log.Warn("Failed to delete old signatures", "nextIndex", nextIndex, "chainId", chainId, "err", err)
+				}
+				// Reset the ticker to shorten the interval to be able to submit verify tx without waiting for the next interval
+				tick.Reset(1 * time.Second)
+				continue
+			} else if strings.Contains(err.Error(), "stake amount shortage") {
+				// Wait until enough signatures are collected
+				w.log.Debug("Waiting for enough signatures", "nextIndex", nextIndex, "chainId", chainId)
+				continue
+			} else if err == nil {
+				// Finally, succeeded to verify the corresponding rollup index, So move to the next index
+				w.log.Debug("Successfully verified the rollup index", "nextIndex", nextIndex, "chainId", chainId)
+				tick.Reset(w.cfg.Interval)
+				continue
+			} else {
+				w.log.Error("Failed to verify the rollup index", "nextIndex", nextIndex, "chainId", chainId, "err", err)
+			}
+		}
+	}
 }
 
 func (w *Submitter) workLoop(ctx context.Context) {
@@ -113,17 +185,30 @@ func (w *Submitter) RemoveTask(contract common.Address) {
 	w.tasks.Delete(contract)
 }
 
-func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) {
+func (w *Submitter) highestUnverifiedIndex(ctx context.Context, verse verse.TransactableVerse) (uint64, error) {
+	latest, err := verse.L1Client().BlockNumber(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch latest block height: %w", err)
+	}
+
+	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
+	confirmedNumber := latest - uint64(w.cfg.Confirmations)
+	nextIndex, err := verse.NextIndex(&bind.CallOpts{Context: ctx, BlockNumber: new(big.Int).SetUint64(confirmedNumber)})
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch next index: %w", err)
+	}
+	return nextIndex.Uint64(), nil
+}
+
+func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) (uint64, error) {
 	log := task.Logger(w.log)
 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	// fetch the next index from hub-layer
-	nextIndex, err := task.NextIndex(&bind.CallOpts{Context: ctx})
+	nextIndex, err := w.highestUnverifiedIndex(ctx, task)
 	if err != nil {
-		log.Error("Failed to get next index", "err", err)
-		return
+		return 0, fmt.Errorf("failed to fetch next index: %w", err)
 	}
 	log = log.New("next-index", nextIndex)
 
@@ -131,7 +216,7 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) {
 		db:           w.db,
 		stakemanager: w.stakemanager,
 		contract:     task.RollupContract(),
-		rollupIndex:  nextIndex.Uint64(),
+		rollupIndex:  nextIndex,
 	}
 
 	var tx *types.Transaction
@@ -142,10 +227,13 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) {
 	}
 
 	if err != nil {
-		log.Error(err.Error())
+		log.Debug(err.Error())
+		return nextIndex, fmt.Errorf("failed to send transaction: %w", err)
 	} else if tx != nil {
 		w.waitForCconfirmation(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
 	}
+
+	return nextIndex, nil
 }
 
 func (w *Submitter) sendNormalTx(
@@ -160,7 +248,7 @@ func (w *Submitter) sendNormalTx(
 		return nil, err
 	} else if len(rows) == 0 {
 		log.Debug("No signatures")
-		return nil, nil
+		return nil, ErrNoSignatures
 	}
 
 	opts := task.L1Signer().TransactOpts(ctx)
@@ -218,19 +306,18 @@ func (w *Submitter) sendMulticallTx(
 	}
 
 	var (
-		calls       []multicall2.Multicall2Call
-		shortageErr *StakeAmountShortage
+		calls []multicall2.Multicall2Call
 	)
 	for i := 0; i < w.cfg.BatchSize; i++ {
 		rows, err := iter.next()
-		if t, ok := err.(*StakeAmountShortage); ok {
-			shortageErr = t
-			break
+		if _, ok := err.(*StakeAmountShortage); ok {
+			return nil, err
 		} else if err != nil {
-			log.Error("Failed to find signatures", "err", err)
+			log.Debug("Failed to find signatures", "err", err)
 			return nil, err
 		} else if len(rows) == 0 {
-			break
+			log.Debug("No signatures")
+			return nil, ErrNoSignatures
 		}
 
 		// build transaction (without sending).
@@ -259,14 +346,6 @@ func (w *Submitter) sendMulticallTx(
 		if !rows[0].Approved {
 			break
 		}
-	}
-	if len(calls) == 0 {
-		if shortageErr != nil {
-			log.Error("No calldata", "err", shortageErr)
-		} else {
-			log.Info("No calldata")
-		}
-		return nil, nil
 	}
 
 	// call estimateGas
