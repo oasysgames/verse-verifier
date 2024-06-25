@@ -55,6 +55,24 @@ func (op *oplegacy) NextIndex(opts *bind.CallOpts) (*big.Int, error) {
 	return sc.NextIndex(opts)
 }
 
+func (op *oplegacy) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
+	var err error
+	if opts.BlockNumber, err = decideConfirmationBlockNumber(opts, confirmation, op.L1Client()); err != nil {
+		if errors.Is(err, ErrNotSufficientConfirmations) && waits {
+			// wait for the next block, then retry
+			time.Sleep(10 * time.Second)
+			return op.NextIndexWithConfirm(opts, confirmation, waits)
+		}
+		return nil, err
+	}
+
+	sc, err := scc.NewScc(op.RollupContract(), op.L1Client())
+	if err != nil {
+		return nil, err
+	}
+	return sc.NextIndex(opts)
+}
+
 func (op *oplegacy) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
 	return &verifiableOPLegacy{&verifiableVerse{op, l2Client}}
 }

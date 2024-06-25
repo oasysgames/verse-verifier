@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -45,6 +46,24 @@ func (op *opstack) EventDB() database.IOPEventDB {
 }
 
 func (op *opstack) NextIndex(opts *bind.CallOpts) (*big.Int, error) {
+	lo, err := l2oo.NewOasysL2OutputOracle(op.RollupContract(), op.L1Client())
+	if err != nil {
+		return nil, err
+	}
+	return lo.NextVerifyIndex(opts)
+}
+
+func (op *opstack) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
+	var err error
+	if opts.BlockNumber, err = decideConfirmationBlockNumber(opts, confirmation, op.L1Client()); err != nil {
+		if errors.Is(err, ErrNotSufficientConfirmations) && waits {
+			// wait for the next block, then retry
+			time.Sleep(10 * time.Second)
+			return op.NextIndexWithConfirm(opts, confirmation, waits)
+		}
+		return nil, err
+	}
+
 	lo, err := l2oo.NewOasysL2OutputOracle(op.RollupContract(), op.L1Client())
 	if err != nil {
 		return nil, err
