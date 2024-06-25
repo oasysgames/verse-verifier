@@ -205,7 +205,7 @@ func (db *OptimismSignatureDB) Save(
 	return &created, nil
 }
 
-// Delete signatures after the specified rollup index.
+// Delete signatures after the specified rollup index by signer.
 func (db *OptimismSignatureDB) Deletes(
 	signer common.Address,
 	contract common.Address,
@@ -220,6 +220,40 @@ func (db *OptimismSignatureDB) Deletes(
 			Joins("Contract").
 			Where("Signer.address = ? AND Contract.address = ?", signer, contract).
 			Where("optimism_signatures.batch_index >= ?", rollupIndex).
+			Pluck("optimism_signatures.id", &ids)
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		tx = s.Where("id IN (?)", ids).Delete(&OptimismSignature{})
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		affected = tx.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return -1, err
+	}
+
+	return affected, nil
+}
+
+// Delete signatures after the specified rollup index.
+func (db *OptimismSignatureDB) DeleteOlds(
+	contract common.Address,
+	rollupIndex uint64,
+) (int64, error) {
+	var affected int64
+	err := db.rawdb.Transaction(func(s *gorm.DB) error {
+		var ids []string
+		tx := s.
+			Model(&OptimismSignature{}).
+			Joins("Signer").
+			Joins("Contract").
+			Where("Contract.address = ?", contract).
+			Where("optimism_signatures.batch_index <= ?", rollupIndex).
 			Pluck("optimism_signatures.id", &ids)
 		if tx.Error != nil {
 			return tx.Error

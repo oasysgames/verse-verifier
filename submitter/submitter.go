@@ -1,7 +1,10 @@
 package submitter
 
 import (
+	"errors"
+	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +28,10 @@ const (
 	minTxGas  = 24871      // Multicall minimum gas
 )
 
+var (
+	ErrNoSignatures = errors.New("no signatures")
+)
+
 type Submitter struct {
 	cfg          *config.Submitter
 	db           *database.Database
@@ -46,6 +53,7 @@ func NewSubmitter(
 	}
 }
 
+// Deprecated
 func (w *Submitter) Start(ctx context.Context) {
 	w.log.Info("Submitter started",
 		"interval", w.cfg.Interval,
@@ -61,6 +69,72 @@ func (w *Submitter) Start(ctx context.Context) {
 	w.workLoop(ctx)
 }
 
+func (w *Submitter) AddVerse(ctx context.Context, verse verse.TransactableVerse) {
+	// Start submitting loop
+	// 1. Request signatures every interval
+	// 2. Submit verify tx if enough signatures are collected
+	go w.startSubmitter(ctx, verse)
+}
+
+func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVerse) {
+	var (
+		chainId = v.L1Signer().ChainID().Uint64()
+		tick    = time.NewTicker(w.cfg.Interval)
+	)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			w.log.Info("Submitting work stopped", "chainId", chainId)
+			return
+		case <-tick.C:
+			nextIndex, err := w.work(ctx, v)
+			if errors.Is(err, verse.ErrNotSufficientConfirmations) {
+				w.log.Info("Not enough confirmations", "nextIndex", nextIndex, "chainId", chainId)
+				continue
+			} else if errors.Is(err, ErrNoSignatures) {
+				w.log.Info("No signatures", "nextIndex", nextIndex, "chainId", chainId)
+				// Reset the ticker to the original interval
+				tick.Reset(w.cfg.Interval)
+				continue
+			} else if err != nil && strings.Contains(err.Error(), "stake amount shortage") {
+				// Wait until enough signatures are collected
+				w.log.Info("Waiting for enough signatures", "nextIndex", nextIndex, "chainId", chainId)
+				// Reset the ticker to shorten the interval to be able to submit verify tx without waiting for the next interval
+				tick.Reset(w.cfg.Interval / 10)
+				continue
+			} else if err == nil {
+				// Finally, succeeded to verify the corresponding rollup index, So move to the next index
+				verifiedIndex := nextIndex
+				w.log.Info("Successfully verified the rollup index", "verifiedIndex", verifiedIndex, "chainId", chainId)
+				// Clean up old signatures
+				if err := w.cleanOldSignatures(v.RollupContract(), verifiedIndex); err != nil {
+					w.log.Warn("Failed to delete old signatures", "verifiedIndex", verifiedIndex, "chainId", chainId, "err", err)
+				}
+				// Reset the ticker to the original interval
+				tick.Reset(w.cfg.Interval)
+				continue
+			} else {
+				w.log.Error("Failed to verify the rollup index", "nextIndex", nextIndex, "chainId", chainId, "err", err)
+			}
+		}
+	}
+}
+
+func (w *Submitter) cleanOldSignatures(contract common.Address, verifiedIndex uint64) error {
+	if verifiedIndex == 0 {
+		return nil
+	}
+	// Just keep the last verified index
+	deleteIndex := uint64(verifiedIndex - 1)
+	if _, err := w.db.OPSignature.DeleteOlds(contract, deleteIndex); err != nil {
+		return fmt.Errorf("failed to delete old signatures. deleteIndex: %d, : %w", deleteIndex, err)
+	}
+	return nil
+}
+
+// Deprecated
 func (w *Submitter) workLoop(ctx context.Context) {
 	wg := util.NewWorkerGroup(w.cfg.Concurrency)
 	running := &sync.Map{}
@@ -113,17 +187,16 @@ func (w *Submitter) RemoveTask(contract common.Address) {
 	w.tasks.Delete(contract)
 }
 
-func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) {
+func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) (uint64, error) {
 	log := task.Logger(w.log)
 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	// fetch the next index from hub-layer
-	nextIndex, err := task.NextIndex(&bind.CallOpts{Context: ctx})
+	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
+	nextIndex, err := task.NextIndexWithConfirm(&bind.CallOpts{Context: ctx}, uint64(w.cfg.Confirmations), false)
 	if err != nil {
-		log.Error("Failed to get next index", "err", err)
-		return
+		return 0, fmt.Errorf("failed to fetch next index: %w", err)
 	}
 	log = log.New("next-index", nextIndex)
 
@@ -142,10 +215,15 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) {
 	}
 
 	if err != nil {
-		log.Error(err.Error())
+		log.Debug(err.Error())
+		return nextIndex.Uint64(), fmt.Errorf("failed to send transaction: %w", err)
 	} else if tx != nil {
-		w.waitForCconfirmation(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
+		// Skip waiting for confirmation. if sent tx is failed, it will be re-sent in the next interval.
+		// w.waitForConfirmation(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
+		w.waitForReceipt(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
 	}
+
+	return nextIndex.Uint64(), nil
 }
 
 func (w *Submitter) sendNormalTx(
@@ -160,7 +238,7 @@ func (w *Submitter) sendNormalTx(
 		return nil, err
 	} else if len(rows) == 0 {
 		log.Debug("No signatures")
-		return nil, nil
+		return nil, ErrNoSignatures
 	}
 
 	opts := task.L1Signer().TransactOpts(ctx)
@@ -219,15 +297,15 @@ func (w *Submitter) sendMulticallTx(
 
 	var (
 		calls       []multicall2.Multicall2Call
-		shortageErr *StakeAmountShortage
+		errShortage error
 	)
 	for i := 0; i < w.cfg.BatchSize; i++ {
 		rows, err := iter.next()
-		if t, ok := err.(*StakeAmountShortage); ok {
-			shortageErr = t
+		if _, ok := err.(*StakeAmountShortage); ok {
+			errShortage = err
 			break
 		} else if err != nil {
-			log.Error("Failed to find signatures", "err", err)
+			log.Debug("Failed to find signatures", "err", err)
 			return nil, err
 		} else if len(rows) == 0 {
 			break
@@ -261,12 +339,12 @@ func (w *Submitter) sendMulticallTx(
 		}
 	}
 	if len(calls) == 0 {
-		if shortageErr != nil {
-			log.Error("No calldata", "err", shortageErr)
-		} else {
-			log.Info("No calldata")
+		if errShortage != nil {
+			log.Debug("No calldata", "err", errShortage)
+			return nil, errShortage
 		}
-		return nil, nil
+		log.Debug("No calldata")
+		return nil, ErrNoSignatures
 	}
 
 	// call estimateGas
@@ -315,7 +393,7 @@ func (w *Submitter) sendMulticallTx(
 	return tx, nil
 }
 
-func (w *Submitter) waitForCconfirmation(
+func (w *Submitter) waitForConfirmation(
 	log log.Logger,
 	ctx context.Context,
 	l1Client ethutil.SignableClient,
@@ -350,6 +428,24 @@ func (w *Submitter) waitForCconfirmation(
 			continue
 		}
 		confirmed[h.Hash()] = true
+	}
+}
+
+func (w *Submitter) waitForReceipt(
+	log log.Logger,
+	ctx context.Context,
+	l1Client ethutil.SignableClient,
+	tx *types.Transaction,
+) {
+	// wait for block to be validated
+	receipt, err := bind.WaitMined(ctx, l1Client, tx)
+	if err != nil {
+		log.Error("Failed to receive receipt", "err", err)
+		return
+	}
+	if receipt.Status != 1 {
+		log.Error("Transaction reverted")
+		return
 	}
 }
 
