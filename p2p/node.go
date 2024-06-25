@@ -253,7 +253,8 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 	procs := &sync.Map{}
 
 	for {
-		peer, msg, err := subscribe(ctx, w.sub, w.h.ID())
+		var msg pb.PubSub
+		peer, err := subscribe(ctx, w.sub, w.h.ID(), &msg)
 		if errors.Is(err, context.Canceled) {
 			// worker stopped
 			return
@@ -290,7 +291,7 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 					procs.Store(rname, job)
 					defer procs.Delete(rname)
 
-					w.handleOptimismSignatureExchangeFromPubSub(job.ctx, job.peer, job.remote)
+					w.handleOptimismSignatureExchangeFromPubSub2(job.ctx, job.peer, job.remote)
 					w.meterPubsubJobs.Decr()
 				})
 				w.meterPubsubWorkers.Incr()
@@ -472,6 +473,55 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	}
 
 	w.handleOptimismSignatureExchangeResponses(ctx, s)
+}
+
+func (w *Node) handleOptimismSignatureExchangeFromPubSub2(
+	ctx context.Context,
+	sender peer.ID,
+	remote *pb.OptimismSignature,
+) bool {
+	signer := common.BytesToAddress(remote.Signer)
+	logctx := []interface{}{
+		"peer", sender,
+		"signer", signer,
+		"remote-latest-id", remote.Id,
+		"remote-latest-previous-id", remote.PreviousId,
+		"remote-latest-index", remote.RollupIndex,
+	}
+
+	if err := verifySignature(w.hubLayerChainID, remote); err != nil {
+		w.log.Error("Invalid signature", append(logctx, "err", err)...)
+		return false
+	}
+
+	local, err := w.db.OPSignature.FindLatestsBySigner(signer, 1, 0)
+	if err != nil {
+		w.log.Error("Failed to find the latest signature", append(logctx, "err", err)...)
+		return false
+	} else if len(local) > 0 && local[0].PreviousID == remote.PreviousId {
+		// duplicated
+		return false
+	} else if len(local) > 0 && strings.Compare(local[0].ID, remote.Id) == 1 {
+		// fully synchronized or less than local
+		w.log.Debug("Skip already possess signature", append(logctx, "local-latest-id", local[0].ID)...)
+		return false
+	}
+
+	// save signature
+	if _, err := w.db.OPSignature.Save(
+		&remote.Id, &remote.PreviousId,
+		signer,
+		common.BytesToAddress(remote.Contract),
+		remote.RollupIndex,
+		common.BytesToHash(remote.RollupHash),
+		remote.Approved,
+		database.BytesSignature(remote.Signature),
+	); err != nil {
+		w.log.Error("Failed to save signature", append(logctx, "err", err)...)
+		return false
+	}
+
+	return true
 }
 
 func (w *Node) handleOptimismSignatureExchangeRequest(
@@ -992,7 +1042,7 @@ func closeStream(s network.Stream) {
 }
 
 // Publish new message.
-func publish(ctx context.Context, topic *ps.Topic, m *pb.PubSub) error {
+func publish(ctx context.Context, topic *ps.Topic, m proto.Message) error {
 	data, err := proto.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("failed to marshal pubsub message: %w", err)
@@ -1014,27 +1064,27 @@ func subscribe(
 	ctx context.Context,
 	sub *ps.Subscription,
 	self peer.ID,
-) (peer.ID, *pb.PubSub, error) {
+	msg proto.Message,
+) (peer.ID, error) {
 	recv, err := sub.Next(ctx)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to subscribe pubsub message: %w", err)
+		return "", fmt.Errorf("failed to subscribe pubsub message: %w", err)
 	}
 
 	if recv.ReceivedFrom == self || recv.GetFrom() == self {
-		return "", nil, errSelfMessage
+		return "", errSelfMessage
 	}
 
 	data, err := decompress(recv.Data)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to decompress pubsub message: %w", err)
+		return "", fmt.Errorf("failed to decompress pubsub message: %w", err)
 	}
 
-	var m pb.PubSub
-	if err = proto.Unmarshal(data, &m); err != nil {
-		return "", nil, fmt.Errorf("failed to unmarshal pubsub message: %w", err)
+	if err = proto.Unmarshal(data, msg); err != nil {
+		return "", fmt.Errorf("failed to unmarshal pubsub message: %w", err)
 	}
 
-	return recv.GetFrom(), &m, nil
+	return recv.GetFrom(), nil
 }
 
 func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error {

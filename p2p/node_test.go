@@ -303,6 +303,25 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
 	s.NotNil(gots15)
 }
 
+func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub2() {
+	// succeed to save signature
+	msg := toProtoBufSig(s.sigs[s.signer0][s.contract0][49])
+	saved := s.node2.handleOptimismSignatureExchangeFromPubSub2(context.Background(), s.node1.h.ID(), msg)
+	s.True(saved)
+	got, err := s.node2.db.OPSignature.FindByID(msg.Id)
+	s.NoError(err)
+	s.Equal(msg.Id, got.ID)
+
+	// saving duplicate signature
+	saved = s.node2.handleOptimismSignatureExchangeFromPubSub2(context.Background(), s.node1.h.ID(), msg)
+	s.False(saved)
+
+	// saving too old signature (no pruneRollupIndexDepth)
+	msg = toProtoBufSig(s.sigs[s.signer0][s.contract0][0])
+	saved = s.node2.handleOptimismSignatureExchangeFromPubSub2(context.Background(), s.node1.h.ID(), msg)
+	s.False(saved)
+}
+
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
 	wantss := [][]struct {
 		signer       common.Address
@@ -532,7 +551,8 @@ func (s *NodeTestSuite) TestPublishLatestSignatures() {
 	go func() {
 		defer cancel()
 
-		peerID, m, err := subscribe(ctx, s.node2.sub, s.node2.h.ID())
+		var m pb.PubSub
+		peerID, err := subscribe(ctx, s.node2.sub, s.node2.h.ID(), &m)
 		if err != nil {
 			s.Fail(err.Error())
 		}
