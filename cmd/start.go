@@ -102,7 +102,8 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	// start workers
 	s.startCollector(ctx)
 	s.startVerifier(ctx)
-	s.startSubmitter(ctx)
+	// Submission starts whenever the verse is discovered
+	// s.startSubmitter(ctx)
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
 	log.Info("All workers started")
@@ -446,7 +447,7 @@ func (s *server) startSubmitter(ctx context.Context) {
 func (s *server) startVerseDiscovery(ctx context.Context) {
 	if s.conf.VerseLayer.Discovery.Endpoint == "" {
 		// read verses from the configuration only, if the discovery endpoint is not set
-		s.verseDiscoveryHandler(s.conf.VerseLayer.Directs)
+		s.verseDiscoveryHandler(ctx, s.conf.VerseLayer.Directs)
 		return
 	}
 
@@ -479,7 +480,7 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 				log.Info("Verse discovery stopped")
 				return
 			case verses := <-sub.Next():
-				s.verseDiscoveryHandler(verses)
+				s.verseDiscoveryHandler(ctx, verses)
 			case <-discTick.C:
 				if err := disc.Work(ctx); err != nil {
 					log.Error("Failed to work verse discovery", "err", err)
@@ -489,7 +490,7 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	}()
 }
 
-func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
+func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.Verse) {
 	if s.verifier == nil && s.submitter == nil {
 		log.Warn("Both Verifier and Submitter are disabled")
 		return
@@ -547,7 +548,8 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 				}
 
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-				s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
+				// s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
+				s.submitter.AddVerse(ctx, x.verse.WithTransactable(l1Signer, x.verify))
 			}
 		}
 	}
