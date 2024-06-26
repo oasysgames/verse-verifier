@@ -57,11 +57,11 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigFromYAML() {
 			address: '0xD244F03CA3e99C6093f6cBEFBD2f4508244C59D4'
 			password: %s
 			plain: '0xebf3a7f5f805e02c0bbbd599acd5c881f40db22caa95127d4bf48e2dde5fd7bb'
-	
+
 	hub_layer:
 		chain_id: 1
 		rpc: https://rpc.hub.example.com/
-	
+
 	verse_layer:
 		discovery:
 			endpoint: https://discovery.example.com/
@@ -71,7 +71,7 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigFromYAML() {
 			  l1_contracts:
 			    StateCommitmentChain: '0x01E901F3c65fA7CBd4505F5eF3A88e4ce432e4B5'
 			    L2OutputOracle: '0x2489317FA6e003550111D5D196302Ba0879354e2'
-	
+
 	p2p:
 		listens:
 			- listen0
@@ -92,7 +92,7 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigFromYAML() {
 	verifier:
 		enable: true
 		wallet: verifier
-	
+
 	submitter:
 		enable: true
 		confirmations: 10
@@ -336,6 +336,7 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 			StateCollectLimit:   defaults["verifier.state_collect_limit"].(int),
 			StateCollectTimeout: defaults["verifier.state_collect_timeout"].(time.Duration),
 			OptimizeInterval:    defaults["verifier.db_optimize_interval"].(time.Duration),
+			Confirmations:       defaults["verifier.confirmations"].(int),
 		},
 		Submitter: config.Submitter{
 			Enable:              false,
