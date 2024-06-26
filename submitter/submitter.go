@@ -78,8 +78,16 @@ func (w *Submitter) AddVerse(ctx context.Context, verse verse.TransactableVerse)
 
 func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVerse) {
 	var (
-		chainId = v.L1Signer().ChainID().Uint64()
-		tick    = time.NewTicker(w.cfg.Interval)
+		chainId       = v.L1Signer().ChainID().Uint64()
+		tick          = time.NewTicker(w.cfg.Interval)
+		duration      = w.cfg.Interval
+		resetDuration = func(target time.Duration) {
+			if duration == target {
+				return
+			}
+			duration = target
+			tick.Reset(duration)
+		}
 	)
 	defer tick.Stop()
 
@@ -96,13 +104,13 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 			} else if errors.Is(err, ErrNoSignatures) {
 				w.log.Info("No signatures", "nextIndex", nextIndex, "chainId", chainId)
 				// Reset the ticker to the original interval
-				tick.Reset(w.cfg.Interval)
+				resetDuration(w.cfg.Interval)
 				continue
 			} else if err != nil && strings.Contains(err.Error(), "stake amount shortage") {
 				// Wait until enough signatures are collected
 				w.log.Info("Waiting for enough signatures", "nextIndex", nextIndex, "chainId", chainId)
 				// Reset the ticker to shorten the interval to be able to submit verify tx without waiting for the next interval
-				tick.Reset(w.cfg.Interval / 10)
+				resetDuration(w.cfg.Interval / 10)
 				continue
 			} else if err == nil {
 				// Finally, succeeded to verify the corresponding rollup index, So move to the next index
@@ -113,7 +121,7 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 					w.log.Warn("Failed to delete old signatures", "verifiedIndex", verifiedIndex, "chainId", chainId, "err", err)
 				}
 				// Reset the ticker to the original interval
-				tick.Reset(w.cfg.Interval)
+				resetDuration(w.cfg.Interval)
 				continue
 			} else {
 				w.log.Error("Failed to verify the rollup index", "nextIndex", nextIndex, "chainId", chainId, "err", err)
