@@ -39,6 +39,7 @@ func (s *VerifierTestSuite) SetupTest() {
 		Concurrency:         10,
 		StateCollectLimit:   3,
 		StateCollectTimeout: time.Second,
+		Confirmations:       2,
 	}, s.DB, s.SignableHub)
 
 	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)
@@ -168,6 +169,10 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 		)
 		s.SignableHub.Commit()
 	}
+	// Confirm blocks
+	for i := 0; i < s.verifier.cfg.Confirmations; i++ {
+		s.Hub.Mining()
+	}
 
 	// run `deleteInvalidSignature`, but nothing happens
 	s.Len(s.waitPublished(1), 0)
@@ -175,12 +180,18 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 	signer := s.SignableHub.Signer()
 	contract := s.task.RollupContract()
 	gots, _ := s.DB.OPSignature.Find(nil, &signer, &contract, nil, 100, 0)
-	s.Equal(len(batches), len(gots))
+	// Make sure more than 3 depth older signature is cleaned up
+	deletedBatches := invalidBatch - 3
+	s.Equal(len(batches)-deletedBatches, len(gots))
 
 	for batchIdx := range batches {
+		if batchIdx < deletedBatches {
+			continue
+		}
+		i := batchIdx - deletedBatches
 		// should not be re-created
-		s.Equal(createds[batchIdx].ID, gots[batchIdx].ID)
-		s.Equal(createds[batchIdx].Signature, gots[batchIdx].Signature)
+		s.Equal(createds[batchIdx].ID, gots[i].ID)
+		s.Equal(createds[batchIdx].Signature, gots[i].Signature)
 	}
 
 	// update to invalid signature
@@ -198,16 +209,20 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 	s.Len(s.waitPublished(len(batches)-invalidBatch), len(batches)-invalidBatch)
 
 	gots, _ = s.DB.OPSignature.Find(nil, &signer, &contract, nil, 100, 0)
-	s.Equal(len(batches), len(gots))
+	s.Equal(len(batches)-deletedBatches, len(gots))
 
 	for batchIdx := range batches {
+		if batchIdx < deletedBatches {
+			continue
+		}
+		i := batchIdx - deletedBatches
 		if batchIdx < invalidBatch {
-			s.Equal(createds[batchIdx].ID, gots[batchIdx].ID)
+			s.Equal(createds[batchIdx].ID, gots[i].ID)
 		} else {
 			// should be re-created
-			s.NotEqual(createds[batchIdx].ID, gots[batchIdx].ID)
+			s.NotEqual(createds[batchIdx].ID, gots[i].ID)
 		}
-		s.Equal(createds[batchIdx].Signature, gots[batchIdx].Signature)
+		s.Equal(createds[batchIdx].Signature, gots[i].Signature)
 	}
 }
 
