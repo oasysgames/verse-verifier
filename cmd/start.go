@@ -220,7 +220,10 @@ func (s *server) mustStartMetrics(ctx context.Context) {
 	go func() {
 		// NOTE: Don't add wait group, as no need to guarantee the completion
 		if err := metrics.ListenAndServe(ctx, s.msvr); err != nil {
-			log.Crit("Failed to start metrics server", "err", err)
+			// `ErrServerClosed` is thrown when `Shutdown` is intentionally called
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Crit("Failed to start metrics server", "err", err)
+			}
 		}
 		log.Info("Metrics server have exited listening", "addr", s.conf.Metrics.Listen)
 	}()
@@ -237,7 +240,10 @@ func (s *server) mustStartPprof(ctx context.Context) {
 	go func() {
 		// NOTE: Don't add wait group, as no need to guarantee the completion
 		if err := ps.ListenAndServe(ctx, s.psvr); err != nil {
-			log.Crit("Failed to start pprof server", "err", err)
+			// `ErrServerClosed` is thrown when `Shutdown` is intentionally called
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Crit("Failed to start pprof server", "err", err)
+			}
 		}
 		log.Info("pprof server have exited listening", "addr", s.conf.Debug.Pprof.Listen)
 	}()

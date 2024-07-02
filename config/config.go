@@ -72,14 +72,14 @@ func Defaults() map[string]interface{} {
 		"verifier.state_collect_limit":   1000,
 		"verifier.state_collect_timeout": 15 * time.Second,
 		"verifier.db_optimize_interval":  time.Hour,
-		"verifier.confirmations":         3, // 3 confirmations are enough for the current L1.
+		"verifier.confirmations":         3, // 3 confirmations are enough for later than v1.3.0 L1.
 
 		// The minimum interval for Verse v0 is 15 seconds.
 		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
 		// Balance the two by setting the default to 30 seconds.
 		"submitter.interval":              30 * time.Second,
 		"submitter.concurrency":           50,
-		"submitter.confirmations":         3, // 3 confirmations are enough for the current L1.
+		"submitter.confirmations":         3, // 3 confirmations are enough for later than v1.3.0 L1.
 		"submitter.gas_multiplier":        1.1,
 		"submitter.batch_size":            20,
 		"submitter.max_gas":               5_000_000,
