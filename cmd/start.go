@@ -479,9 +479,7 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 			log.Info("Verse discovery has stopped, decrement wait group")
 		}()
 
-		// The first tick is immediate
-		isFirstTick := true
-		discTick := time.NewTicker(0)
+		discTick := time.NewTicker(s.conf.VerseLayer.Discovery.RefreshInterval)
 		defer discTick.Stop()
 
 		// Subscribed verses to verifier and submitter
@@ -497,11 +495,6 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 				return
 			case verses := <-sub.Next():
 				s.verseDiscoveryHandler(ctx, verses)
-				if isFirstTick {
-					// From second tick, the interval is used
-					discTick.Reset(s.conf.VerseLayer.Discovery.RefreshInterval)
-					isFirstTick = false
-				}
 			case <-discTick.C:
 				if err := disc.Work(ctx); err != nil {
 					log.Error("Failed to work verse discovery", "err", err)
