@@ -451,9 +451,13 @@ func (s *server) startSubmitter(ctx context.Context) {
 }
 
 func (s *server) startVerseDiscovery(ctx context.Context) {
-	if s.conf.VerseLayer.Discovery.Endpoint == "" {
-		// read verses from the configuration only, if the discovery endpoint is not set
+	if len(s.conf.VerseLayer.Directs) != 0 {
+		// read verses from the configuration
 		s.verseDiscoveryHandler(ctx, s.conf.VerseLayer.Directs)
+	}
+
+	if s.conf.VerseLayer.Discovery.Endpoint == "" {
+		// Disable dinamically discovered verses, if the endpoint is not set
 		return
 	}
 
@@ -471,7 +475,9 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 			log.Info("Verse discovery has stopped, decrement wait group")
 		}()
 
-		discTick := time.NewTicker(s.conf.VerseLayer.Discovery.RefreshInterval)
+		// The first tick is immediate
+		isFirstTick := true
+		discTick := time.NewTicker(0)
 		defer discTick.Stop()
 
 		// Subscribed verses to verifier and submitter
@@ -487,6 +493,11 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 				return
 			case verses := <-sub.Next():
 				s.verseDiscoveryHandler(ctx, verses)
+				if isFirstTick {
+					// From second tick, the interval is used
+					discTick.Reset(s.conf.VerseLayer.Discovery.RefreshInterval)
+					isFirstTick = false
+				}
 			case <-discTick.C:
 				if err := disc.Work(ctx); err != nil {
 					log.Error("Failed to work verse discovery", "err", err)
@@ -516,7 +527,10 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 		verse  verse.Verse
 		verify common.Address
 	}
-	var verses []*verse_
+	var (
+		verses        []*verse_
+		verseChainIDs []uint64
+	)
 	for _, cfg := range discovers {
 		for name, addr := range cfg.L1Contracts {
 			if factory, ok := verseFactories[name]; ok {
@@ -525,9 +539,12 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 					verse:  factory(s.db, s.hub, common.HexToAddress(addr)),
 					verify: verifyContracts[name],
 				})
+				verseChainIDs = append(verseChainIDs, cfg.ChainID)
 			}
 		}
 	}
+
+	log.Info("Discovered verses", "count", len(verses), "chain-ids", verseChainIDs)
 
 	for _, x := range verses {
 		// add verse to Verifier
