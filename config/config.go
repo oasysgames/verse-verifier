@@ -110,7 +110,7 @@ func Defaults() map[string]interface{} {
 }
 
 // Build configuration.
-func NewConfig(input []byte) (*Config, error) {
+func NewConfig(input []byte, enableStrictValidation bool) (*Config, error) {
 	k := koanf.New(".")
 
 	// load default values
@@ -131,7 +131,7 @@ func NewConfig(input []byte) (*Config, error) {
 	}
 
 	// run validation
-	if err := Validate(&conf); err != nil {
+	if err := Validate(&conf, enableStrictValidation); err != nil {
 		return nil, err
 	}
 
@@ -155,16 +155,21 @@ func MustNewDefaultConfig() *Config {
 	return &conf
 }
 
-func Validate(conf *Config) error {
-	// validate verse discovery configuration
-	if conf.VerseLayer.Discovery.Endpoint == "" && len(conf.VerseLayer.Directs) == 0 {
-		return errors.New("either verse_layer.discovery.endpoint or verse_layer.directs must be set")
+func Validate(conf *Config, strict bool) error {
+	if err := validate.Struct(conf); err != nil {
+		return err
 	}
-	// validate verifier and submitter configuration
-	if !conf.Verifier.Enable && !conf.Submitter.Enable {
-		return errors.New("either verifier.enable or submitter.enable must be set")
+	if strict {
+		// validate verse discovery configuration
+		if conf.VerseLayer.Discovery.Endpoint == "" && len(conf.VerseLayer.Directs) == 0 {
+			return errors.New("either verse.discovery or verse.directs must be set")
+		}
+		// validate verifier and submitter configuration
+		if !conf.Verifier.Enable && !conf.Submitter.Enable {
+			return errors.New("either verifier.enable or submitter.enable must be set")
+		}
 	}
-	return validate.Struct(conf)
+	return nil
 }
 
 // App configuration.

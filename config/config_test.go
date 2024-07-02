@@ -295,7 +295,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		},
 	}
 
-	got, _ := NewConfig(s.toBytes(input))
+	got, _ := NewConfig(s.toBytes(input), false)
 
 	s.Equal(want, got)
 }
@@ -343,7 +343,7 @@ func (s *ConfigTestSuite) TestValidate() {
 		"Config.metrics.listen":                            "hostname_port",
 	}
 
-	_, err := NewConfig(s.toBytes(input))
+	_, err := NewConfig(s.toBytes(input), false)
 
 	gots := map[string]string{}
 	for _, e := range err.(validator.ValidationErrors) {
@@ -373,7 +373,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 		listen: 127.0.0.1:20001
 	`)
 
-	got, _ := NewConfig(s.toBytes(input))
+	got, err := NewConfig(s.toBytes(input), false)
+	s.NoError(err)
 
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 

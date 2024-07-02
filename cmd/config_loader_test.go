@@ -123,7 +123,7 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigFromYAML() {
 	})
 	rootCmd.Execute()
 
-	got, _ := globalConfigLoader.load()
+	got, _ := globalConfigLoader.load(false)
 	s.Equal(want, got)
 }
 
@@ -227,7 +227,8 @@ func (s *ConfigLoaderTestSuite) executeWithCliArgs(appendArgs []string) *config.
 	}, appendArgs...))
 	cmd.Execute()
 
-	conf, _ := opts.load()
+	conf, err := opts.load(false)
+	s.Require().NoError(err)
 	return conf
 }
 

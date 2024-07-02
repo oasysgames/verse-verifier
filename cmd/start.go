@@ -174,7 +174,7 @@ func mustNewServer(ctx context.Context) *server {
 		signers: map[string]ethutil.Signer{},
 	}
 
-	if s.conf, err = globalConfigLoader.load(); err != nil {
+	if s.conf, err = globalConfigLoader.load(true); err != nil {
 		log.Crit("Failed to load configuration", "err", err)
 	}
 
