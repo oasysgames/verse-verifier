@@ -472,6 +472,12 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 		log.Crit("Failed to construct verse discovery", "err", err)
 	}
 
+	// synchronously try the first discovery
+	if err := disc.Work(ctx); err != nil {
+		// exit if the first discovery faild, because the following discovery highly likely fail
+		log.Crit("Failed to work verse discovery", "err", err)
+	}
+
 	s.wg.Add(1)
 	go func() {
 		defer func() {
