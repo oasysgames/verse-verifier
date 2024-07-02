@@ -462,11 +462,15 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	}
 
 	// dinamically discovered verses
-	disc := config.NewVerseDiscovery(
+	disc, err := config.NewVerseDiscovery(
+		ctx,
 		http.DefaultClient,
 		s.conf.VerseLayer.Discovery.Endpoint,
 		s.conf.VerseLayer.Discovery.RefreshInterval,
 	)
+	if err != nil {
+		log.Crit("Failed to construct verse discovery", "err", err)
+	}
 
 	s.wg.Add(1)
 	go func() {
