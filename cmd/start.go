@@ -472,6 +472,9 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 		log.Crit("Failed to construct verse discovery", "err", err)
 	}
 
+	// Subscribed verses to verifier and submitter
+	discSub := disc.Subscribe(ctx)
+
 	// synchronously try the first discovery
 	if err := disc.Work(ctx); err != nil {
 		// exit if the first discovery faild, because the following discovery highly likely fail
@@ -482,15 +485,12 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	go func() {
 		defer func() {
 			defer s.wg.Done()
+			discSub.Cancel()
 			log.Info("Verse discovery has stopped, decrement wait group")
 		}()
 
 		discTick := time.NewTicker(s.conf.VerseLayer.Discovery.RefreshInterval)
 		defer discTick.Stop()
-
-		// Subscribed verses to verifier and submitter
-		sub := disc.Subscribe(ctx)
-		defer sub.Cancel()
 
 		log.Info("Verse discovery started", "endpoint", s.conf.VerseLayer.Discovery.Endpoint, "interval", s.conf.VerseLayer.Discovery.RefreshInterval)
 
@@ -499,7 +499,7 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 			case <-ctx.Done():
 				log.Info("Verse discovery stopped")
 				return
-			case verses := <-sub.Next():
+			case verses := <-discSub.Next():
 				s.verseDiscoveryHandler(ctx, verses)
 			case <-discTick.C:
 				if err := disc.Work(ctx); err != nil {
@@ -556,6 +556,7 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 			if err != nil {
 				log.Error("Failed to construct verse-layer client", "err", err)
 			} else {
+				log.Info("Add verse to Verifier", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
 				s.verifier.AddTask(x.verse.WithVerifiable(l2Client))
 			}
 		}
@@ -573,6 +574,7 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 					continue
 				}
 
+				log.Info("Add verse to Submitter", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
 				// s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
 				s.submitter.AddVerse(ctx, x.verse.WithTransactable(l1Signer, x.verify))

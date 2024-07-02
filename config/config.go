@@ -161,9 +161,9 @@ func Validate(conf *Config) error {
 		return errors.New("either verse_layer.discovery.endpoint or verse_layer.directs must be set")
 	}
 	// validate verifier and submitter configuration
-	// if !conf.Verifier.Enable && !conf.Submitter.Enable {
-	// 	return errors.New("either verifier.enable or submitter.enable must be set")
-	// }
+	if !conf.Verifier.Enable && !conf.Submitter.Enable {
+		return errors.New("either verifier.enable or submitter.enable must be set")
+	}
 	return validate.Struct(conf)
 }
 
