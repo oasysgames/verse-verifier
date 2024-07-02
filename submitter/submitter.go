@@ -29,7 +29,8 @@ const (
 )
 
 var (
-	ErrNoSignatures = errors.New("no signatures")
+	ErrNoSignatures    = errors.New("no signatures")
+	ErrAlreadyVerified = errors.New("already verified")
 )
 
 type Submitter struct {
@@ -81,6 +82,7 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 		chainId       = v.L1Signer().ChainID().Uint64()
 		tick          = time.NewTicker(w.cfg.Interval)
 		duration      = w.cfg.Interval
+		verifiedIndex *uint64
 		resetDuration = func(target time.Duration) {
 			if duration == target {
 				return
@@ -97,7 +99,7 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 			w.log.Info("Submitting work stopped", "chainId", chainId)
 			return
 		case <-tick.C:
-			nextIndex, err := w.work(ctx, v)
+			nextIndex, err := w.work(ctx, v, verifiedIndex)
 			if errors.Is(err, verse.ErrNotSufficientConfirmations) {
 				w.log.Info("Not enough confirmations", "nextIndex", nextIndex, "chainId", chainId)
 				continue
@@ -114,14 +116,17 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 				continue
 			} else if err == nil {
 				// Finally, succeeded to verify the corresponding rollup index, So move to the next index
-				verifiedIndex := nextIndex
-				w.log.Info("Successfully verified the rollup index", "verifiedIndex", verifiedIndex, "chainId", chainId)
+				verifiedIndex = &nextIndex
+				w.log.Info("Successfully verified the rollup index", "verifiedIndex", *verifiedIndex, "chainId", chainId)
 				// Clean up old signatures
-				if err := w.cleanOldSignatures(v.RollupContract(), verifiedIndex); err != nil {
-					w.log.Warn("Failed to delete old signatures", "verifiedIndex", verifiedIndex, "chainId", chainId, "err", err)
+				if err := w.cleanOldSignatures(v.RollupContract(), *verifiedIndex); err != nil {
+					w.log.Warn("Failed to delete old signatures", "verifiedIndex", *verifiedIndex, "chainId", chainId, "err", err)
 				}
 				// Reset the ticker to the original interval
 				resetDuration(w.cfg.Interval)
+				continue
+			} else if errors.Is(err, ErrAlreadyVerified) {
+				// Skip if the nextIndex is already verified
 				continue
 			} else {
 				w.log.Error("Failed to verify the rollup index", "nextIndex", nextIndex, "chainId", chainId, "err", err)
@@ -169,7 +174,7 @@ func (w *Submitter) workLoop(ctx context.Context) {
 				if !wg.Has(workerID) {
 					worker := func(ctx context.Context, rname string, data interface{}) {
 						defer running.Delete(rname)
-						w.work(ctx, data.(verse.TransactableVerse))
+						w.work(ctx, data.(verse.TransactableVerse), nil)
 					}
 					wg.AddWorker(ctx, workerID, worker)
 				}
@@ -195,7 +200,7 @@ func (w *Submitter) RemoveTask(contract common.Address) {
 	w.tasks.Delete(contract)
 }
 
-func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) (uint64, error) {
+func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, verifiedIndex *uint64) (uint64, error) {
 	log := task.Logger(w.log)
 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
@@ -207,6 +212,16 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse) (uin
 		return 0, fmt.Errorf("failed to fetch next index: %w", err)
 	}
 	log = log.New("next-index", nextIndex)
+
+	if verifiedIndex != nil {
+		if *verifiedIndex == nextIndex.Uint64() {
+			// Skip if the nextIndex is already verified
+			return nextIndex.Uint64(), ErrAlreadyVerified
+		} else if *verifiedIndex > nextIndex.Uint64() {
+			// Continue as purhaps reorged
+			log.Warn("Possible reorged. next index is smaller than the verified index", "verified-index", *verifiedIndex, "next-index", nextIndex.Uint64())
+		}
+	}
 
 	iter := &signatureIterator{
 		db:           w.db,

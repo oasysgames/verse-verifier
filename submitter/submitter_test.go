@@ -106,7 +106,7 @@ func (s *SubmitterTestSuite) TestSubmit() {
 
 	// submitter do the work.
 	s.submitter.stakemanager.Refresh(ctx)
-	go s.submitter.work(ctx, s.task)
+	go s.submitter.work(ctx, s.task, nil)
 	time.Sleep(time.Second / 10)
 	s.Hub.Commit()
 
