@@ -102,7 +102,8 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	// start workers
 	s.startCollector(ctx)
 	s.startVerifier(ctx)
-	s.startSubmitter(ctx)
+	// Submission starts whenever the verse is discovered
+	// s.startSubmitter(ctx)
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
 	log.Info("All workers started")
@@ -173,7 +174,7 @@ func mustNewServer(ctx context.Context) *server {
 		signers: map[string]ethutil.Signer{},
 	}
 
-	if s.conf, err = globalConfigLoader.load(); err != nil {
+	if s.conf, err = globalConfigLoader.load(true); err != nil {
 		log.Crit("Failed to load configuration", "err", err)
 	}
 
@@ -219,7 +220,10 @@ func (s *server) mustStartMetrics(ctx context.Context) {
 	go func() {
 		// NOTE: Don't add wait group, as no need to guarantee the completion
 		if err := metrics.ListenAndServe(ctx, s.msvr); err != nil {
-			log.Crit("Failed to start metrics server", "err", err)
+			// `ErrServerClosed` is thrown when `Shutdown` is intentionally called
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Crit("Failed to start metrics server", "err", err)
+			}
 		}
 		log.Info("Metrics server have exited listening", "addr", s.conf.Metrics.Listen)
 	}()
@@ -236,7 +240,10 @@ func (s *server) mustStartPprof(ctx context.Context) {
 	go func() {
 		// NOTE: Don't add wait group, as no need to guarantee the completion
 		if err := ps.ListenAndServe(ctx, s.psvr); err != nil {
-			log.Crit("Failed to start pprof server", "err", err)
+			// `ErrServerClosed` is thrown when `Shutdown` is intentionally called
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Crit("Failed to start pprof server", "err", err)
+			}
 		}
 		log.Info("pprof server have exited listening", "addr", s.conf.Debug.Pprof.Listen)
 	}()
@@ -444,32 +451,46 @@ func (s *server) startSubmitter(ctx context.Context) {
 }
 
 func (s *server) startVerseDiscovery(ctx context.Context) {
+	if len(s.conf.VerseLayer.Directs) != 0 {
+		// read verses from the configuration
+		s.verseDiscoveryHandler(ctx, s.conf.VerseLayer.Directs)
+	}
+
 	if s.conf.VerseLayer.Discovery.Endpoint == "" {
-		// read verses from the configuration only, if the discovery endpoint is not set
-		s.verseDiscoveryHandler(s.conf.VerseLayer.Directs)
+		// Disable dinamically discovered verses, if the endpoint is not set
 		return
 	}
 
 	// dinamically discovered verses
-	disc := config.NewVerseDiscovery(
+	disc, err := config.NewVerseDiscovery(
+		ctx,
 		http.DefaultClient,
 		s.conf.VerseLayer.Discovery.Endpoint,
 		s.conf.VerseLayer.Discovery.RefreshInterval,
 	)
+	if err != nil {
+		log.Crit("Failed to construct verse discovery", "err", err)
+	}
+
+	// Subscribed verses to verifier and submitter
+	discSub := disc.Subscribe(ctx)
+
+	// synchronously try the first discovery
+	if err := disc.Work(ctx); err != nil {
+		// exit if the first discovery faild, because the following discovery highly likely fail
+		log.Crit("Failed to work verse discovery", "err", err)
+	}
 
 	s.wg.Add(1)
 	go func() {
 		defer func() {
 			defer s.wg.Done()
+			discSub.Cancel()
 			log.Info("Verse discovery has stopped, decrement wait group")
 		}()
 
 		discTick := time.NewTicker(s.conf.VerseLayer.Discovery.RefreshInterval)
 		defer discTick.Stop()
-
-		// Subscribed verses to verifier and submitter
-		sub := disc.Subscribe(ctx)
-		defer sub.Cancel()
 
 		log.Info("Verse discovery started", "endpoint", s.conf.VerseLayer.Discovery.Endpoint, "interval", s.conf.VerseLayer.Discovery.RefreshInterval)
 
@@ -478,8 +499,8 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 			case <-ctx.Done():
 				log.Info("Verse discovery stopped")
 				return
-			case verses := <-sub.Next():
-				s.verseDiscoveryHandler(verses)
+			case verses := <-discSub.Next():
+				s.verseDiscoveryHandler(ctx, verses)
 			case <-discTick.C:
 				if err := disc.Work(ctx); err != nil {
 					log.Error("Failed to work verse discovery", "err", err)
@@ -489,7 +510,7 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	}()
 }
 
-func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
+func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.Verse) {
 	if s.verifier == nil && s.submitter == nil {
 		log.Warn("Both Verifier and Submitter are disabled")
 		return
@@ -509,7 +530,10 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 		verse  verse.Verse
 		verify common.Address
 	}
-	var verses []*verse_
+	var (
+		verses        []*verse_
+		verseChainIDs []uint64
+	)
 	for _, cfg := range discovers {
 		for name, addr := range cfg.L1Contracts {
 			if factory, ok := verseFactories[name]; ok {
@@ -518,9 +542,12 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 					verse:  factory(s.db, s.hub, common.HexToAddress(addr)),
 					verify: verifyContracts[name],
 				})
+				verseChainIDs = append(verseChainIDs, cfg.ChainID)
 			}
 		}
 	}
+
+	log.Info("Discovered verses", "count", len(verses), "chain-ids", verseChainIDs)
 
 	for _, x := range verses {
 		// add verse to Verifier
@@ -529,6 +556,7 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 			if err != nil {
 				log.Error("Failed to construct verse-layer client", "err", err)
 			} else {
+				log.Info("Add verse to Verifier", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
 				s.verifier.AddTask(x.verse.WithVerifiable(l2Client))
 			}
 		}
@@ -546,8 +574,10 @@ func (s *server) verseDiscoveryHandler(discovers []*config.Verse) {
 					continue
 				}
 
+				log.Info("Add verse to Submitter", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-				s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
+				// s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
+				s.submitter.AddVerse(ctx, x.verse.WithTransactable(l1Signer, x.verify))
 			}
 		}
 	}

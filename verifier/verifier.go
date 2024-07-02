@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -101,13 +102,18 @@ func (w *Verifier) Work(ctx context.Context) {
 func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse) {
 	log := task.Logger(w.log)
 
-	// fetch the next index from hub-layer
-	nextIndex, err := task.NextIndex(&bind.CallOpts{Context: ctx})
+	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
+	nextIndex, err := task.NextIndexWithConfirm(&bind.CallOpts{Context: ctx}, uint64(w.cfg.Confirmations), true)
 	if err != nil {
 		log.Error("Failed to call the NextIndex method", "err", err)
 		return
 	}
 	log = log.New("next-index", nextIndex)
+
+	// Clean up old signatures
+	if err := w.cleanOldSignatures(task.RollupContract(), nextIndex.Uint64()); err != nil {
+		w.log.Warn("Failed to delete old signatures", "nextIndex", nextIndex, "err", err)
+	}
 
 	// verify the signature that match the nextIndex
 	// and delete after signatures if there is a problem.
@@ -208,6 +214,25 @@ func (w *Verifier) deleteInvalidNextIndexSignature(task verse.VerifiableVerse, n
 	} else {
 		log.Warn("Deleted invalid signatures", "rows", rows)
 	}
+}
+
+func (w *Verifier) cleanOldSignatures(contract common.Address, nextIndex uint64) error {
+	var verifiedIndex uint64
+	if nextIndex == 0 {
+		verifiedIndex = 0
+	} else {
+		verifiedIndex = nextIndex - 1
+	}
+
+	// Keep the last 3 signatures.
+	if verifiedIndex < 3 {
+		return nil
+	}
+	deleteIndex := uint64(verifiedIndex - 3)
+	if _, err := w.db.OPSignature.DeleteOlds(contract, deleteIndex); err != nil {
+		return fmt.Errorf("failed to delete old signatures. deleteIndex: %d, : %w", deleteIndex, err)
+	}
+	return nil
 }
 
 type SignatureSubscription struct {

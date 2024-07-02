@@ -2,6 +2,8 @@ package verse
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -12,6 +14,10 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 )
 
+var (
+	ErrNotSufficientConfirmations = errors.New("not sufficient confirmations")
+)
+
 type Verse interface {
 	Logger(base log.Logger) log.Logger
 	DB() *database.Database
@@ -19,6 +25,7 @@ type Verse interface {
 	RollupContract() common.Address
 	EventDB() database.IOPEventDB
 	NextIndex(opts *bind.CallOpts) (*big.Int, error)
+	NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error)
 	WithVerifiable(l2Client ethutil.Client) VerifiableVerse
 	WithTransactable(l1Signer ethutil.SignableClient, verifyContract common.Address) TransactableVerse
 }
@@ -73,6 +80,9 @@ func (v *verse) L1Client() ethutil.Client                   { return v.l1Client 
 func (v *verse) RollupContract() common.Address             { return v.rollupContract }
 func (v *verse) EventDB() database.IOPEventDB               { panic("not implemented") }
 func (v *verse) NextIndex(*bind.CallOpts) (*big.Int, error) { panic("not implemented") }
+func (v *verse) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
+	panic("not implemented")
+}
 func (v *verse) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
 	return &verifiableVerse{v, l2Client}
 }
@@ -122,4 +132,23 @@ func newVerseFactory(conv func(Verse) Verse) VerseFactory {
 			rollupContract: rollupContract,
 		})
 	}
+}
+
+func decideConfirmationBlockNumber(opts *bind.CallOpts, confirmation uint64, client ethutil.Client) (*big.Int, error) {
+	if opts.BlockNumber != nil {
+		return nil, errors.New("block number is overridden. should be nil")
+	}
+	if 16 < confirmation {
+		return nil, errors.New("confirmation is too large")
+	}
+	// get the latest block number
+	latest, err := client.BlockNumber(opts.Context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch latest block height: %w", err)
+	}
+	if latest < confirmation {
+		return nil, fmt.Errorf("not enough blocks to confirm: %d < %d, %w", latest, confirmation, ErrNotSufficientConfirmations)
+	}
+	confirmedNumber := latest - confirmation
+	return new(big.Int).SetUint64(confirmedNumber), nil
 }

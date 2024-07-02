@@ -1,0 +1,6 @@
+---
+Language: Proto
+BasedOnStyle: Google
+ColumnLimit: 1024
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true

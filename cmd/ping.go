@@ -16,7 +16,7 @@ var pingCmd = &cobra.Command{
 	Short: "Send ping via P2P to specified peer",
 	Long:  "Send ping via P2P to specified peer",
 	Run: func(cmd *cobra.Command, args []string) {
-		conf, err := globalConfigLoader.load()
+		conf, err := globalConfigLoader.load(true)
 		if err != nil {
 			util.Exit(1, "Failed to load configuration: %s\n", err)
 		}
