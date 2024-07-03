@@ -127,6 +127,7 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 				continue
 			} else if errors.Is(err, ErrAlreadyVerified) {
 				// Skip if the nextIndex is already verified
+				w.log.Info("Already verified the rollup index", "nextIndex", nextIndex, "chainId", chainId)
 				continue
 			} else {
 				w.log.Error("Failed to verify the rollup index", "nextIndex", nextIndex, "chainId", chainId, "err", err)
