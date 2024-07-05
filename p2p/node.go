@@ -156,25 +156,31 @@ func NewNode(
 	return worker, nil
 }
 
-func (w *Node) Start(ctx context.Context) {
+func (w *Node) Start(ctx context.Context, subscribeSigs bool) {
 	defer w.h.Close()
 	defer w.topic.Close()
-	defer w.sub.Cancel()
+
+	// For backward compatibility(older than v1.1.0), we support the stream protocol.
 	w.h.SetStreamHandler(streamProtocol, w.newStreamHandler(ctx))
 
 	var (
-		wg            sync.WaitGroup
-		publishTicker = time.NewTicker(w.cfg.PublishInterval)
-		meterTicker   = time.NewTicker(time.Second * 60)
+		wg sync.WaitGroup
+		// publishTicker = time.NewTicker(w.cfg.PublishInterval)
+		meterTicker = time.NewTicker(time.Second * 60)
 	)
-	defer publishTicker.Stop()
+	// defer publishTicker.Stop()
 	defer meterTicker.Stop()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.subscribeLoop(ctx)
-	}()
+	if subscribeSigs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer w.sub.Cancel()
+			w.subscribeLoop(ctx)
+		}()
+	} else {
+		w.sub.Cancel()
+	}
 
 	w.showBootstrapLog()
 
@@ -184,8 +190,8 @@ func (w *Node) Start(ctx context.Context) {
 			w.log.Info("P2P node stopping...")
 			wg.Wait()
 			return
-		case <-publishTicker.C:
-			w.publishLatestSignatures(ctx)
+		// case <-publishTicker.C:
+		// 	w.publishLatestSignatures(ctx)
 		case <-meterTicker.C:
 			nwstat := newNetworkStatus(w.h)
 			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
