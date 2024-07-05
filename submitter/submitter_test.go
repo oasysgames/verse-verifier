@@ -161,7 +161,7 @@ func (s *SubmitterTestSuite) TestSubmit() {
 	}
 }
 
-func (s *SubmitterTestSuite) TestStartSubmit() {
+func (s *SubmitterTestSuite) TestStartSubmitter() {
 	ctx, cancel := context.WithCancel(context.Background())
 	batchIndexes := s.Range(0, 5)
 	nextIndex := 2
@@ -169,7 +169,7 @@ func (s *SubmitterTestSuite) TestStartSubmit() {
 
 	// Start submitter
 	s.submitter.stakemanager.Refresh(ctx)
-	go s.submitter.startSubmitter(ctx, s.task)
+	go s.submitter.startSubmitter(ctx, s.task, 0)
 	// Dry run to cover no signature case
 	// Manually confirmed by checking the logs
 	time.Sleep(s.submitter.cfg.Interval)

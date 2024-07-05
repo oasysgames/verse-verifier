@@ -70,16 +70,15 @@ func (w *Submitter) Start(ctx context.Context) {
 	w.workLoop(ctx)
 }
 
-func (w *Submitter) AddVerse(ctx context.Context, verse verse.TransactableVerse) {
+func (w *Submitter) AddVerse(ctx context.Context, v verse.TransactableVerse, chainId uint64) {
 	// Start submitting loop
 	// 1. Request signatures every interval
 	// 2. Submit verify tx if enough signatures are collected
-	go w.startSubmitter(ctx, verse)
+	go w.startSubmitter(ctx, v, chainId)
 }
 
-func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVerse) {
+func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVerse, chainId uint64) {
 	var (
-		chainId       = v.L1Signer().ChainID().Uint64()
 		tick          = time.NewTicker(w.cfg.Interval)
 		duration      = w.cfg.Interval
 		verifiedIndex *uint64
