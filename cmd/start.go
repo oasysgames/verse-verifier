@@ -99,11 +99,9 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		s.smcache.RefreshLoop(ctx, time.Hour)
 	}()
 
-	// start workers
-	s.startCollector(ctx)
-	s.startVerifier(ctx)
-	// Submission starts whenever the verse is discovered
-	// s.startSubmitter(ctx)
+	// s.startCollector(ctx) -> Necessary event logs are directly fetched from the chain during verification
+	// s.startVerifier(ctx)-> Verificatin starts whenever the verse is discovered
+	// s.startSubmitter(ctx) -> Submission starts whenever the verse is discovered
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
 	log.Info("All workers started")
@@ -304,7 +302,8 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	go func() {
 		defer s.wg.Done()
 
-		s.p2p.Start(ctx)
+		subscribeSigs := s.conf.Submitter.Enable
+		s.p2p.Start(ctx, subscribeSigs)
 		log.Info("P2P node has stopped, decrement wait group")
 	}()
 }
@@ -557,7 +556,8 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 				log.Error("Failed to construct verse-layer client", "err", err)
 			} else {
 				log.Info("Add verse to Verifier", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
-				s.verifier.AddTask(x.verse.WithVerifiable(l2Client))
+				// s.verifier.AddTask(x.verse.WithVerifiable(l2Client))
+				s.verifier.AddVerse(ctx, x.verse.WithVerifiable(l2Client), x.cfg.ChainID)
 			}
 		}
 
@@ -577,7 +577,7 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 				log.Info("Add verse to Submitter", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
 				// s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
-				s.submitter.AddVerse(ctx, x.verse.WithTransactable(l1Signer, x.verify))
+				s.submitter.AddVerse(ctx, x.verse.WithTransactable(l1Signer, x.verify), x.cfg.ChainID)
 			}
 		}
 	}
