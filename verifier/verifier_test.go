@@ -44,28 +44,9 @@ func (s *VerifierTestSuite) SetupTest() {
 
 	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)
 	s.verifier.AddTask(s.task)
-
-	ctx := context.Background()
-	ctx, s.stopWork = context.WithCancel(ctx)
-
-	go func() {
-		tick := time.NewTicker(s.verifier.cfg.Interval)
-		defer tick.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				s.verifier.Work(ctx)
-			}
-		}
-	}()
 }
 
 func (s *VerifierTestSuite) TestVerify() {
-	defer s.stopWork()
-
 	cases := []struct {
 		batchRoot     string
 		wantSignature string
@@ -84,6 +65,9 @@ func (s *VerifierTestSuite) TestVerify() {
 	}
 
 	batchSize := 10
+
+	s.startWorker()
+	defer s.stopWork()
 
 	// send transactions to verse-layer
 	s.sendVerseTransactions(10 * len(cases))
@@ -122,6 +106,7 @@ func (s *VerifierTestSuite) TestVerify() {
 }
 
 func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
+	s.startWorker()
 	defer s.stopWork()
 
 	batches := s.Range(0, 10)
@@ -226,6 +211,72 @@ func (s *VerifierTestSuite) TestDeleteInvalidSignature() {
 	}
 }
 
+func (s *VerifierTestSuite) TestStartVerifier() {
+	// start verifier
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.verifier.startVerifier(ctx, s.task, 0)
+
+	batches := s.Range(0, 3)
+	batchSize := 5
+
+	// send transactions to verse-layer
+	merkleRoots := make([][32]byte, len(batches))
+	for batchIdx := range batches {
+		elements := make([][32]byte, batchSize)
+		for i, header := range s.sendVerseTransactions(batchSize) {
+			elements[i] = header.Root
+		}
+		if merkleRoot, err := verse.CalcMerkleRoot(elements); s.NoError(err) {
+			merkleRoots[batchIdx] = merkleRoot
+		}
+	}
+	for batchIdx, merkleRoot := range merkleRoots {
+		_, err := s.TSCC.EmitStateBatchAppended(
+			s.SignableHub.TransactOpts(context.Background()),
+			big.NewInt(int64(batchIdx)),
+			merkleRoot, big.NewInt(int64(batchSize)),
+			big.NewInt(int64(batchIdx*batchSize)), []byte(fmt.Sprintf("test-%d", batchIdx)),
+		)
+		s.NoError(err)
+		s.Mining()
+	}
+
+	// run verification
+	sigs := s.waitPublished(len(merkleRoots))
+	s.Len(sigs, len(merkleRoots))
+
+	// assert
+	for batchIndex, sig := range sigs {
+		bi64 := uint64(batchIndex)
+		got0, _ := s.DB.OPSignature.Find(nil, nil, nil, &bi64, 1, 0)
+
+		s.Equal(sig.RollupHash.Hex(), got0[0].RollupHash.Hex())
+		s.Equal(merkleRoots[batchIndex][:], got0[0].RollupHash[:])
+
+		s.Equal(sig.Approved, got0[0].Approved)
+		s.Equal(true, got0[0].Approved)
+
+		s.Equal(sig.Signature.Hex(), got0[0].Signature.Hex())
+	}
+
+	// increment `nextIndex`
+	nextIndex := 1
+	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
+	s.Hub.Commit()
+
+	// confirm blocks
+	s.Hub.Commit()
+	s.Hub.Commit()
+
+	// no prior signature than verified index should be sent
+	sigs = s.waitPublished((len(merkleRoots) - 1) * 2)
+	s.Len(sigs, (len(merkleRoots)-1)*2)
+	for _, sig := range sigs {
+		s.True(sig.RollupIndex >= uint64(nextIndex))
+	}
+}
+
 func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.Header) {
 	ctx := context.Background()
 	to := common.HexToAddress("0x09ad74977844F513E61AdE2B50b0C06268A4f6d7")
@@ -253,8 +304,27 @@ func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.H
 	return headers
 }
 
+func (s *VerifierTestSuite) startWorker() {
+	ctx := context.Background()
+	ctx, s.stopWork = context.WithCancel(ctx)
+
+	go func() {
+		tick := time.NewTicker(s.verifier.cfg.Interval)
+		defer tick.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				s.verifier.Work(ctx)
+			}
+		}
+	}()
+}
+
 func (s *VerifierTestSuite) waitPublished(count int) []*database.OptimismSignature {
-	ctx, candel := context.WithTimeout(context.Background(), time.Second/3)
+	ctx, candel := context.WithTimeout(context.Background(), time.Second/2)
 	defer candel()
 
 	sub := s.verifier.SubscribeNewSignature(ctx)

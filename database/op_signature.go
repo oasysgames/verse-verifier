@@ -128,6 +128,30 @@ func (db *OptimismSignatureDB) FindLatestsBySigner(
 	return rows, nil
 }
 
+func (db *OptimismSignatureDB) FindUnverifiedBySigner(
+	signer common.Address,
+	unverifiedIndex uint64,
+) ([]*OptimismSignature, error) {
+	_signer, err := db.db.Signer.FindOrCreate(signer)
+	if err != nil {
+		return nil, err
+	}
+
+	var rows []*OptimismSignature
+	tx := db.rawdb.
+		Joins("Signer").
+		Joins("Contract").
+		Where("optimism_signatures.signer_id = ?", _signer.ID).
+		Order("optimism_signatures.id DESC").
+		Where("optimism_signatures.batch_index >= ?", unverifiedIndex).
+		Find(&rows)
+
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return rows, nil
+}
+
 func (db *OptimismSignatureDB) Save(
 	id, previousID *string,
 	signer common.Address,
