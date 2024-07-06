@@ -319,7 +319,7 @@ func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub2() {
 	// saving too old signature (no pruneRollupIndexDepth)
 	msg = toProtoBufSig(s.sigs[s.signer0][s.contract0][0])
 	saved = s.node2.handleOptimismSignatureExchangeFromPubSub2(context.Background(), s.node1.h.ID(), msg)
-	s.False(saved)
+	s.True(saved)
 }
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {

@@ -156,30 +156,26 @@ func NewNode(
 	return worker, nil
 }
 
-func (w *Node) Start(ctx context.Context, subscribeSigs bool) {
+func (w *Node) Start(ctx context.Context, enableSubscriber bool) {
 	defer w.h.Close()
 	defer w.topic.Close()
+	defer w.sub.Cancel()
 
 	// For backward compatibility(older than v1.1.0), we support the stream protocol.
 	w.h.SetStreamHandler(streamProtocol, w.newStreamHandler(ctx))
 
 	var (
-		wg sync.WaitGroup
-		// publishTicker = time.NewTicker(w.cfg.PublishInterval)
+		wg          sync.WaitGroup
 		meterTicker = time.NewTicker(time.Second * 60)
 	)
-	// defer publishTicker.Stop()
 	defer meterTicker.Stop()
 
-	if subscribeSigs {
+	if enableSubscriber {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer w.sub.Cancel()
 			w.subscribeLoop(ctx)
 		}()
-	} else {
-		w.sub.Cancel()
 	}
 
 	w.showBootstrapLog()
@@ -190,8 +186,6 @@ func (w *Node) Start(ctx context.Context, subscribeSigs bool) {
 			w.log.Info("P2P node stopping...")
 			wg.Wait()
 			return
-		// case <-publishTicker.C:
-		// 	w.publishLatestSignatures(ctx)
 		case <-meterTicker.C:
 			nwstat := newNetworkStatus(w.h)
 			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
@@ -257,6 +251,8 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 	// Storing workers and jobs.
 	workers := util.NewWorkerGroup(100)
 	procs := &sync.Map{}
+
+	w.log.Info("Start subscribing to pubsub messages")
 
 	for {
 		var msg pb.PubSub
@@ -500,18 +496,16 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub2(
 		return false
 	}
 
-	local, err := w.db.OPSignature.FindLatestsBySigner(signer, 1, 0)
-	if err != nil {
-		w.log.Error("Failed to find the latest signature", append(logctx, "err", err)...)
-		return false
-	} else if len(local) > 0 && local[0].PreviousID == remote.PreviousId {
+	if _, err := w.db.OPSignature.FindByID(remote.Id); err == nil {
 		// duplicated
+		w.log.Debug("Duplicated signature", append(logctx, "id", remote.Id)...)
 		return false
-	} else if len(local) > 0 && strings.Compare(local[0].ID, remote.Id) == 1 {
-		// fully synchronized or less than local
-		w.log.Debug("Skip already possess signature", append(logctx, "local-latest-id", local[0].ID)...)
+	} else if !errors.Is(err, database.ErrNotFound) {
+		w.log.Error("Unexpected error happen during finding signature by id", append(logctx, "id", remote.Id, "err", err)...)
 		return false
 	}
+
+	w.log.Info("Received new signature", logctx...)
 
 	// save signature
 	if _, err := w.db.OPSignature.Save(
