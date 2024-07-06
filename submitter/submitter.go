@@ -103,7 +103,7 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 				w.log.Info("Not enough confirmations", "nextIndex", nextIndex, "chainId", chainId)
 				continue
 			} else if errors.Is(err, ErrNoSignatures) {
-				w.log.Info("No signatures", "nextIndex", nextIndex, "chainId", chainId)
+				w.log.Info("No signatures to submit", "nextIndex", nextIndex, "chainId", chainId)
 				// Reset the ticker to the original interval
 				resetDuration(w.cfg.Interval)
 				continue

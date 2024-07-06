@@ -229,7 +229,7 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 	}
 
 	// submitter do the work.
-	time.Sleep(s.submitter.cfg.Interval * 2)
+	time.Sleep(s.submitter.cfg.Interval * 3)
 	s.Hub.Commit()
 
 	// assert multicall transaction
