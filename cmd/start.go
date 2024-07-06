@@ -302,9 +302,8 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	go func() {
 		defer s.wg.Done()
 
-		subscribeSigs := s.conf.Submitter.Enable
-		s.p2p.Start(ctx, subscribeSigs)
-		log.Info("P2P node has stopped, decrement wait group")
+		enableSubscriber := s.conf.Submitter.Enable
+		s.p2p.Start(ctx, enableSubscriber)
 	}()
 }
 
@@ -364,7 +363,7 @@ func (s *server) mustSetupVerifier() {
 	}
 
 	l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-	s.verifier = verifier.NewVerifier(&s.conf.Verifier, s.db, l1Signer)
+	s.verifier = verifier.NewVerifier(&s.conf.Verifier, s.db, s.p2p, l1Signer)
 }
 
 func (s *server) startVerifier(ctx context.Context) {
