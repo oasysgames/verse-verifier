@@ -25,22 +25,32 @@ type VerifierTestSuite struct {
 	verifier *Verifier
 	task     verse.VerifiableVerse
 	stopWork context.CancelFunc
+	sigsCh   chan []*database.OptimismSignature
 }
 
 func TestVerifier(t *testing.T) {
 	suite.Run(t, new(VerifierTestSuite))
 }
 
+type MockP2P struct {
+	sigsCh chan []*database.OptimismSignature
+}
+
+func (m *MockP2P) PublishSignatures(ctx context.Context, sigs []*database.OptimismSignature) {
+	m.sigsCh <- sigs
+}
+
 func (s *VerifierTestSuite) SetupTest() {
 	s.BackendSuite.SetupTest()
 
+	s.sigsCh = make(chan []*database.OptimismSignature, 4)
 	s.verifier = NewVerifier(&config.Verifier{
 		Interval:            50 * time.Millisecond,
 		Concurrency:         10,
 		StateCollectLimit:   3,
 		StateCollectTimeout: time.Second,
 		Confirmations:       2,
-	}, s.DB, s.SignableHub)
+	}, s.DB, &MockP2P{sigsCh: s.sigsCh}, s.SignableHub)
 
 	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)
 	s.verifier.AddTask(s.task)
@@ -243,7 +253,7 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	}
 
 	// run verification
-	sigs := s.waitPublished(len(merkleRoots))
+	sigs := <-s.sigsCh
 	s.Len(sigs, len(merkleRoots))
 
 	// assert
@@ -270,10 +280,12 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	s.Hub.Commit()
 
 	// no prior signature than verified index should be sent
-	sigs = s.waitPublished((len(merkleRoots) - 1) * 2)
-	s.Len(sigs, (len(merkleRoots)-1)*2)
-	for _, sig := range sigs {
-		s.True(sig.RollupIndex >= uint64(nextIndex))
+	for i := 0; i < 2; i++ {
+		sigs = <-s.sigsCh
+		s.Len(sigs, 2)
+		for _, sig := range sigs {
+			s.True(sig.RollupIndex >= uint64(nextIndex))
+		}
 	}
 }
 

@@ -25,6 +25,7 @@ type Verifier struct {
 	cfg      *config.Verifier
 	db       *database.Database
 	l1Signer ethutil.SignableClient
+	p2p      P2P
 	topic    *util.Topic
 	tasks    sync.Map
 	log      log.Logger
@@ -32,15 +33,21 @@ type Verifier struct {
 	running  *sync.Map
 }
 
+type P2P interface {
+	PublishSignatures(ctx context.Context, sigs []*database.OptimismSignature)
+}
+
 // Returns the new verifier.
 func NewVerifier(
 	cfg *config.Verifier,
 	db *database.Database,
+	p2p P2P,
 	l1Signer ethutil.SignableClient,
 ) *Verifier {
 	return &Verifier{
 		cfg:      cfg,
 		db:       db,
+		p2p:      p2p,
 		l1Signer: l1Signer,
 		topic:    util.NewTopic(),
 		log:      log.New("worker", "verifier"),
@@ -277,6 +284,13 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 			// skip `*verse.DeletedEvent` or `*verse.VerifiedEvent`
 			continue
 		}
+
+		contract, err := w.db.OPContract.FindOrCreate(logs[i].Address)
+		if err != nil {
+			log.Warn("Failed to find or create contract", "err", err)
+			continue
+		}
+
 		var dbEvent database.OPEvent
 		switch t := rollupEvent.Parsed.(type) {
 		case *scc.SccStateBatchAppended:
@@ -285,12 +299,17 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 			model.PrevTotalElements = t.PrevTotalElements.Uint64()
 			model.BatchSize = t.BatchSize.Uint64()
 			model.BatchRoot = t.BatchRoot
+			model.ContractID = contract.ID
+			model.Contract = *contract
 			dbEvent = &model
 		case *l2oo.OasysL2OutputOracleOutputProposed:
 			var model database.OpstackProposal
 			model.L2OutputIndex = t.L2OutputIndex.Uint64()
-			model.L2BlockNumber = t.L2BlockNumber.Uint64()
 			model.OutputRoot = t.OutputRoot
+			model.L2BlockNumber = t.L2BlockNumber.Uint64()
+			model.L1Timestamp = t.L1Timestamp.Uint64()
+			model.ContractID = contract.ID
+			model.Contract = *contract
 			dbEvent = &model
 		default:
 			return fmt.Errorf("unsupported event type: %T", t)
@@ -331,7 +350,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 		log.Debug("Verification completed", "approved", approved, "rollup-index", dbEvent.GetRollupIndex())
 	}
 	if len(opsigs) > 0 {
-		log.Debug("Completed verification of all fetched logs", "count-logs", len(logs), "count-newsigs", len(opsigs))
+		log.Info("Completed verification of all fetched logs", "count-logs", len(logs), "count-newsigs", len(opsigs))
 	}
 
 	// Will publish all unverified signatures if the flag is set.
@@ -343,12 +362,11 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 		opsigs = append(opsigs, rows...)
 	}
 
-	// publish each signatures
-	for i := range opsigs {
-		w.topic.Publish(opsigs[i])
-	}
 	if len(opsigs) > 0 {
-		log.Info("Published verified signatures", "count", len(opsigs))
+		// publish all signatures at once
+		w.p2p.PublishSignatures(ctx, opsigs)
+	} else {
+		log.Info("No signatures to publish")
 	}
 
 	return nil
