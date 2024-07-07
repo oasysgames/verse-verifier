@@ -268,7 +268,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	// fetch event logs
 	var logs []types.Log
 	if !skipFetchlog {
-		if logs, err = w.l1Signer.FilterLogs(ctx, verse.NewEventLogFilter(start, end)); err != nil {
+		if logs, err = w.l1Signer.FilterLogs(ctx, verse.NewEventLogFilter(start, end, []common.Address{task.RollupContract()})); err != nil {
 			return fmt.Errorf("failed to fetch(start: %d, end: %d) event logs from hub-layer: %w", start, end, err)
 		}
 	}

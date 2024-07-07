@@ -136,11 +136,14 @@ func init() {
 	}
 }
 
-func NewEventLogFilter(fromBlock, toBlock uint64) ethereum.FilterQuery {
+func NewEventLogFilter(fromBlock, toBlock uint64, addresss []common.Address) ethereum.FilterQuery {
 	query := ethereum.FilterQuery{
 		Topics:    [][]common.Hash{make([]common.Hash, len(eventTopics))},
 		FromBlock: new(big.Int).SetUint64(fromBlock),
 		ToBlock:   new(big.Int).SetUint64(toBlock),
+	}
+	if len(addresss) != 0 {
+		query.Addresses = addresss
 	}
 	copy(query.Topics[0], eventTopics)
 	return query

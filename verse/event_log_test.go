@@ -52,7 +52,7 @@ func (s *EventLogTestSuite) TestNewEventLogFilter() {
 		wants[i] = receipt.Logs[0]
 	}
 
-	gots, _ := s.Hub.FilterLogs(context.Background(), NewEventLogFilter(0, 100))
+	gots, _ := s.Hub.FilterLogs(context.Background(), NewEventLogFilter(0, 100, nil))
 	s.Len(gots, len(wants))
 	for i, want := range wants {
 		s.Equal(*want, gots[i])
