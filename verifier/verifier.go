@@ -93,7 +93,7 @@ func (w *Verifier) AddVerse(ctx context.Context, v verse.VerifiableVerse, chainI
 func (w *Verifier) startVerifier(ctx context.Context, v verse.VerifiableVerse, chainId uint64) {
 	var (
 		tick                     = time.NewTicker(w.cfg.Interval)
-		nextEventFetchStartBlock *uint64
+		nextEventFetchStartBlock uint64
 		counter                  int
 		publishAllUnverifiedSigs = func() bool {
 			counter++
@@ -109,7 +109,7 @@ func (w *Verifier) startVerifier(ctx context.Context, v verse.VerifiableVerse, c
 			w.log.Info("Verifying work stopped", "chainId", chainId)
 			return
 		case <-tick.C:
-			if err := w.work2(ctx, v, chainId, nextEventFetchStartBlock, publishAllUnverifiedSigs()); err != nil {
+			if err := w.work2(ctx, v, chainId, &nextEventFetchStartBlock, publishAllUnverifiedSigs()); err != nil {
 				w.log.Error("Failed to run verification", "err", err)
 			}
 		}
@@ -241,7 +241,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	if err != nil {
 		return fmt.Errorf("failed to fetch the latest block number: %w", err)
 	}
-	if nextStart != nil {
+	if 0 < *nextStart {
 		start = *nextStart
 		if start > end {
 			// Block number is not updated yet.
@@ -262,6 +262,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	}
 
 	if skipFetchlog && !publishAllUnverifiedSigs {
+		log.Info("Skip fetching logs", "start", start, "end", end)
 		return nil
 	}
 
@@ -275,7 +276,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 
 	// Next start block is the current end block + 1
 	end += 1
-	nextStart = &end
+	*nextStart = end
 
 	// verify the fetched logs
 	opsigs := []*database.OptimismSignature{}
@@ -358,12 +359,13 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 		log.Debug("Verification completed", "approved", approved, "rollup-index", dbEvent.GetRollupIndex())
 	}
 	if len(opsigs) > 0 {
-		log.Info("Completed verification of all fetched logs", "count-logs", len(logs), "count-newsigs", len(opsigs))
+		log.Info("Completed verification of all fetched logs", "count-logs", len(logs), "count-newsigs", len(opsigs), "start", start, "end", end)
 	}
 
 	// Will publish all unverified signatures if the flag is set.
 	if publishAllUnverifiedSigs {
-		rows, err := w.db.OPSignature.FindUnverifiedBySigner(w.l1Signer.Signer(), nextIndex.Uint64())
+		contract := task.RollupContract()
+		rows, err := w.db.OPSignature.FindUnverifiedBySigner(w.l1Signer.Signer(), nextIndex.Uint64(), &contract)
 		if err != nil {
 			log.Error("Failed to find unverified signatures", "err", err)
 		}
