@@ -93,7 +93,7 @@ func (w *Verifier) AddVerse(ctx context.Context, v verse.VerifiableVerse, chainI
 func (w *Verifier) startVerifier(ctx context.Context, v verse.VerifiableVerse, chainId uint64) {
 	var (
 		tick                     = time.NewTicker(w.cfg.Interval)
-		nextEventFetchStartBlock uint64
+		nextEventFetchStartBlock *uint64
 		counter                  int
 		publishAllUnverifiedSigs = func() bool {
 			counter++
@@ -109,7 +109,7 @@ func (w *Verifier) startVerifier(ctx context.Context, v verse.VerifiableVerse, c
 			w.log.Info("Verifying work stopped", "chainId", chainId)
 			return
 		case <-tick.C:
-			if err := w.work2(ctx, v, chainId, &nextEventFetchStartBlock, publishAllUnverifiedSigs()); err != nil {
+			if err := w.work2(ctx, v, chainId, nextEventFetchStartBlock, publishAllUnverifiedSigs()); err != nil {
 				w.log.Error("Failed to run verification", "err", err)
 			}
 		}
@@ -213,7 +213,10 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse) {
 
 func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainId uint64, nextStart *uint64, publishAllUnverifiedSigs bool) error {
 	// run verification tasks until time out
-	var cancel context.CancelFunc
+	var (
+		cancel    context.CancelFunc
+		ctxOrigin = ctx
+	)
 	ctx, cancel = context.WithTimeout(ctx, w.cfg.StateCollectTimeout)
 	defer cancel()
 
@@ -245,17 +248,18 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 			skipFetchlog = true
 		}
 	} else {
-		// start fetching logs from 7 days ago
-		backLimit := uint64(5760) * 7
-		if end < backLimit {
+		offset := w.cfg.StartBlockOffset
+		if end < offset {
 			start = 0
 		} else {
-			start = end - backLimit
+			start = end - offset
 		}
+		// override the timeout to prevent the timeout error
+		// Fetching logs with wide range may take a long time.
+		var cancelLogTimeout context.CancelFunc
+		ctx, cancelLogTimeout = context.WithTimeout(ctxOrigin, 300*time.Second)
+		defer cancelLogTimeout()
 	}
-
-	// Next start block is the current end block + 1
-	*nextStart = end + 1
 
 	if skipFetchlog && !publishAllUnverifiedSigs {
 		return nil
@@ -268,6 +272,10 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 			return fmt.Errorf("failed to fetch(start: %d, end: %d) event logs from hub-layer: %w", start, end, err)
 		}
 	}
+
+	// Next start block is the current end block + 1
+	end += 1
+	nextStart = &end
 
 	// verify the fetched logs
 	opsigs := []*database.OptimismSignature{}

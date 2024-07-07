@@ -50,6 +50,7 @@ func (s *VerifierTestSuite) SetupTest() {
 		StateCollectLimit:   3,
 		StateCollectTimeout: time.Second,
 		Confirmations:       2,
+		StartBlockOffset:    100,
 	}, s.DB, &MockP2P{sigsCh: s.sigsCh}, s.SignableHub)
 
 	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)
