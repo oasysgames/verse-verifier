@@ -338,6 +338,7 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 			StateCollectTimeout: defaults["verifier.state_collect_timeout"].(time.Duration),
 			OptimizeInterval:    defaults["verifier.db_optimize_interval"].(time.Duration),
 			Confirmations:       defaults["verifier.confirmations"].(int),
+			StartBlockOffset:    defaults["verifier.start_block_offset"].(uint64),
 		},
 		Submitter: config.Submitter{
 			Enable:              false,

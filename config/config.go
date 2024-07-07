@@ -73,7 +73,8 @@ func Defaults() map[string]interface{} {
 		"verifier.state_collect_limit":   1000,
 		"verifier.state_collect_timeout": 15 * time.Second,
 		"verifier.db_optimize_interval":  time.Hour,
-		"verifier.confirmations":         3, // 3 confirmations are enough for later than v1.3.0 L1.
+		"verifier.confirmations":         3,                // 3 confirmations are enough for later than v1.3.0 L1.
+		"verifier.start_block_offset":    uint64(5760 * 2), // 2 days
 
 		// The minimum interval for Verse v0 is 15 seconds.
 		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
@@ -396,6 +397,10 @@ type Verifier struct {
 
 	// Number of confirmation blocks for transaction receipt.
 	Confirmations int
+
+	// The number of start fetching events is offset from the current block.
+	// This offset is used at the first time to fetch events.
+	StartBlockOffset uint64 `koanf:"start_block_offset"`
 }
 
 type Submitter struct {

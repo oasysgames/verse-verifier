@@ -81,6 +81,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		state_collect_timeout: 1s
 		db_optimize_interval: 2s
 		confirmations: 4
+		start_block_offset: 5760
 
 	submitter:
 		enable: true
@@ -242,6 +243,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			StateCollectTimeout: time.Second,
 			OptimizeInterval:    time.Second * 2,
 			Confirmations:       4,
+			StartBlockOffset:    5760,
 		},
 		Submitter: Submitter{
 			Enable:              true,
