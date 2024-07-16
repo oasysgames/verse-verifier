@@ -376,7 +376,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 		// publish all signatures at once
 		w.p2p.PublishSignatures(ctx, opsigs)
 	} else {
-		log.Info("No signatures to publish")
+		log.Info("No signatures to publish", "count-logs", len(logs), "start", start, "end", end)
 	}
 
 	return nil
