@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -33,9 +32,10 @@ func NewVerseDiscovery(
 		topic:           util.NewTopic(),
 		log:             log.New("worker", "verse-discovery"),
 	}
-	if _, err = disc.fetch(ctx); err != nil {
-		return nil, fmt.Errorf("the inital verse discovery failed, make sure the url(%s) is reachable: %w", url, err)
-	}
+	// Commented out the initial fetch, as it will be done in the worker
+	// if _, err = disc.fetch(ctx); err != nil {
+	// 	return nil, fmt.Errorf("the inital verse discovery failed, make sure the url(%s) is reachable: %w", url, err)
+	// }
 	return
 }
 

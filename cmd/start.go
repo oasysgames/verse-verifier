@@ -555,8 +555,7 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 				log.Error("Failed to construct verse-layer client", "err", err)
 			} else {
 				log.Info("Add verse to Verifier", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
-				// s.verifier.AddTask(x.verse.WithVerifiable(l2Client))
-				s.verifier.AddVerse(ctx, x.verse.WithVerifiable(l2Client), x.cfg.ChainID)
+				s.verifier.AddTask(ctx, x.verse.WithVerifiable(l2Client), x.cfg.ChainID)
 			}
 		}
 
@@ -575,8 +574,7 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 
 				log.Info("Add verse to Submitter", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
 				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-				// s.submitter.AddTask(x.verse.WithTransactable(l1Signer, x.verify))
-				s.submitter.AddVerse(ctx, x.verse.WithTransactable(l1Signer, x.verify), x.cfg.ChainID)
+				s.submitter.AddTask(ctx, x.verse.WithTransactable(l1Signer, x.verify), x.cfg.ChainID)
 			}
 		}
 	}

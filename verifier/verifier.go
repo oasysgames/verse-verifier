@@ -20,6 +20,10 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 )
 
+const (
+	FindUnverifiedBySignerLimit = 64
+)
+
 // Worker to verify rollups.
 type Verifier struct {
 	cfg      *config.Verifier
@@ -69,9 +73,10 @@ func (w *Verifier) HasTask(contract common.Address, l2RPC string) bool {
 	return l2RPC == val.(verse.VerifiableVerse).L2Client().URL()
 }
 
-func (w *Verifier) AddTask(task verse.VerifiableVerse) {
+func (w *Verifier) AddTask(ctx context.Context, task verse.VerifiableVerse, chainId uint64) {
 	task.Logger(w.log).Info("Add verifier task")
 	w.tasks.Store(task.RollupContract(), task)
+	w.AddVerse(ctx, task, chainId)
 }
 
 func (w *Verifier) RemoveTask(contract common.Address) {
@@ -365,7 +370,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	// Will publish all unverified signatures if the flag is set.
 	if publishAllUnverifiedSigs {
 		contract := task.RollupContract()
-		rows, err := w.db.OPSignature.FindUnverifiedBySigner(w.l1Signer.Signer(), nextIndex.Uint64(), &contract)
+		rows, err := w.db.OPSignature.FindUnverifiedBySigner(w.l1Signer.Signer(), nextIndex.Uint64(), &contract, FindUnverifiedBySignerLimit)
 		if err != nil {
 			log.Error("Failed to find unverified signatures", "err", err)
 		}

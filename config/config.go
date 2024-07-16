@@ -165,10 +165,11 @@ func Validate(conf *Config, strict bool) error {
 		if conf.VerseLayer.Discovery.Endpoint == "" && len(conf.VerseLayer.Directs) == 0 {
 			return errors.New("either verse.discovery or verse.directs must be set")
 		}
+		// NOTE: Commented out because bootnode disable verifier and submitter
 		// validate verifier and submitter configuration
-		if !conf.Verifier.Enable && !conf.Submitter.Enable {
-			return errors.New("either verifier.enable or submitter.enable must be set")
-		}
+		// if !conf.Verifier.Enable && !conf.Submitter.Enable {
+		// 	return errors.New("either verifier.enable or submitter.enable must be set")
+		// }
 	}
 	return nil
 }

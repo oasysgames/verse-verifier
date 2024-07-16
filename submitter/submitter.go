@@ -191,9 +191,10 @@ func (w *Submitter) HasTask(contract common.Address) bool {
 	return ok
 }
 
-func (w *Submitter) AddTask(task verse.TransactableVerse) {
+func (w *Submitter) AddTask(ctx context.Context, task verse.TransactableVerse, chainId uint64) {
 	task.Logger(w.log).Info("Add submitter task")
 	w.tasks.Store(task.RollupContract(), task)
+	w.AddVerse(ctx, task, chainId)
 }
 
 func (w *Submitter) RemoveTask(contract common.Address) {

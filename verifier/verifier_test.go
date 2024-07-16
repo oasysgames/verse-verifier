@@ -54,7 +54,7 @@ func (s *VerifierTestSuite) SetupTest() {
 	}, s.DB, &MockP2P{sigsCh: s.sigsCh}, s.SignableHub)
 
 	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)
-	s.verifier.AddTask(s.task)
+	s.verifier.AddTask(context.Background(), s.task, 0)
 }
 
 func (s *VerifierTestSuite) TestVerify() {
@@ -281,9 +281,12 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	s.Hub.Commit()
 
 	// no prior signature than verified index should be sent
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		sigs = <-s.sigsCh
-		s.Len(sigs, 2)
+		if len(sigs) == len(batches) {
+			// signatures before incrementing `nextIndex` are remained
+			continue
+		}
 		for _, sig := range sigs {
 			s.True(sig.RollupIndex >= uint64(nextIndex))
 		}
