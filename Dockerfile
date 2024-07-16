@@ -11,6 +11,10 @@ ADD . ./
 ENV CGO_ENABLED=1
 RUN go build -a -o oasvlfy -tags netgo -installsuffix netgo --ldflags='-s -w -extldflags "-static"' -buildvcs=false
 
+# Binary extraction stage
+FROM scratch as binaries
+COPY --from=builder /build/oasvlfy /oasvlfy
+
 # Final stage
 FROM gcr.io/distroless/base-debian12
 COPY --from=builder /build/oasvlfy /usr/local/bin/oasvlfy
