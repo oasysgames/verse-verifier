@@ -53,7 +53,7 @@ func NewSubmitter(
 	}
 }
 
-// Deprecated
+// Deprecated:
 func (w *Submitter) Start(ctx context.Context) {
 	w.log.Info("Submitter started",
 		"interval", w.cfg.Interval,
@@ -67,13 +67,6 @@ func (w *Submitter) Start(ctx context.Context) {
 		"use-multicall", w.cfg.UseMulticall,
 		"multicall", w.cfg.MulticallAddress)
 	w.workLoop(ctx)
-}
-
-func (w *Submitter) AddVerse(ctx context.Context, v verse.TransactableVerse, chainId uint64) {
-	// Start submitting loop
-	// 1. Request signatures every interval
-	// 2. Submit verify tx if enough signatures are collected
-	go w.startSubmitter(ctx, v, chainId)
 }
 
 func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVerse, chainId uint64) {
@@ -146,7 +139,7 @@ func (w *Submitter) cleanOldSignatures(contract common.Address, verifiedIndex ui
 	return nil
 }
 
-// Deprecated
+// Deprecated:
 func (w *Submitter) workLoop(ctx context.Context) {
 	wg := util.NewWorkerGroup(w.cfg.Concurrency)
 	running := &sync.Map{}
@@ -193,7 +186,10 @@ func (w *Submitter) HasTask(contract common.Address) bool {
 func (w *Submitter) AddTask(ctx context.Context, task verse.TransactableVerse, chainId uint64) {
 	task.Logger(w.log).Info("Add submitter task")
 	w.tasks.Store(task.RollupContract(), task)
-	w.AddVerse(ctx, task, chainId)
+	// Start submitting loop
+	// 1. Request signatures every interval
+	// 2. Submit verify tx if enough signatures are collected
+	go w.startSubmitter(ctx, task, chainId)
 }
 
 func (w *Submitter) RemoveTask(contract common.Address) {
@@ -241,8 +237,6 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, veri
 		return nextIndex.Uint64(), fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	// Skip waiting for confirmation. if sent tx is failed, it will be re-sent in the next interval.
-	// w.waitForConfirmation(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
 	if err = w.waitForReceipt(ctx, task.L1Signer(), tx); err != nil {
 		return nextIndex.Uint64(), fmt.Errorf("failed to wait for receipt: %w", err)
 	}
@@ -415,44 +409,6 @@ func (w *Submitter) sendMulticallTx(
 		"gas-tip", tx.GasTipCap(),
 	)
 	return tx, nil
-}
-
-func (w *Submitter) waitForConfirmation(
-	log log.Logger,
-	ctx context.Context,
-	l1Client ethutil.SignableClient,
-	tx *types.Transaction,
-) {
-	// wait for block to be validated
-	receipt, err := bind.WaitMined(ctx, l1Client, tx)
-	if err != nil {
-		log.Error("Failed to receive receipt", "err", err)
-		return
-	}
-	if receipt.Status != 1 {
-		log.Error("Transaction reverted")
-		return
-	}
-
-	// wait for confirmations
-	confirmed := map[common.Hash]bool{receipt.BlockHash: true}
-	for {
-		remaining := w.cfg.Confirmations - len(confirmed)
-		if remaining <= 0 {
-			log.Info("Transaction succeeded")
-			return
-		}
-
-		log.Info("Wait for confirmation", "remaining", remaining)
-		time.Sleep(time.Second)
-
-		h, err := l1Client.HeaderByNumber(ctx, nil)
-		if err != nil {
-			log.Error("Failed to fetch block header", "err", err)
-			continue
-		}
-		confirmed[h.Hash()] = true
-	}
 }
 
 func (w *Submitter) waitForReceipt(

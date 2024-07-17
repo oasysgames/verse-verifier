@@ -19,7 +19,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/oasysgames/oasys-optimism-verifier/beacon"
 	"github.com/oasysgames/oasys-optimism-verifier/cmd/ipccmd"
-	"github.com/oasysgames/oasys-optimism-verifier/collector"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
@@ -29,7 +28,6 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/metrics"
 	"github.com/oasysgames/oasys-optimism-verifier/p2p"
 	"github.com/oasysgames/oasys-optimism-verifier/submitter"
-	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verifier"
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 	"github.com/oasysgames/oasys-optimism-verifier/version"
@@ -83,7 +81,6 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	})
 
 	// setup workers
-	s.mustSetupCollector()
 	s.mustSetupVerifier()
 	s.setupSubmitter()
 	s.mustSetupBeacon()
@@ -99,9 +96,6 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 		s.smcache.RefreshLoop(ctx, time.Hour)
 	}()
 
-	// s.startCollector(ctx) -> Necessary event logs are directly fetched from the chain during verification
-	// s.startVerifier(ctx)-> Verificatin starts whenever the verse is discovered
-	// s.startSubmitter(ctx) -> Submission starts whenever the verse is discovered
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
 	log.Info("All workers started")
@@ -148,21 +142,19 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 }
 
 type server struct {
-	wg             sync.WaitGroup
-	conf           *config.Config
-	db             *database.Database
-	signers        map[string]ethutil.Signer
-	hub            ethutil.Client
-	smcache        *stakemanager.Cache
-	p2p            *p2p.Node
-	blockCollector *collector.BlockCollector
-	eventCollector *collector.EventCollector
-	verifier       *verifier.Verifier
-	submitter      *submitter.Submitter
-	bw             *beacon.BeaconWorker
-	msvr           *http.Server
-	psvr           *http.Server
-	ipc            *ipc.IPCServer
+	wg        sync.WaitGroup
+	conf      *config.Config
+	db        *database.Database
+	signers   map[string]ethutil.Signer
+	hub       ethutil.Client
+	smcache   *stakemanager.Cache
+	p2p       *p2p.Node
+	verifier  *verifier.Verifier
+	submitter *submitter.Submitter
+	bw        *beacon.BeaconWorker
+	msvr      *http.Server
+	psvr      *http.Server
+	ipc       *ipc.IPCServer
 }
 
 func mustNewServer(ctx context.Context) *server {
@@ -307,51 +299,6 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	}()
 }
 
-func (s *server) mustSetupCollector() {
-	if !s.conf.Verifier.Enable {
-		return
-	}
-
-	signer, ok := s.signers[s.conf.Verifier.Wallet]
-	if !ok {
-		log.Crit("Wallet for the Verifier not found", "wallet", s.conf.Verifier.Wallet)
-	}
-
-	s.blockCollector = collector.NewBlockCollector(&s.conf.Verifier, s.db, s.hub)
-	s.eventCollector = collector.NewEventCollector(&s.conf.Verifier, s.db, s.hub, signer.From())
-}
-
-func (s *server) startCollector(ctx context.Context) {
-	if s.blockCollector == nil || s.eventCollector == nil {
-		return
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer func() {
-			defer s.wg.Done()
-			log.Info("Block collector has stopped, decrement wait group")
-		}()
-
-		ticker := time.NewTicker(s.conf.Verifier.Interval)
-		defer ticker.Stop()
-
-		log.Info("Block collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
-		log.Info("Event collector started", "interval", s.conf.Verifier.Interval, "block-limit", s.conf.Verifier.BlockLimit)
-
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("Block collector stopped")
-				return
-			case <-ticker.C:
-				s.blockCollector.Work(ctx)
-				s.eventCollector.Work(ctx)
-			}
-		}
-	}()
-}
-
 func (s *server) mustSetupVerifier() {
 	if !s.conf.Verifier.Enable {
 		return
@@ -366,86 +313,12 @@ func (s *server) mustSetupVerifier() {
 	s.verifier = verifier.NewVerifier(&s.conf.Verifier, s.db, s.p2p, l1Signer)
 }
 
-func (s *server) startVerifier(ctx context.Context) {
-	if s.verifier == nil {
-		return
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer func() {
-			defer s.wg.Done()
-			log.Info("Verifier has stopped, decrement wait group")
-		}()
-
-		// Start verifier ticker
-		vTick := time.NewTicker(s.conf.Verifier.Interval)
-		defer vTick.Stop()
-
-		// Subscribe new signature from validators
-		var (
-			sub        = s.verifier.SubscribeNewSignature(ctx)
-			subscribes = map[common.Address]*database.OptimismSignature{}
-		)
-		defer sub.Cancel()
-
-		// Publish new signature via p2p
-		debounce := time.NewTicker(time.Second * 5)
-		defer debounce.Stop()
-
-		// Optimize database every hour
-		dbTick := util.NewTicker(s.conf.Verifier.OptimizeInterval, 1)
-		defer dbTick.Stop()
-
-		log.Info("Verifier started", "signer", s.verifier.L1Signer().Signer())
-
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("Verifier stopped")
-				return
-			case <-vTick.C:
-				s.verifier.Work(ctx)
-			case sig := <-sub.Next():
-				subscribes[sig.Signer.Address] = sig
-			case <-debounce.C:
-				if len(subscribes) == 0 {
-					continue
-				}
-				var publishes []*database.OptimismSignature
-				for _, sig := range subscribes {
-					publishes = append(publishes, sig)
-				}
-				s.p2p.PublishSignatures(ctx, publishes)
-				subscribes = map[common.Address]*database.OptimismSignature{}
-			case <-dbTick.C:
-				log.Info("Optimize database")
-				s.db.OPSignature.RepairPreviousID(s.verifier.L1Signer().Signer())
-			}
-		}
-	}()
-}
-
 func (s *server) setupSubmitter() {
 	if !s.conf.Submitter.Enable {
 		return
 	}
 
 	s.submitter = submitter.NewSubmitter(&s.conf.Submitter, s.db, s.smcache)
-}
-
-func (s *server) startSubmitter(ctx context.Context) {
-	if s.submitter == nil {
-		return
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
-		s.submitter.Start(ctx)
-		log.Info("Submitter has stopped, decrement wait group")
-	}()
 }
 
 func (s *server) startVerseDiscovery(ctx context.Context) {

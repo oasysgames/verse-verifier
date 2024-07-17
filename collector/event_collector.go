@@ -24,6 +24,7 @@ type EventCollector struct {
 	log    log.Logger
 }
 
+// Deprecated:
 func NewEventCollector(
 	cfg *config.Verifier,
 	db *database.Database,
