@@ -2,8 +2,12 @@ package ethutil
 
 import (
 	"context"
+	"fmt"
 	"math/big"
+	"strings"
+	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -13,6 +17,7 @@ import (
 	"github.com/lmittmann/w3"
 	"github.com/lmittmann/w3/module/eth"
 	"github.com/lmittmann/w3/w3types"
+	"golang.org/x/sync/semaphore"
 )
 
 type SignDataFn = func(hash []byte) (sig []byte, err error)
@@ -27,6 +32,7 @@ type Client interface {
 		ctx context.Context,
 		hash common.Hash,
 	) (tx *types.Transaction, isPending bool, err error)
+	FilterLogsWithRateThottling(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
 	NewBatchHeaderClient() (BatchHeaderClient, error)
 	GetProof(ctx context.Context, account common.Address, keys []string, blockNumber *big.Int) (*gethclient.AccountResult, error)
 }
@@ -46,6 +52,8 @@ type client struct {
 
 	url string
 	rpc *rpc.Client
+	// used for api rate thottling.
+	sem *semaphore.Weighted
 }
 
 func NewClient(url string) (Client, error) {
@@ -54,10 +62,14 @@ func NewClient(url string) (Client, error) {
 		return nil, err
 	}
 
+	// This is magic number, it should be updated based on the network.
+	// semaphore is used for log filtering rate thottling for now.
+	const concurrency = 2
 	return &client{
 		Client: ethclient.NewClient(c),
 		url:    url,
 		rpc:    c,
+		sem:    semaphore.NewWeighted(concurrency),
 	}, nil
 }
 
@@ -70,6 +82,29 @@ func (c *client) TransactionByHash(
 	hash common.Hash,
 ) (tx *types.Transaction, isPending bool, err error) {
 	return c.Client.TransactionByHash(ctx, hash)
+}
+
+func (c *client) FilterLogsWithRateThottling(ctx context.Context, q ethereum.FilterQuery) (logs []types.Log, err error) {
+	if err = c.sem.Acquire(ctx, 1); err != nil {
+		// continue even if we can't acquire semaphore.
+		fmt.Printf("***** WARN *****\nfailed to acquire semaphore in filter: %v\n", err)
+	} else {
+		defer c.sem.Release(1)
+	}
+
+	logs, err = c.Client.FilterLogs(ctx, q)
+	if err != nil && strings.Contains(err.Error(), "too many requests") {
+		// sleep longer if the rate limit is reached.
+		time.Sleep(3 * time.Second)
+		return
+	}
+
+	// sleep if the filter range is big.
+	if 1024 <= q.ToBlock.Sub(q.ToBlock, q.FromBlock).Uint64() {
+		time.Sleep(300 * time.Microsecond)
+	}
+
+	return
 }
 
 func (c *client) NewBatchHeaderClient() (BatchHeaderClient, error) {

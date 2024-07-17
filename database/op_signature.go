@@ -3,11 +3,17 @@ package database
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
+)
+
+const (
+	DeleteOldsLimit             = 1024
+	FindUnverifiedBySignerLimit = 64
 )
 
 type OptimismSignatureDB db
@@ -143,7 +149,6 @@ func (db *OptimismSignatureDB) FindUnverifiedBySigner(
 		Joins("Signer").
 		Joins("Contract").
 		Where("optimism_signatures.signer_id = ?", _signer.ID).
-		Order("optimism_signatures.id DESC").
 		Where("optimism_signatures.batch_index >= ?", unverifiedIndex).
 		Limit(limit)
 
@@ -279,16 +284,22 @@ func (db *OptimismSignatureDB) Deletes(
 func (db *OptimismSignatureDB) DeleteOlds(
 	contract common.Address,
 	rollupIndex uint64,
+	limit int,
 ) (int64, error) {
+	_contract, err := db.db.OPContract.FindOrCreate(contract)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find contract(%s) during delete old signatures: %w", contract.Hex(), err)
+	}
+
 	var affected int64
-	err := db.rawdb.Transaction(func(s *gorm.DB) error {
+	err = db.rawdb.Transaction(func(s *gorm.DB) error {
+
 		var ids []string
 		tx := s.
 			Model(&OptimismSignature{}).
-			Joins("Signer").
-			Joins("Contract").
-			Where("Contract.address = ?", contract).
+			Where("optimism_signatures.optimism_scc_id = ?", _contract.ID).
 			Where("optimism_signatures.batch_index <= ?", rollupIndex).
+			Limit(limit).
 			Pluck("optimism_signatures.id", &ids)
 		if tx.Error != nil {
 			return tx.Error

@@ -14,12 +14,12 @@ type OPEvent interface {
 	idCol() string
 	contractCol() string
 	rollupIndexCol() string
-	assignEvent(contract *OptimismContract, e any) error
 
 	Logger(base log.Logger) log.Logger
 	GetContract() *OptimismContract
 	GetRollupIndex() uint64
 	GetRollupHash() common.Hash
+	AssignEvent(contract *OptimismContract, e any) error
 }
 
 type OPEventConstraint[X any] interface {
@@ -131,7 +131,7 @@ func (db *OPEventDB[T, PT]) Save(contract common.Address, e any) (OPEvent, error
 	err := db.db.Transaction(func(txdb *Database) error {
 		if c, err := txdb.OPContract.FindOrCreate(contract); err != nil {
 			return err
-		} else if err := row.assignEvent(c, e); err != nil {
+		} else if err := row.AssignEvent(c, e); err != nil {
 			return err
 		}
 		return txdb.rawdb.Create(&row).Error

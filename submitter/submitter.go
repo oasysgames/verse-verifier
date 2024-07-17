@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 	"sync"
 	"time"
 
@@ -107,7 +106,7 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 				// Reset the ticker to the original interval
 				resetDuration(w.cfg.Interval)
 				continue
-			} else if err != nil && strings.Contains(err.Error(), "stake amount shortage") {
+			} else if _, ok := err.(*StakeAmountShortage); ok {
 				// Wait until enough signatures are collected
 				w.log.Info("Waiting for enough signatures", "nextIndex", nextIndex, "chainId", chainId)
 				// Reset the ticker to shorten the interval to be able to submit verify tx without waiting for the next interval
@@ -141,7 +140,7 @@ func (w *Submitter) cleanOldSignatures(contract common.Address, verifiedIndex ui
 	}
 	// Just keep the last verified index
 	deleteIndex := uint64(verifiedIndex - 1)
-	if _, err := w.db.OPSignature.DeleteOlds(contract, deleteIndex); err != nil {
+	if _, err := w.db.OPSignature.DeleteOlds(contract, deleteIndex, database.DeleteOldsLimit); err != nil {
 		return fmt.Errorf("failed to delete old signatures. deleteIndex: %d, : %w", deleteIndex, err)
 	}
 	return nil
@@ -237,14 +236,15 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, veri
 	} else {
 		tx, err = w.sendNormalTx(log, ctx, task, iter)
 	}
-
 	if err != nil {
 		log.Debug(err.Error())
 		return nextIndex.Uint64(), fmt.Errorf("failed to send transaction: %w", err)
-	} else if tx != nil {
-		// Skip waiting for confirmation. if sent tx is failed, it will be re-sent in the next interval.
-		// w.waitForConfirmation(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
-		w.waitForReceipt(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
+	}
+
+	// Skip waiting for confirmation. if sent tx is failed, it will be re-sent in the next interval.
+	// w.waitForConfirmation(log.New("tx", tx.Hash()), ctx, task.L1Signer(), tx)
+	if err = w.waitForReceipt(ctx, task.L1Signer(), tx); err != nil {
+		return nextIndex.Uint64(), fmt.Errorf("failed to wait for receipt: %w", err)
 	}
 
 	return nextIndex.Uint64(), nil
@@ -456,21 +456,19 @@ func (w *Submitter) waitForConfirmation(
 }
 
 func (w *Submitter) waitForReceipt(
-	log log.Logger,
 	ctx context.Context,
 	l1Client ethutil.SignableClient,
 	tx *types.Transaction,
-) {
+) error {
 	// wait for block to be validated
 	receipt, err := bind.WaitMined(ctx, l1Client, tx)
 	if err != nil {
-		log.Error("Failed to receive receipt", "err", err)
-		return
+		return fmt.Errorf("failed to receive receipt. tx: %s, : %w", tx.Hash().Hex(), err)
 	}
 	if receipt.Status != 1 {
-		log.Error("Transaction reverted")
-		return
+		return fmt.Errorf("transaction reverted. tx: %s", tx.Hash().Hex())
 	}
+	return nil
 }
 
 func fromWei(wei *big.Int) *big.Int {

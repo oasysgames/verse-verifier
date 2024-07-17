@@ -12,16 +12,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
-	"github.com/oasysgames/oasys-optimism-verifier/contract/l2oo"
-	"github.com/oasysgames/oasys-optimism-verifier/contract/scc"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
-)
-
-const (
-	FindUnverifiedBySignerLimit = 64
 )
 
 // Worker to verify rollups.
@@ -241,6 +235,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	var (
 		start        uint64
 		skipFetchlog bool
+		oneDayBlocks = uint64(5760)
 	)
 	end, err := w.l1Signer.BlockNumber(ctx)
 	if err != nil {
@@ -259,11 +254,10 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 		} else {
 			start = end - offset
 		}
-		// override the timeout to prevent the timeout error
-		// Fetching logs with wide range may take a long time.
-		var cancelLogTimeout context.CancelFunc
-		ctx, cancelLogTimeout = context.WithTimeout(ctxOrigin, 300*time.Second)
-		defer cancelLogTimeout()
+	}
+	if oneDayBlocks < end-start {
+		// If the range is too wide, divide it into one-day blocks.
+		end = start + oneDayBlocks
 	}
 
 	if skipFetchlog && !publishAllUnverifiedSigs {
@@ -274,7 +268,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	// fetch event logs
 	var logs []types.Log
 	if !skipFetchlog {
-		if logs, err = w.l1Signer.FilterLogs(ctx, verse.NewEventLogFilter(start, end, []common.Address{task.RollupContract()})); err != nil {
+		if logs, err = w.l1Signer.FilterLogsWithRateThottling(ctx, verse.NewEventLogFilter(start, end, []common.Address{task.RollupContract()})); err != nil {
 			return fmt.Errorf("failed to fetch(start: %d, end: %d) event logs from hub-layer: %w", start, end, err)
 		}
 	}
@@ -286,82 +280,39 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	// verify the fetched logs
 	opsigs := []*database.OptimismSignature{}
 	for i := range logs {
-		event, err := verse.ParseEventLog(&logs[i])
+		row, err := w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log)
 		if err != nil {
-			log.Warn("Failed to parse event log", "block", logs[i].BlockNumber, "contract", logs[i].Address.Hex(), "err", err)
-			continue
+			if errors.Is(err, context.Canceled) {
+				// exit if context have been canceled
+				return err
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				// retry if the deadline is exceeded
+				log.Warn("too much time spent on log iteration", "total-logs", len(logs), "current-index", i, "start", start, "end", end)
+				cancel()                                                     // cancel previous context
+				ctx, cancel = context.WithTimeout(ctxOrigin, 30*time.Second) // expand the deadline
+				defer cancel()
+				row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log)
+				if err != nil {
+					// give up if the retry fails
+					log.Error("Failed to verification", "err", err, "rollup-index", nextIndex.Uint64())
+					continue
+				}
+			} else {
+				// continue if other errors
+				log.Error("Failed to verification", "err", err, "rollup-index", nextIndex.Uint64())
+				continue
+			}
 		}
 
-		// parse event log
-		rollupEvent, ok := event.(*verse.RollupedEvent)
-		if !ok {
-			// skip `*verse.DeletedEvent` or `*verse.VerifiedEvent`
-			continue
-		}
-
-		contract, err := w.db.OPContract.FindOrCreate(logs[i].Address)
-		if err != nil {
-			log.Warn("Failed to find or create contract", "err", err)
-			continue
-		}
-
-		var dbEvent database.OPEvent
-		switch t := rollupEvent.Parsed.(type) {
-		case *scc.SccStateBatchAppended:
-			var model database.OptimismState
-			model.BatchIndex = t.BatchIndex.Uint64()
-			model.PrevTotalElements = t.PrevTotalElements.Uint64()
-			model.BatchSize = t.BatchSize.Uint64()
-			model.BatchRoot = t.BatchRoot
-			model.ContractID = contract.ID
-			model.Contract = *contract
-			dbEvent = &model
-		case *l2oo.OasysL2OutputOracleOutputProposed:
-			var model database.OpstackProposal
-			model.L2OutputIndex = t.L2OutputIndex.Uint64()
-			model.OutputRoot = t.OutputRoot
-			model.L2BlockNumber = t.L2BlockNumber.Uint64()
-			model.L1Timestamp = t.L1Timestamp.Uint64()
-			model.ContractID = contract.ID
-			model.Contract = *contract
-			dbEvent = &model
-		default:
-			return fmt.Errorf("unsupported event type: %T", t)
-		}
-
-		if dbEvent.GetRollupIndex() < nextIndex.Uint64() {
-			// skip old events
-			continue
-		}
-
-		approved, err := task.Verify(log, ctx, dbEvent, w.cfg.StateCollectLimit)
-		if err != nil {
-			log.Error("Failed to verification", "err", err, "rollup-index", dbEvent.GetRollupIndex())
-			continue
-		}
-
-		msg := database.NewMessage(dbEvent, w.l1Signer.ChainID(), approved)
-		sig, err := msg.Signature(w.l1Signer.SignData)
-		if err != nil {
-			log.Error("Failed to calculate signature", "err", err, "rollup-index", dbEvent.GetRollupIndex())
-			continue
-		}
-
-		row, err := w.db.OPSignature.Save(
-			nil, nil,
-			w.l1Signer.Signer(),
-			dbEvent.GetContract().Address,
-			dbEvent.GetRollupIndex(),
-			dbEvent.GetRollupHash(),
-			approved,
-			sig)
-		if err != nil {
-			log.Error("Failed to save signature", "err", err, "rollup-index", dbEvent.GetRollupIndex())
+		if row == nil {
+			// skip if the row is nil
+			// - when the event is not a rollup event
+			// - when the event is already verified
 			continue
 		}
 
 		opsigs = append(opsigs, row)
-		log.Debug("Verification completed", "approved", approved, "rollup-index", dbEvent.GetRollupIndex())
+		log.Debug("Verification completed", "approved", row.Approved, "rollup-index", row.RollupIndex)
 	}
 	if len(opsigs) > 0 {
 		log.Info("Completed verification of all fetched logs", "count-logs", len(logs), "count-newsigs", len(opsigs), "start", start, "end", end)
@@ -370,7 +321,7 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	// Will publish all unverified signatures if the flag is set.
 	if publishAllUnverifiedSigs {
 		contract := task.RollupContract()
-		rows, err := w.db.OPSignature.FindUnverifiedBySigner(w.l1Signer.Signer(), nextIndex.Uint64(), &contract, FindUnverifiedBySignerLimit)
+		rows, err := w.db.OPSignature.FindUnverifiedBySigner(w.l1Signer.Signer(), nextIndex.Uint64(), &contract, database.FindUnverifiedBySignerLimit)
 		if err != nil {
 			log.Error("Failed to find unverified signatures", "err", err)
 		}
@@ -385,6 +336,60 @@ func (w *Verifier) work2(ctx context.Context, task verse.VerifiableVerse, chainI
 	}
 
 	return nil
+}
+
+func (w *Verifier) verifyAndSaveLog(ctx context.Context, log *types.Log, task verse.VerifiableVerse, nextIndex uint64, logger log.Logger) (*database.OptimismSignature, error) {
+	event, err := verse.ParseEventLog(log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse event log. block: %d contract: %s,: %w", log.BlockNumber, log.Address.Hex(), err)
+	}
+
+	// parse event log
+	rollupEvent, ok := event.(*verse.RollupedEvent)
+	if !ok {
+		// skip `*verse.DeletedEvent` or `*verse.VerifiedEvent`
+		return nil, nil
+	}
+
+	// cast to database event
+	contract, err := w.db.OPContract.FindOrCreate(log.Address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find or create contract(%s): %w", log.Address.Hex(), err)
+	}
+	dbEvent, err := rollupEvent.CastToDatabaseOPEvent(contract)
+	if err != nil {
+		return nil, fmt.Errorf("failed to cast to database. rollup-index: %d, event: %w", dbEvent.GetRollupIndex(), err)
+	}
+
+	if dbEvent.GetRollupIndex() < nextIndex {
+		// skip old events
+		return nil, nil
+	}
+
+	approved, err := task.Verify(logger, ctx, dbEvent, w.cfg.StateCollectLimit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verification. rollup-index: %d, : %w", dbEvent.GetRollupIndex(), err)
+	}
+
+	msg := database.NewMessage(dbEvent, w.l1Signer.ChainID(), approved)
+	sig, err := msg.Signature(w.l1Signer.SignData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate signature. rollup-index: %d, : %w", dbEvent.GetRollupIndex(), err)
+	}
+
+	row, err := w.db.OPSignature.Save(
+		nil, nil,
+		w.l1Signer.Signer(),
+		dbEvent.GetContract().Address,
+		dbEvent.GetRollupIndex(),
+		dbEvent.GetRollupHash(),
+		approved,
+		sig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save signature. rollup-index: %d, : %w", dbEvent.GetRollupIndex(), err)
+	}
+
+	return row, nil
 }
 
 func (w *Verifier) deleteInvalidNextIndexSignature(task verse.VerifiableVerse, nextIndex uint64) {
@@ -446,7 +451,7 @@ func (w *Verifier) cleanOldSignatures(contract common.Address, nextIndex uint64)
 		return nil
 	}
 	deleteIndex := uint64(verifiedIndex - 3)
-	if _, err := w.db.OPSignature.DeleteOlds(contract, deleteIndex); err != nil {
+	if _, err := w.db.OPSignature.DeleteOlds(contract, deleteIndex, database.DeleteOldsLimit); err != nil {
 		return fmt.Errorf("failed to delete old signatures. deleteIndex: %d, : %w", deleteIndex, err)
 	}
 	return nil

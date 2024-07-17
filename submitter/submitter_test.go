@@ -163,6 +163,7 @@ func (s *SubmitterTestSuite) TestSubmit() {
 
 func (s *SubmitterTestSuite) TestStartSubmitter() {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	batchIndexes := s.Range(0, 5)
 	nextIndex := 2
 	signers := s.StakeManager.Operators
@@ -239,7 +240,8 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 	s.Equal(s.task.L1Signer().Signer(), sender)
 	s.Equal(s.MulticallAddr, *mcallTx.To())
 
-	mcallReceipt, _ := s.Hub.TransactionReceipt(context.Background(), mcallTx.Hash())
+	mcallReceipt, err := s.Hub.TransactionReceipt(context.Background(), mcallTx.Hash())
+	s.NoError(err)
 	s.Len(mcallReceipt.Logs, 6)
 	s.Equal(s.SCCAddr, mcallReceipt.Logs[0].Address)
 	s.Equal(s.SCCVAddr, mcallReceipt.Logs[1].Address)
@@ -281,12 +283,10 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 			}
 		}
 	}
-
-	// Cancel will exit receipt waiting loop
-	cancel()
+	// Wait 1s as the receipt waiting loop 1s interval
+	time.Sleep(1 * time.Second)
 
 	// Confirm old signatures are cleaned up
-	time.Sleep(s.submitter.cfg.Interval)
 	deleteIndex := uint64(1)
 	rows, err := s.DB.OPSignature.Find(nil, nil, &s.SCCAddr, &deleteIndex, 1000, 0)
 	s.NoError(err)

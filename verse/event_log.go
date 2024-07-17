@@ -195,3 +195,22 @@ LOOP:
 		Parsed:   rawEvent,
 	}), nil
 }
+
+func (e *RollupedEvent) CastToDatabaseOPEvent(contract *database.OptimismContract) (dbEvent database.OPEvent, err error) {
+	if e.Parsed == nil {
+		return nil, fmt.Errorf("parsed event is nil, event: %v", e)
+	}
+	switch t := e.Parsed.(type) {
+	case *scc.SccStateBatchAppended:
+		var model database.OptimismState
+		err = model.AssignEvent(contract, e.Parsed)
+		dbEvent = &model
+	case *l2oo.OasysL2OutputOracleOutputProposed:
+		var model database.OpstackProposal
+		err = model.AssignEvent(contract, e.Parsed)
+		dbEvent = &model
+	default:
+		err = fmt.Errorf("unsupported event type: %T", t)
+	}
+	return
+}
