@@ -99,8 +99,8 @@ func (c *client) FilterLogsWithRateThottling(ctx context.Context, q ethereum.Fil
 		return
 	}
 
-	// sleep if the filter range is big.
-	if 1024 <= q.ToBlock.Sub(q.ToBlock, q.FromBlock).Uint64() {
+	// sleep if the filter range is big or not set.
+	if q.ToBlock == nil || q.FromBlock == nil || 1024 <= q.ToBlock.Sub(q.ToBlock, q.FromBlock).Uint64() {
 		time.Sleep(300 * time.Microsecond)
 	}
 

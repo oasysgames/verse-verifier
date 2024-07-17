@@ -55,10 +55,10 @@ func (s *VerifierTestSuite) SetupTest() {
 }
 
 func (s *VerifierTestSuite) TestStartVerifier() {
-	// start verifier
+	// start verifier by adding task
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go s.verifier.startVerifier(ctx, s.task, 0)
+	s.verifier.AddTask(ctx, s.task, 0)
 
 	batches := s.Range(0, 3)
 	batchSize := 5

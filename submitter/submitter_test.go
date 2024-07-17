@@ -168,9 +168,9 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 	nextIndex := 2
 	signers := s.StakeManager.Operators
 
-	// Start submitter
+	// Start submitter by adding task
 	s.submitter.stakemanager.Refresh(ctx)
-	go s.submitter.startSubmitter(ctx, s.task, 0)
+	s.submitter.AddTask(ctx, s.task, 0)
 	// Dry run to cover no signature case
 	// Manually confirmed by checking the logs
 	time.Sleep(s.submitter.cfg.Interval)

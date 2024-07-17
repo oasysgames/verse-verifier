@@ -69,7 +69,7 @@ func (w *Submitter) Start(ctx context.Context) {
 	w.workLoop(ctx)
 }
 
-func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVerse, chainId uint64) {
+func (w *Submitter) startSubmitter(ctx context.Context, contract common.Address, chainId uint64) {
 	var (
 		tick          = time.NewTicker(w.cfg.Interval)
 		duration      = w.cfg.Interval
@@ -90,6 +90,11 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 			w.log.Info("Submitting work stopped", "chainId", chainId)
 			return
 		case <-tick.C:
+			v, found := w.GetTask(contract)
+			if !found {
+				w.log.Info("Exit submitter loop as the task is evicted", "chainId", chainId)
+				return
+			}
 			nextIndex, err := w.work(ctx, v, verifiedIndex)
 			if errors.Is(err, verse.ErrNotSufficientConfirmations) {
 				w.log.Info("Not enough confirmations", "nextIndex", nextIndex, "chainId", chainId)
@@ -99,7 +104,7 @@ func (w *Submitter) startSubmitter(ctx context.Context, v verse.TransactableVers
 				// Reset the ticker to the original interval
 				resetDuration(w.cfg.Interval)
 				continue
-			} else if _, ok := err.(*StakeAmountShortage); ok {
+			} else if errors.Is(err, &StakeAmountShortage{}) {
 				// Wait until enough signatures are collected
 				w.log.Info("Waiting for enough signatures", "nextIndex", nextIndex, "chainId", chainId)
 				// Reset the ticker to shorten the interval to be able to submit verify tx without waiting for the next interval
@@ -185,11 +190,24 @@ func (w *Submitter) HasTask(contract common.Address) bool {
 
 func (w *Submitter) AddTask(ctx context.Context, task verse.TransactableVerse, chainId uint64) {
 	task.Logger(w.log).Info("Add submitter task")
+	exists := w.HasTask(task.RollupContract())
 	w.tasks.Store(task.RollupContract(), task)
-	// Start submitting loop
-	// 1. Request signatures every interval
-	// 2. Submit verify tx if enough signatures are collected
-	go w.startSubmitter(ctx, task, chainId)
+	if !exists {
+		// Start submitting loop by each contract.
+		// 1. Request signatures every interval
+		// 2. Submit verify tx if enough signatures are collected
+		go w.startSubmitter(ctx, task.RollupContract(), chainId)
+	}
+}
+
+func (w *Submitter) GetTask(contract common.Address) (task verse.TransactableVerse, found bool) {
+	var val any
+	val, found = w.tasks.Load(contract)
+	if !found {
+		return
+	}
+	task, found = val.(verse.TransactableVerse)
+	return
 }
 
 func (w *Submitter) RemoveTask(contract common.Address) {

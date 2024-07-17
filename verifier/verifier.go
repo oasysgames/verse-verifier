@@ -64,15 +64,29 @@ func (w *Verifier) HasTask(contract common.Address, l2RPC string) bool {
 
 func (w *Verifier) AddTask(ctx context.Context, task verse.VerifiableVerse, chainId uint64) {
 	task.Logger(w.log).Info("Add verifier task")
+	_, exists := w.tasks.Load(task.RollupContract())
 	w.tasks.Store(task.RollupContract(), task)
-	go w.startVerifier(ctx, task, chainId)
+	if !exists {
+		// Start the verifier by each contract.
+		go w.startVerifier(ctx, task.RollupContract(), chainId)
+	}
+}
+
+func (w *Verifier) GetTask(contract common.Address) (task verse.VerifiableVerse, found bool) {
+	var val any
+	val, found = w.tasks.Load(contract)
+	if !found {
+		return
+	}
+	task, found = val.(verse.VerifiableVerse)
+	return
 }
 
 func (w *Verifier) RemoveTask(contract common.Address) {
 	w.tasks.Delete(contract)
 }
 
-func (w *Verifier) startVerifier(ctx context.Context, v verse.VerifiableVerse, chainId uint64) {
+func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, chainId uint64) {
 	var (
 		tick                     = time.NewTicker(w.cfg.Interval)
 		nextEventFetchStartBlock uint64
@@ -91,7 +105,12 @@ func (w *Verifier) startVerifier(ctx context.Context, v verse.VerifiableVerse, c
 			w.log.Info("Verifying work stopped", "chainId", chainId)
 			return
 		case <-tick.C:
-			if err := w.work(ctx, v, chainId, &nextEventFetchStartBlock, publishAllUnverifiedSigs()); err != nil {
+			task, found := w.GetTask(contract)
+			if !found {
+				w.log.Info("exit verifier as task is evicted", "chainId", chainId)
+				return
+			}
+			if err := w.work(ctx, task, chainId, &nextEventFetchStartBlock, publishAllUnverifiedSigs()); err != nil {
 				w.log.Error("Failed to run verification", "err", err)
 			}
 		}
