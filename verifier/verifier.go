@@ -63,7 +63,6 @@ func (w *Verifier) HasTask(contract common.Address, l2RPC string) bool {
 }
 
 func (w *Verifier) AddTask(ctx context.Context, task verse.VerifiableVerse, chainId uint64) {
-	task.Logger(w.log).Info("Add verifier task")
 	_, exists := w.tasks.Load(task.RollupContract())
 	w.tasks.Store(task.RollupContract(), task)
 	if !exists {
@@ -238,6 +237,7 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 	if len(opsigs) > 0 {
 		// publish all signatures at once
 		w.p2p.PublishSignatures(ctx, opsigs)
+		log.Info("Published signatures", "count-logs", len(logs), "count-sigs", len(opsigs), "start", start, "end", end)
 	} else {
 		log.Info("No signatures to publish", "count-logs", len(logs), "start", start, "end", end)
 	}

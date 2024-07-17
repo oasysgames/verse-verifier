@@ -721,8 +721,6 @@ func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismS
 		w.log.Error("Failed to publish latest signatures", "err", err)
 		return
 	}
-
-	w.log.Info("Publish latest signatures", "len", len(rows))
 }
 
 func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, error) {

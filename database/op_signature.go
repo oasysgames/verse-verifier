@@ -150,6 +150,7 @@ func (db *OptimismSignatureDB) FindUnverifiedBySigner(
 		Joins("Contract").
 		Where("optimism_signatures.signer_id = ?", _signer.ID).
 		Where("optimism_signatures.batch_index >= ?", unverifiedIndex).
+		Order("optimism_signatures.batch_index").
 		Limit(limit)
 
 	if contract != nil {

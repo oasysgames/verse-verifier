@@ -189,7 +189,6 @@ func (w *Submitter) HasTask(contract common.Address) bool {
 }
 
 func (w *Submitter) AddTask(ctx context.Context, task verse.TransactableVerse, chainId uint64) {
-	task.Logger(w.log).Info("Add submitter task")
 	exists := w.HasTask(task.RollupContract())
 	w.tasks.Store(task.RollupContract(), task)
 	if !exists {
