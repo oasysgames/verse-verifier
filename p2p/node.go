@@ -205,41 +205,6 @@ func (w *Node) Host() host.Host                  { return w.h }
 func (w *Node) Routing() routing.Routing         { return w.dht }
 func (w *Node) HolePunchHelper() HolePunchHelper { return w.hpHelper }
 
-func (w *Node) meterLoop(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 15)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			nwstat := newNetworkStatus(w.h)
-			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
-			w.meterUDPConnections.Set(float64(nwstat.connections.udp))
-			w.meterRelayConnections.Set(float64(nwstat.connections.relay))
-			w.meterRelayHopStreams.Set(float64(nwstat.streams.hop))
-			w.meterRelayStopStreams.Set(float64(nwstat.streams.stop))
-			w.meterVerifierStreams.Set(float64(nwstat.streams.verifier))
-			w.meterPeers.Set(float64(w.h.Peerstore().Peers().Len()))
-		}
-	}
-}
-
-func (w *Node) publishLoop(ctx context.Context) {
-	ticker := time.NewTicker(w.cfg.PublishInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			w.publishLatestSignatures(ctx)
-		}
-	}
-}
-
 func (w *Node) subscribeLoop(ctx context.Context) {
 	type job struct {
 		ctx    context.Context
