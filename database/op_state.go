@@ -36,7 +36,7 @@ func (row *OptimismState) GetRollupHash() common.Hash {
 	return row.BatchRoot
 }
 
-func (row *OptimismState) assignEvent(contract *OptimismContract, e any) error {
+func (row *OptimismState) AssignEvent(contract *OptimismContract, e any) error {
 	t, ok := e.(*scc.SccStateBatchAppended)
 	if !ok {
 		return errors.New("invalid event")

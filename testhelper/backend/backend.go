@@ -37,6 +37,10 @@ type Backend struct {
 	*simulated.Backend
 }
 
+func (b *Backend) FilterLogsWithRateThottling(ctx context.Context, q ethereum.FilterQuery) (logs []types.Log, err error) {
+	return b.FilterLogs(ctx, q)
+}
+
 func (b *Backend) NewBatchHeaderClient() (ethutil.BatchHeaderClient, error) {
 	return &BatchHeaderClient{b}, nil
 }

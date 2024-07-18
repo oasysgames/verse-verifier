@@ -1,6 +1,8 @@
 package ipc
 
 import (
+	"errors"
+	"io"
 	"sync"
 	"time"
 
@@ -9,7 +11,9 @@ import (
 )
 
 const (
-	EOM = 65536
+	EOM = 1 << 16
+	// message type for closing the server
+	CLOSE_REQUEST = 1 << 8
 )
 
 const (
@@ -57,10 +61,18 @@ func (s *IPCServer) Start() {
 			continue
 		}
 
+		// If the message type is CLOSE_REQUEST, exit the loop to close the server
+		// Need this to avoid infinite loop caused by the bug in ipc server
+		if msg.MsgType == CLOSE_REQUEST {
+			s.Write(EOM, nil)
+			s.log.Info("IPC server will close", "msgType", msg.MsgType, "sockname", s.sockname)
+			return
+		}
+
 		if msg.MsgType == -1 {
 			s.log.Debug("Status changed", "sockname", s.sockname, "status", msg.Status)
 			if msg.Status == "Closed" || msg.Status == "Closing" || s.s.StatusCode() == goipc.Closed || s.s.StatusCode() == goipc.Closing {
-				s.log.Info("IPC server closed", "sockname", s.sockname)
+				s.log.Info("IPC server will close", "msgType", msg.MsgType, "sockname", s.sockname)
 				return
 			} else if msg.Status == "Error" || s.s.StatusCode() == goipc.Error {
 				s.log.Error("Error recieved", "sockname", s.sockname, "err", string(msg.Data))
@@ -82,8 +94,28 @@ func (s *IPCServer) Start() {
 	}
 }
 
-func (s *IPCServer) Close() {
+func (s *IPCServer) Close() error {
+	// Due to ipc server's bug, the `Close` method does not close read channel.
+	// Therefore, the read loop is not terminated and the server is not closed.
+	// So we need to send a close request to the server.
+	c, err := NewClient(s.sockname, CLOSE_REQUEST)
+	if err != nil {
+		s.log.Error("Failed to create ipc server close client", "err", err)
+		return err
+	}
+	// Send close request(msgType = 256)
+	if err = c.Write(nil); err != nil {
+		s.log.Error("Failed to write close request", "err", err)
+		return err
+	}
+	// err should be io.EOF
+	if _, err = c.Read(); !errors.Is(err, io.EOF) {
+		s.log.Error("unexpected error", "err", err)
+		return err
+	}
+
 	s.s.Close()
+	return nil
 }
 
 func (s *IPCServer) Write(msgType int, message []byte) error {

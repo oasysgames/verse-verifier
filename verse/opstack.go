@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -52,6 +53,24 @@ func (op *opstack) NextIndex(opts *bind.CallOpts) (*big.Int, error) {
 	return lo.NextVerifyIndex(opts)
 }
 
+func (op *opstack) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
+	var err error
+	if opts.BlockNumber, err = decideConfirmationBlockNumber(opts, confirmation, op.L1Client()); err != nil {
+		if errors.Is(err, ErrNotSufficientConfirmations) && waits {
+			// wait for the next block, then retry
+			time.Sleep(10 * time.Second)
+			return op.NextIndexWithConfirm(opts, confirmation, waits)
+		}
+		return nil, err
+	}
+
+	lo, err := l2oo.NewOasysL2OutputOracle(op.RollupContract(), op.L1Client())
+	if err != nil {
+		return nil, err
+	}
+	return lo.NextVerifyIndex(opts)
+}
+
 func (op *opstack) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
 	return &verifiableOPStack{&verifiableVerse{op, l2Client}}
 }
@@ -73,14 +92,10 @@ func (op *verifiableOPStack) Verify(
 	if !ok {
 		return false, errors.New("not OpstackProposal event")
 	}
-
-	log := op.Logger(base).New("index", row.L2OutputIndex)
-
 	// verify storage proof of L2ToL1MessagePasser
 	output, err := GetOpstackOutputV0(ctx, op.L2Client(),
 		OpstackPredeploys.L2ToL1MessagePasser, []string{}, row.L2BlockNumber)
 	if err != nil {
-		log.Error("Failed to l2output", "err", err)
 		return false, err
 	}
 
