@@ -119,8 +119,13 @@ func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, c
 func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId uint64, nextStart *uint64, publishAllUnverifiedSigs bool) error {
 	// run verification tasks until time out
 	var (
-		cancel    context.CancelFunc
-		ctxOrigin = ctx
+		cancel       context.CancelFunc
+		ctxOrigin    = ctx
+		setNextStart = func(endBlock uint64) {
+			// Next start block is the current end block + 1
+			endBlock += 1
+			*nextStart = endBlock
+		}
 	)
 	ctx, cancel = context.WithTimeout(ctx, w.cfg.StateCollectTimeout)
 	defer cancel()
@@ -161,13 +166,15 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 			start = end - offset
 		}
 	}
-	if oneDayBlocks < end-start {
+	if start < end && oneDayBlocks < end-start {
 		// If the range is too wide, divide it into one-day blocks.
 		end = start + oneDayBlocks
 	}
+	log = log.New("start", start, "end", end)
 
 	if skipFetchlog && !publishAllUnverifiedSigs {
-		log.Info("Skip fetching logs", "start", start, "end", end)
+		log.Info("Skip fetching logs")
+		setNextStart(end)
 		return nil
 	}
 
@@ -176,15 +183,15 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 	if !skipFetchlog {
 		if logs, err = w.l1Signer.FilterLogsWithRateThottling(ctx, verse.NewEventLogFilter(start, end, []common.Address{task.RollupContract()})); err != nil {
 			if errors.Is(err, ethutil.ErrTooManyRequests) {
-				log.Warn("Rate limit exceeded", "start", start, "end", end, "err", err)
+				log.Warn("Rate limit exceeded", "err", err)
 			}
 			return fmt.Errorf("failed to fetch(start: %d, end: %d) event logs from hub-layer: %w", start, end, err)
 		}
 	}
+	log = log.New("count-logs", len(logs))
 
-	// Next start block is the current end block + 1
-	end += 1
-	*nextStart = end
+	// Only if succeed to fetch logs, update the next start block.
+	setNextStart(end)
 
 	// verify the fetched logs
 	opsigs := []*database.OptimismSignature{}
@@ -196,7 +203,7 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 				return err
 			} else if errors.Is(err, context.DeadlineExceeded) {
 				// retry if the deadline is exceeded
-				log.Warn("too much time spent on log iteration", "total-logs", len(logs), "current-index", i, "start", start, "end", end)
+				log.Warn("too much time spent on log iteration", "current-index", i)
 				cancel()                                                     // cancel previous context
 				ctx, cancel = context.WithTimeout(ctxOrigin, 30*time.Second) // expand the deadline
 				defer cancel()
@@ -224,7 +231,7 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 		log.Debug("Verification completed", "approved", row.Approved, "rollup-index", row.RollupIndex)
 	}
 	if len(opsigs) > 0 {
-		log.Info("Completed verification of all fetched logs", "count-logs", len(logs), "count-newsigs", len(opsigs), "start", start, "end", end)
+		log.Info("Completed verification of all fetched logs", "count-newsigs", len(opsigs))
 	}
 
 	// Will publish all unverified signatures if the flag is set.
@@ -240,9 +247,9 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 	if len(opsigs) > 0 {
 		// publish all signatures at once
 		w.p2p.PublishSignatures(ctx, opsigs)
-		log.Info("Published signatures", "count-logs", len(logs), "count-sigs", len(opsigs), "start", start, "end", end)
+		log.Info("Published signatures", "count-sigs", len(opsigs), "first-rollup-index", opsigs[0].RollupIndex, "last-rollup-index", opsigs[len(opsigs)-1].RollupIndex)
 	} else {
-		log.Info("No signatures to publish", "count-logs", len(logs), "start", start, "end", end)
+		log.Info("No signatures to publish")
 	}
 
 	return nil
