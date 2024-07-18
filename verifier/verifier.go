@@ -206,29 +206,29 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 	for i := range logs {
 		// verify with retry
 		var row *database.OptimismSignature
-		for retryCounter := 0; retryCounter <= VerifyRetryLimit; retryCounter++ {
+		for counter := 0; counter < VerifyRetryLimit; counter++ {
 			if row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log); err != nil {
+				log.Warn("retry verification", "retry-counter", counter, "err", err)
 				if errors.Is(err, context.Canceled) {
 					// exit if context have been canceled
 					return err
 				} else if errors.Is(err, context.DeadlineExceeded) {
 					// expand the deadline if the deadline is exceeded
-					log.Warn("too much time spent on log iteration", "current-index", i)
+					log.Info("expand the deadline", "log-index", i)
 					cancel()                                                     // cancel previous context
 					ctx, cancel = context.WithTimeout(ctxOrigin, 30*time.Second) // expand the deadline
 					defer cancel()
-				} else {
-					// retry verification after backoff delay: 100ms, 800ms, 6400ms
-					log.Info("retry verification", "retry-counter", retryCounter, "err", err)
-					time.Sleep(100 << (3 * retryCounter) * time.Millisecond)
-					continue
+					continue // retry immediately
 				}
+				// retry after backoff delay: 100ms, 1600ms, 25600ms
+				time.Sleep(100 << (4 * counter) * time.Millisecond)
+				continue
 			}
-
 			// break if the verification is successful
 			break
 		}
 
+		// verification failed
 		if err != nil {
 			// skip the log if the verification failed
 			log.Error("Failed to verification", "log-index", i, "err", err)
