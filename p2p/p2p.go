@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -347,7 +347,7 @@ func decompress(b []byte) ([]byte, error) {
 	if err = r.Close(); err != nil {
 		return nil, err
 	}
-	if b, err = ioutil.ReadAll(r); err != nil {
+	if b, err = io.ReadAll(r); err != nil {
 		return nil, err
 	}
 	return b, nil

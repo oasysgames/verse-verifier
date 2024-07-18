@@ -1,7 +1,8 @@
 package ipc
 
 import (
-	"context"
+	"errors"
+	"io"
 	"sync"
 	"time"
 
@@ -10,7 +11,9 @@ import (
 )
 
 const (
-	EOM = 65536
+	EOM = 1 << 16
+	// message type for closing the server
+	CLOSE_REQUEST = 1 << 8
 )
 
 const (
@@ -47,37 +50,72 @@ func (s *IPCServer) SetHandler(id int, handler Handler) {
 	}
 }
 
-func (s *IPCServer) Start(ctx context.Context) {
-	go func() {
-		for {
-			func() {
-				msg, err := s.s.Read()
-				if err != nil {
-					s.log.Error("Read error", "err", err)
-					s.reConnect()
-					return
-				}
+func (s *IPCServer) Start() {
+	s.log.Info("IPC server started", "sockname", s.sockname)
 
-				if msg.MsgType == -1 {
-					s.log.Debug("Status changed", "status", msg.Status)
-					return
-				}
-
-				// message type -2 is an error, these won't automatically cause the recieve channel to close.
-				if msg.MsgType == -2 {
-					return
-				}
-
-				if handler, ok := s.handlers.Load(msg.MsgType); ok {
-					handler.(Handler)(s, msg.Data)
-				}
-			}()
+	for {
+		msg, err := s.s.Read()
+		if err != nil {
+			s.log.Error("Read error", "err", err)
+			s.reConnect()
+			continue
 		}
-	}()
 
-	s.log.Info("Worker started", "sockname", s.sockname)
-	<-ctx.Done()
-	s.log.Info("Worker stopped")
+		// If the message type is CLOSE_REQUEST, exit the loop to close the server
+		// Need this to avoid infinite loop caused by the bug in ipc server
+		if msg.MsgType == CLOSE_REQUEST {
+			s.Write(EOM, nil)
+			s.log.Info("IPC server will close", "msgType", msg.MsgType, "sockname", s.sockname)
+			return
+		}
+
+		if msg.MsgType == -1 {
+			s.log.Debug("Status changed", "sockname", s.sockname, "status", msg.Status)
+			if msg.Status == "Closed" || msg.Status == "Closing" || s.s.StatusCode() == goipc.Closed || s.s.StatusCode() == goipc.Closing {
+				s.log.Info("IPC server will close", "msgType", msg.MsgType, "sockname", s.sockname)
+				return
+			} else if msg.Status == "Error" || s.s.StatusCode() == goipc.Error {
+				s.log.Error("Error recieved", "sockname", s.sockname, "err", string(msg.Data))
+				s.reConnect()
+				continue
+			}
+			continue
+		}
+
+		// message type -2 is an error, these won't automatically cause the recieve channel to close.
+		if msg.MsgType == -2 {
+			s.log.Warn("Error recieved", "sockname", s.sockname, "err", string(msg.Data))
+			continue
+		}
+
+		if handler, ok := s.handlers.Load(msg.MsgType); ok {
+			handler.(Handler)(s, msg.Data)
+		}
+	}
+}
+
+func (s *IPCServer) Close() error {
+	// Due to ipc server's bug, the `Close` method does not close read channel.
+	// Therefore, the read loop is not terminated and the server is not closed.
+	// So we need to send a close request to the server.
+	c, err := NewClient(s.sockname, CLOSE_REQUEST)
+	if err != nil {
+		s.log.Error("Failed to create ipc server close client", "err", err)
+		return err
+	}
+	// Send close request(msgType = 256)
+	if err = c.Write(nil); err != nil {
+		s.log.Error("Failed to write close request", "err", err)
+		return err
+	}
+	// err should be io.EOF
+	if _, err = c.Read(); !errors.Is(err, io.EOF) {
+		s.log.Error("unexpected error", "err", err)
+		return err
+	}
+
+	s.s.Close()
+	return nil
 }
 
 func (s *IPCServer) Write(msgType int, message []byte) error {

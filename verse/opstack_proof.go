@@ -80,7 +80,7 @@ func GetOpstackOutputV0(
 
 	// make sure that the proof (including storage hash) that we retrieved is correct by verifying it against the state-root
 	if err := VerifyProof(proof, head.Root); err != nil {
-		return nil, fmt.Errorf("invalid proof, state root was %s: %w", head.Root, err)
+		return nil, fmt.Errorf("invalid proof, state root was %s, block number %d: %w", head.Root, block, err)
 	}
 
 	return &OpstackOutputV0{

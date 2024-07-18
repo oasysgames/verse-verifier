@@ -16,7 +16,7 @@ type PprofServer struct {
 	log log.Logger
 }
 
-func NewPprofServer(cfg *config.Pprof) *PprofServer {
+func NewPprofServer(cfg *config.Pprof) (*PprofServer, *http.Server) {
 	runtime.SetBlockProfileRate(cfg.BlockProfileRate)
 	runtime.MemProfileRate = cfg.MemProfileRate
 
@@ -32,31 +32,17 @@ func NewPprofServer(cfg *config.Pprof) *PprofServer {
 		cfg: cfg,
 		mux: mux,
 		log: log.New("worker", "pprof"),
-	}
+	}, &http.Server{Addr: cfg.Listen, Handler: mux}
 }
 
-func (w *PprofServer) ListenAndServe(parent context.Context) error {
+func (w *PprofServer) ListenAndServe(ctx context.Context, psvr *http.Server) error {
 	w.log.Info("Started pprof server",
 		"listen", w.cfg.Listen,
 		"username", w.cfg.BasicAuth.Username,
 		"password", w.cfg.BasicAuth.Password,
 		"block-profile-rate", w.cfg.BlockProfileRate,
 		"mem-profile-rate", w.cfg.MemProfileRate)
-
-	ctx, cancel := context.WithCancel(parent)
-	var err error
-	go func() {
-		defer cancel()
-		err = http.ListenAndServe(w.cfg.Listen, w.mux)
-	}()
-
-	select {
-	case <-parent.Done():
-		w.log.Info("Worker stopped")
-		return nil
-	case <-ctx.Done():
-		return err
-	}
+	return psvr.ListenAndServe()
 }
 
 func wrapBasicAuth(username, password string) func(origin http.HandlerFunc) http.HandlerFunc {

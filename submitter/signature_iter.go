@@ -109,3 +109,8 @@ func (err *StakeAmountShortage) Error() string {
 	return fmt.Sprintf("stake amount shortage, required=%s actual=%s",
 		fromWei(err.required), fromWei(err.actual))
 }
+
+func (err *StakeAmountShortage) Is(target error) bool {
+	_, ok := target.(*StakeAmountShortage)
+	return ok
+}

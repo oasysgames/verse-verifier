@@ -6,7 +6,7 @@ require (
 	github.com/ethereum/go-ethereum v1.14.3
 	github.com/go-playground/validator/v10 v10.11.1
 	github.com/ipfs/go-datastore v0.6.0
-	github.com/james-barrow/golang-ipc v1.0.0
+	github.com/james-barrow/golang-ipc v1.2.4
 	github.com/knadh/koanf/parsers/yaml v0.1.0
 	github.com/knadh/koanf/providers/confmap v0.1.0
 	github.com/knadh/koanf/providers/rawbytes v0.1.0
