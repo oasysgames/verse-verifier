@@ -194,7 +194,11 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 	setNextStart(end)
 
 	// verify the fetched logs
-	opsigs := []*database.OptimismSignature{}
+	var (
+		opsigs = []*database.OptimismSignature{}
+		// flag at least one log verification failed
+		atLeastOneLogVerificationFailed bool
+	)
 	for i := range logs {
 		row, err := w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log)
 		if err != nil {
@@ -211,11 +215,13 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 				if err != nil {
 					// give up if the retry fails
 					log.Error("Failed to verification", "err", err, "rollup-index", nextIndex.Uint64())
+					atLeastOneLogVerificationFailed = true
 					continue
 				}
 			} else {
 				// continue if other errors
 				log.Error("Failed to verification", "err", err, "rollup-index", nextIndex.Uint64())
+				atLeastOneLogVerificationFailed = true
 				continue
 			}
 		}
@@ -250,6 +256,13 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 		log.Info("Published signatures", "count-sigs", len(opsigs), "first-rollup-index", opsigs[0].RollupIndex, "last-rollup-index", opsigs[len(opsigs)-1].RollupIndex)
 	} else {
 		log.Info("No signatures to publish")
+	}
+
+	if atLeastOneLogVerificationFailed {
+		// Remove task if at least one log verification failed.
+		// The removed task will be added again in the next verse discovery.
+		// As the verse discovery interval is 1h, the faild log verification will be retried 1h later.
+		w.RemoveTask(task.RollupContract())
 	}
 
 	return nil
