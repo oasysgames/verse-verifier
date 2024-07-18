@@ -22,6 +22,7 @@ type BlockCollector struct {
 	log log.Logger
 }
 
+// Deprecated:
 func NewBlockCollector(
 	cfg *config.Verifier,
 	db *database.Database,

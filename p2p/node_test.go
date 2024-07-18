@@ -20,7 +20,6 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
-	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -137,170 +136,22 @@ func (s *NodeTestSuite) SetupTest() {
 }
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeFromPubSub() {
-	type want struct {
-		signer  common.Address
-		idAfter string
-	}
-	type testcase struct {
-		msg  *pb.OptimismSignature
-		want want
-	}
-	cases := []*testcase{
-		{
-			toProtoBufSig(s.sigs[s.signer0][s.contract1][99]),
-			want{s.signer0, s.sigs[s.signer0][s.contract1][99].ID},
-		},
-		{
-			toProtoBufSig(s.sigs[s.signer1][s.contract1][199]),
-			want{s.signer1, s.sigs[s.signer1][s.contract1][199].ID},
-		},
-		{
-			&pb.OptimismSignature{
-				Id:          util.ULID(nil).String(),
-				PreviousId:  util.ULID(nil).String(),
-				Signer:      s.signer2[:],
-				Contract:    s.contract2[:],
-				RollupIndex: 0,
-				RollupHash:  s.genStateRoot(s.contract2[:], 0).Bytes(),
-				Approved:    true,
-			},
-			want{s.signer2, ""},
-		},
-	}
+	// succeed to save signature
+	msg := toProtoBufSig(s.sigs[s.signer0][s.contract0][49])
+	saved := s.node2.handleOptimismSignatureExchangeFromPubSub(context.Background(), s.node1.h.ID(), msg)
+	s.True(saved)
+	got, err := s.node2.db.OPSignature.FindByID(msg.Id)
+	s.NoError(err)
+	s.Equal(msg.Id, got.ID)
 
-	lastcase := cases[len(cases)-1]
-	msg := ethutil.NewMessage(
-		s.b2.ChainID(),
-		common.BytesToAddress(lastcase.msg.Contract),
-		new(big.Int).SetUint64(lastcase.msg.RollupIndex),
-		util.BytesToBytes32(lastcase.msg.RollupHash),
-		lastcase.msg.Approved,
-	)
-	sigbin, _ := msg.Signature(s.b2.SignData)
-	lastcase.msg.Signature = sigbin[:]
+	// saving duplicate signature
+	saved = s.node2.handleOptimismSignatureExchangeFromPubSub(context.Background(), s.node1.h.ID(), msg)
+	s.False(saved)
 
-	// set assertion func to subscriber
-	var (
-		reads = []*pb.Stream{}
-		wg    sync.WaitGroup
-	)
-	wg.Add(len(cases))
-	s.node2.h.SetStreamHandler(streamProtocol, func(st network.Stream) {
-		defer wg.Done()
-		defer closeStream(st)
-
-		for {
-			m, _ := readStream(st)
-			reads = append(reads, m)
-
-			switch m.Body.(type) {
-			case *pb.Stream_FindCommonOptimismSignature:
-				writeStream(st, &pb.Stream{Body: &pb.Stream_FindCommonOptimismSignature{
-					FindCommonOptimismSignature: &pb.FindCommonOptimismSignature{
-						Found: nil,
-					},
-				}})
-			case *pb.Stream_OptimismSignatureExchange:
-				writeStream(st, eom)
-			case *pb.Stream_Eom:
-				return
-			}
-		}
-	})
-
-	// publish message
-	for _, tt := range cases {
-		go s.node1.handleOptimismSignatureExchangeFromPubSub(context.Background(), s.node2.h.ID(), tt.msg)
-		time.Sleep(time.Millisecond * 50)
-	}
-	wg.Wait()
-
-	s.Len(reads, 16)
-
-	// signer0
-	gots0 := reads[0].GetFindCommonOptimismSignature().Locals
-	s.Len(gots0, 50)
-	s.Equal(gots0[0].Id, s.sigs[s.signer0][s.contract1][99].ID)
-	s.Equal(gots0[49].Id, s.sigs[s.signer0][s.contract1][50].ID)
-
-	gots1 := reads[1].GetFindCommonOptimismSignature().Locals
-	s.Len(gots1, 50)
-	s.Equal(gots1[0].Id, s.sigs[s.signer0][s.contract1][49].ID)
-	s.Equal(gots1[49].Id, s.sigs[s.signer0][s.contract1][0].ID)
-
-	gots2 := reads[2].GetFindCommonOptimismSignature().Locals
-	s.Len(gots2, 50)
-	s.Equal(gots2[0].Id, s.sigs[s.signer0][s.contract0][49].ID)
-	s.Equal(gots2[49].Id, s.sigs[s.signer0][s.contract0][0].ID)
-
-	gots3 := reads[3].GetOptimismSignatureExchange().Requests
-	s.Len(gots3, 1)
-	s.Equal(cases[0].want.signer[:], gots3[0].Signer)
-	func() {
-		gt := ulid.MustParse(gots3[0].IdAfter)
-		wt := ulid.MustParse(cases[0].want.idAfter)
-		s.Equal(wt.Time()-1000, gt.Time())
-	}()
-
-	gots4 := reads[4].GetEom()
-	s.NotNil(gots4)
-
-	// signer1
-	gots5 := reads[5].GetFindCommonOptimismSignature().Locals
-	s.Len(gots5, 50)
-	s.Equal(gots5[0].Id, s.sigs[s.signer1][s.contract1][199].ID)
-	s.Equal(gots5[49].Id, s.sigs[s.signer1][s.contract1][150].ID)
-
-	gots6 := reads[6].GetFindCommonOptimismSignature().Locals
-	s.Len(gots6, 50)
-	s.Equal(gots6[0].Id, s.sigs[s.signer1][s.contract1][149].ID)
-	s.Equal(gots6[49].Id, s.sigs[s.signer1][s.contract1][100].ID)
-
-	gots7 := reads[7].GetFindCommonOptimismSignature().Locals
-	s.Len(gots7, 50)
-	s.Equal(gots7[0].Id, s.sigs[s.signer1][s.contract1][99].ID)
-	s.Equal(gots7[49].Id, s.sigs[s.signer1][s.contract1][50].ID)
-
-	gots8 := reads[8].GetFindCommonOptimismSignature().Locals
-	s.Len(gots8, 50)
-	s.Equal(gots8[0].Id, s.sigs[s.signer1][s.contract1][49].ID)
-	s.Equal(gots8[49].Id, s.sigs[s.signer1][s.contract1][0].ID)
-
-	gots9 := reads[9].GetFindCommonOptimismSignature().Locals
-	s.Len(gots9, 50)
-	s.Equal(gots9[0].Id, s.sigs[s.signer1][s.contract0][149].ID)
-	s.Equal(gots9[49].Id, s.sigs[s.signer1][s.contract0][100].ID)
-
-	gots10 := reads[10].GetFindCommonOptimismSignature().Locals
-	s.Len(gots10, 50)
-	s.Equal(gots10[0].Id, s.sigs[s.signer1][s.contract0][99].ID)
-	s.Equal(gots10[49].Id, s.sigs[s.signer1][s.contract0][50].ID)
-
-	gots11 := reads[11].GetFindCommonOptimismSignature().Locals
-	s.Len(gots11, 50)
-	s.Equal(gots11[0].Id, s.sigs[s.signer1][s.contract0][49].ID)
-	s.Equal(gots11[49].Id, s.sigs[s.signer1][s.contract0][0].ID)
-
-	gots12 := reads[12].GetOptimismSignatureExchange().Requests
-	s.Len(gots12, 1)
-	s.Equal(cases[1].want.signer[:], gots12[0].Signer)
-	func() {
-		gt := ulid.MustParse(gots12[0].IdAfter)
-		wt := ulid.MustParse(cases[1].want.idAfter)
-		s.Equal(wt.Time()-1000, gt.Time())
-	}()
-
-	gots13 := reads[13].GetEom()
-	s.NotNil(gots13)
-
-	// signer2
-	gots14 := reads[14].GetOptimismSignatureExchange().Requests
-	s.Len(gots14, 1)
-	s.Equal(cases[2].want.signer[:], gots14[0].Signer)
-	s.Equal("", gots14[0].IdAfter)
-
-	gots15 := reads[15].GetEom()
-	s.NotNil(gots15)
+	// saving too old signature (no pruneRollupIndexDepth)
+	msg = toProtoBufSig(s.sigs[s.signer0][s.contract0][0])
+	saved = s.node2.handleOptimismSignatureExchangeFromPubSub(context.Background(), s.node1.h.ID(), msg)
+	s.True(saved)
 }
 
 func (s *NodeTestSuite) TestHandleOptimismSignatureExchangeRequests() {
@@ -532,7 +383,8 @@ func (s *NodeTestSuite) TestPublishLatestSignatures() {
 	go func() {
 		defer cancel()
 
-		peerID, m, err := subscribe(ctx, s.node2.sub, s.node2.h.ID())
+		var m pb.PubSub
+		peerID, err := subscribe(ctx, s.node2.sub, s.node2.h.ID(), &m)
 		if err != nil {
 			s.Fail(err.Error())
 		}

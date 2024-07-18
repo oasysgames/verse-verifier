@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/oasysgames/oasys-optimism-verifier/config"
@@ -139,7 +139,7 @@ func mustNewConfigLoader(cmd *cobra.Command) *configLoader {
 	return opts
 }
 
-func (opts *configLoader) load() (*config.Config, error) {
+func (opts *configLoader) load(enableStrictValidation bool) (*config.Config, error) {
 	// load config from the file
 	if !opts.fromCli {
 		path, err := opts.cmd.Flags().GetString(fileConfigFlag)
@@ -147,12 +147,12 @@ func (opts *configLoader) load() (*config.Config, error) {
 			return nil, err
 		}
 
-		input, err := ioutil.ReadFile(path)
+		input, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
 		}
 
-		conf, err := config.NewConfig(input)
+		conf, err := config.NewConfig(input, true)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +188,7 @@ func (opts *configLoader) load() (*config.Config, error) {
 		}
 	}
 
-	if err := config.Validate(opts.cfg); err != nil {
+	if err := config.Validate(opts.cfg, enableStrictValidation); err != nil {
 		return nil, err
 	}
 

@@ -24,6 +24,7 @@ type EventCollector struct {
 	log    log.Logger
 }
 
+// Deprecated:
 func NewEventCollector(
 	cfg *config.Verifier,
 	db *database.Database,
@@ -71,7 +72,7 @@ func (w *EventCollector) Work(ctx context.Context) {
 
 		// collect event logs from hub-layer
 		start, end := blocks[0], blocks[len(blocks)-1]
-		logs, err := w.hub.FilterLogs(ctx, verse.NewEventLogFilter(start.Number, end.Number))
+		logs, err := w.hub.FilterLogs(ctx, verse.NewEventLogFilter(start.Number, end.Number, nil))
 		if err != nil {
 			w.log.Error("Failed to fetch event logs from hub-layer",
 				"start", start, "end", end, "err", err)

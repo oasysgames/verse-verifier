@@ -136,11 +136,14 @@ func init() {
 	}
 }
 
-func NewEventLogFilter(fromBlock, toBlock uint64) ethereum.FilterQuery {
+func NewEventLogFilter(fromBlock, toBlock uint64, addresss []common.Address) ethereum.FilterQuery {
 	query := ethereum.FilterQuery{
 		Topics:    [][]common.Hash{make([]common.Hash, len(eventTopics))},
 		FromBlock: new(big.Int).SetUint64(fromBlock),
 		ToBlock:   new(big.Int).SetUint64(toBlock),
+	}
+	if len(addresss) != 0 {
+		query.Addresses = addresss
 	}
 	copy(query.Topics[0], eventTopics)
 	return query
@@ -191,4 +194,23 @@ LOOP:
 		EventDB:  parser.dbFn,
 		Parsed:   rawEvent,
 	}), nil
+}
+
+func (e *RollupedEvent) CastToDatabaseOPEvent(contract *database.OptimismContract) (dbEvent database.OPEvent, err error) {
+	if e.Parsed == nil {
+		return nil, fmt.Errorf("parsed event is nil, event: %v", e)
+	}
+	switch t := e.Parsed.(type) {
+	case *scc.SccStateBatchAppended:
+		var model database.OptimismState
+		err = model.AssignEvent(contract, e.Parsed)
+		dbEvent = &model
+	case *l2oo.OasysL2OutputOracleOutputProposed:
+		var model database.OpstackProposal
+		err = model.AssignEvent(contract, e.Parsed)
+		dbEvent = &model
+	default:
+		err = fmt.Errorf("unsupported event type: %T", t)
+	}
+	return
 }

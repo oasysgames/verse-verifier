@@ -34,7 +34,8 @@ import (
 )
 
 const (
-	pubsubTopic    = "/oasys-optimism-verifier/pubsub/1.0.0"
+	pubsubTopic = "/oasys-optimism-verifier/pubsub/1.0.0"
+	// Deprecated:
 	streamProtocol = "/oasys-optimism-verifier/stream/1.0.0"
 )
 
@@ -156,25 +157,27 @@ func NewNode(
 	return worker, nil
 }
 
-func (w *Node) Start(ctx context.Context) {
+func (w *Node) Start(ctx context.Context, enableSubscriber bool) {
 	defer w.h.Close()
 	defer w.topic.Close()
 	defer w.sub.Cancel()
+
+	// For backward compatibility(older than v1.1.0), we support the stream protocol.
 	w.h.SetStreamHandler(streamProtocol, w.newStreamHandler(ctx))
 
 	var (
-		wg            sync.WaitGroup
-		publishTicker = time.NewTicker(w.cfg.PublishInterval)
-		meterTicker   = time.NewTicker(time.Second * 60)
+		wg          sync.WaitGroup
+		meterTicker = time.NewTicker(time.Second * 60)
 	)
-	defer publishTicker.Stop()
 	defer meterTicker.Stop()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.subscribeLoop(ctx)
-	}()
+	if enableSubscriber {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.subscribeLoop(ctx)
+		}()
+	}
 
 	w.showBootstrapLog()
 
@@ -184,8 +187,6 @@ func (w *Node) Start(ctx context.Context) {
 			w.log.Info("P2P node stopping...")
 			wg.Wait()
 			return
-		case <-publishTicker.C:
-			w.publishLatestSignatures(ctx)
 		case <-meterTicker.C:
 			nwstat := newNetworkStatus(w.h)
 			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
@@ -204,41 +205,6 @@ func (w *Node) Host() host.Host                  { return w.h }
 func (w *Node) Routing() routing.Routing         { return w.dht }
 func (w *Node) HolePunchHelper() HolePunchHelper { return w.hpHelper }
 
-func (w *Node) meterLoop(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 15)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			nwstat := newNetworkStatus(w.h)
-			w.meterTCPConnections.Set(float64(nwstat.connections.tcp))
-			w.meterUDPConnections.Set(float64(nwstat.connections.udp))
-			w.meterRelayConnections.Set(float64(nwstat.connections.relay))
-			w.meterRelayHopStreams.Set(float64(nwstat.streams.hop))
-			w.meterRelayStopStreams.Set(float64(nwstat.streams.stop))
-			w.meterVerifierStreams.Set(float64(nwstat.streams.verifier))
-			w.meterPeers.Set(float64(w.h.Peerstore().Peers().Len()))
-		}
-	}
-}
-
-func (w *Node) publishLoop(ctx context.Context) {
-	ticker := time.NewTicker(w.cfg.PublishInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			w.publishLatestSignatures(ctx)
-		}
-	}
-}
-
 func (w *Node) subscribeLoop(ctx context.Context) {
 	type job struct {
 		ctx    context.Context
@@ -252,8 +218,11 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 	workers := util.NewWorkerGroup(100)
 	procs := &sync.Map{}
 
+	w.log.Info("Start subscribing to pubsub messages")
+
 	for {
-		peer, msg, err := subscribe(ctx, w.sub, w.h.ID())
+		var msg pb.PubSub
+		peer, err := subscribe(ctx, w.sub, w.h.ID(), &msg)
 		if errors.Is(err, context.Canceled) {
 			// worker stopped
 			return
@@ -369,7 +338,7 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	ctx context.Context,
 	sender peer.ID,
 	remote *pb.OptimismSignature,
-) {
+) bool {
 	signer := common.BytesToAddress(remote.Signer)
 	logctx := []interface{}{
 		"peer", sender,
@@ -381,97 +350,35 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 
 	if err := verifySignature(w.hubLayerChainID, remote); err != nil {
 		w.log.Error("Invalid signature", append(logctx, "err", err)...)
-		return
+		return false
 	}
 
-	local, err := w.db.OPSignature.FindLatestsBySigner(signer, 1, 0)
-	if err != nil {
-		w.log.Error("Failed to find the latest signature", append(logctx, "err", err)...)
-		return
-	} else if len(local) > 0 && strings.Compare(local[0].ID, remote.Id) == 1 {
-		// fully synchronized or less than local
-		return
+	if _, err := w.db.OPSignature.FindByID(remote.Id); err == nil {
+		// duplicated
+		w.log.Debug("Duplicated signature", append(logctx, "id", remote.Id)...)
+		return false
+	} else if !errors.Is(err, database.ErrNotFound) {
+		w.log.Error("Unexpected error happen during finding signature by id", append(logctx, "id", remote.Id, "err", err)...)
+		return false
 	}
 
-	// open stream to peer
-	var s network.Stream
-	openStream := func() error {
-		if ss, err := w.openStream(ctx, sender); err != nil {
-			return err
-		} else {
-			s = ss
-			return nil
-		}
-	}
-	returned := make(chan any)
-	defer func() { close(returned) }()
-	go func() {
-		select {
-		case <-ctx.Done():
-			// canceled because newer signature were received
-		case <-returned:
-		}
-		if s != nil {
-			w.closeStream(s)
-		}
-	}()
+	w.log.Info("Received new signature", logctx...)
 
-	var idAfter string
-	if len(local) == 0 {
-		w.log.Info("Request all signatures", logctx...)
-	} else {
-		if openStream() != nil {
-			return
-		}
-		if found, err := w.findCommonLatestSignature(ctx, s, signer); err == nil {
-			fsigner := common.BytesToAddress(found.Signer)
-			if fsigner != signer {
-				w.log.Error("Signer does not match", append(logctx, "found-signer", fsigner)...)
-				return
-			}
-
-			idAfter = found.Id
-			w.log.Info("Found common signature from peer",
-				"signer", signer, "id", found.Id, "previous-id", found.PreviousId)
-		} else if errors.Is(err, database.ErrNotFound) {
-			if localID, err := ulid.ParseStrict(local[0].ID); err == nil {
-				// Prevent out-of-sync by specifying the ID of 1 second ago
-				ms := localID.Time() - 1000
-				idAfter = ulid.MustNew(ms, ulid.DefaultEntropy()).String()
-				logctx = append(logctx, "local-id", local[0].ID, "created-after", time.UnixMilli(int64(ms)))
-			} else {
-				w.log.Error("Failed to parse ULID", "local-id", local[0].ID, "err", err)
-				return
-			}
-		} else {
-			return
-		}
-
-		w.log.Info("Request signatures", append(logctx, "id-after", idAfter)...)
+	// save signature
+	if _, err := w.db.OPSignature.Save(
+		&remote.Id, &remote.PreviousId,
+		signer,
+		common.BytesToAddress(remote.Contract),
+		remote.RollupIndex,
+		common.BytesToHash(remote.RollupHash),
+		remote.Approved,
+		database.BytesSignature(remote.Signature),
+	); err != nil {
+		w.log.Error("Failed to save signature", append(logctx, "err", err)...)
+		return false
 	}
 
-	// send request to peer
-	m := &pb.Stream{
-		Body: &pb.Stream_OptimismSignatureExchange{
-			OptimismSignatureExchange: &pb.OptimismSignatureExchange{
-				Requests: []*pb.OptimismSignatureExchange_Request{
-					{
-						Signer:  remote.Signer,
-						IdAfter: idAfter,
-					},
-				},
-			},
-		},
-	}
-	if s == nil && openStream() != nil {
-		return
-	}
-	if err = w.writeStream(s, m); err != nil {
-		w.log.Error("Failed to send signature request", "err", err)
-		return
-	}
-
-	w.handleOptimismSignatureExchangeResponses(ctx, s)
+	return true
 }
 
 func (w *Node) handleOptimismSignatureExchangeRequest(
@@ -814,8 +721,6 @@ func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismS
 		w.log.Error("Failed to publish latest signatures", "err", err)
 		return
 	}
-
-	w.log.Info("Publish latest signatures", "len", len(rows))
 }
 
 func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, error) {
@@ -992,7 +897,7 @@ func closeStream(s network.Stream) {
 }
 
 // Publish new message.
-func publish(ctx context.Context, topic *ps.Topic, m *pb.PubSub) error {
+func publish(ctx context.Context, topic *ps.Topic, m proto.Message) error {
 	data, err := proto.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("failed to marshal pubsub message: %w", err)
@@ -1014,27 +919,27 @@ func subscribe(
 	ctx context.Context,
 	sub *ps.Subscription,
 	self peer.ID,
-) (peer.ID, *pb.PubSub, error) {
+	msg proto.Message,
+) (peer.ID, error) {
 	recv, err := sub.Next(ctx)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to subscribe pubsub message: %w", err)
+		return "", fmt.Errorf("failed to subscribe pubsub message: %w", err)
 	}
 
 	if recv.ReceivedFrom == self || recv.GetFrom() == self {
-		return "", nil, errSelfMessage
+		return "", errSelfMessage
 	}
 
 	data, err := decompress(recv.Data)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to decompress pubsub message: %w", err)
+		return "", fmt.Errorf("failed to decompress pubsub message: %w", err)
 	}
 
-	var m pb.PubSub
-	if err = proto.Unmarshal(data, &m); err != nil {
-		return "", nil, fmt.Errorf("failed to unmarshal pubsub message: %w", err)
+	if err = proto.Unmarshal(data, msg); err != nil {
+		return "", fmt.Errorf("failed to unmarshal pubsub message: %w", err)
 	}
 
-	return recv.GetFrom(), &m, nil
+	return recv.GetFrom(), nil
 }
 
 func verifySignature(hubLayerChainID *big.Int, sig *pb.OptimismSignature) error {

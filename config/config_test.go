@@ -28,11 +28,11 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			address: '0xBA3186c30Bb0d9e8c7924147238F82617C3fE729'
 			password: /etc/passwd
 			plain: '0x70ce1ba0e76547883c0999662d093dd3426d550ec783a6c775b0060bf4ee6d0f'
-	
+
 	hub_layer:
 		chain_id: 12345
 		rpc: http://127.0.0.1:8545/
-	
+
 	verse_layer:
 		discovery:
 			endpoint: http://127.0.0.1/api/v1/verse-layers.json
@@ -43,7 +43,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			  rpc: http://127.0.0.1:8545/
 			  l1_contracts:
 			    StateCommitmentChain: '0x62b105FD57A11819f9E50892E18a354bd7c89937'
-	
+
 	p2p:
 		listens:
 			- listen0
@@ -80,7 +80,9 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		state_collect_limit: 5
 		state_collect_timeout: 1s
 		db_optimize_interval: 2s
-	
+		confirmations: 4
+		start_block_offset: 5760
+
 	submitter:
 		enable: true
 		interval: 5s
@@ -240,6 +242,8 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			StateCollectLimit:   5,
 			StateCollectTimeout: time.Second,
 			OptimizeInterval:    time.Second * 2,
+			Confirmations:       4,
+			StartBlockOffset:    5760,
 		},
 		Submitter: Submitter{
 			Enable:              true,
@@ -293,7 +297,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		},
 	}
 
-	got, _ := NewConfig(s.toBytes(input))
+	got, _ := NewConfig(s.toBytes(input), false)
 
 	s.Equal(want, got)
 }
@@ -341,7 +345,7 @@ func (s *ConfigTestSuite) TestValidate() {
 		"Config.metrics.listen":                            "hostname_port",
 	}
 
-	_, err := NewConfig(s.toBytes(input))
+	_, err := NewConfig(s.toBytes(input), false)
 
 	gots := map[string]string{}
 	for _, e := range err.(validator.ValidationErrors) {
@@ -358,20 +362,21 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	input := (`
 	datastore: /tmp
 	keystore: /tmp
-	
+
 	hub_layer:
 		chain_id: 12345
 		rpc: http://127.0.0.1:8545/
-	
+
 	verse_layer:
 		discovery:
 			endpoint: http://127.0.0.1/
-	
+
 	p2p:
 		listen: 127.0.0.1:20001
 	`)
 
-	got, _ := NewConfig(s.toBytes(input))
+	got, err := NewConfig(s.toBytes(input), false)
+	s.NoError(err)
 
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 
@@ -409,10 +414,11 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
 	s.Equal(time.Hour, got.Verifier.OptimizeInterval)
+	s.Equal(3, got.Verifier.Confirmations)
 
-	s.Equal(15*time.Second, got.Submitter.Interval)
+	s.Equal(30*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)
-	s.Equal(6, got.Submitter.Confirmations)
+	s.Equal(3, got.Submitter.Confirmations)
 	s.Equal(1.1, got.Submitter.GasMultiplier)
 	s.Equal(20, got.Submitter.BatchSize)
 	s.Equal(uint64(5_000_000), got.Submitter.MaxGas)

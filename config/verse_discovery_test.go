@@ -50,7 +50,8 @@ func (s *VerseDiscoveryTestSuite) TestDiscover() {
 	})
 
 	// setup pubsub
-	discovery := NewVerseDiscovery(client, "https://example.com/", time.Second)
+	discovery, err := NewVerseDiscovery(context.Background(), client, "https://example.com/", time.Second)
+	s.Require().NoError(err)
 	sub0 := discovery.Subscribe(context.Background())
 	sub1 := discovery.Subscribe(context.Background())
 

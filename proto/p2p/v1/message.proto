@@ -6,53 +6,53 @@ option go_package = "./gen";
 
 message PubSub {
   oneof body {
-    bytes misc = 1;
+    bytes                     misc                        = 1;
     OptimismSignatureExchange optimism_signature_exchange = 2;
   }
 }
 
 message Stream {
   oneof body {
-    bytes misc = 1;
-    bytes eom = 2;
-    OptimismSignatureExchange optimism_signature_exchange = 3;
+    bytes                       misc                           = 1;
+    bytes                       eom                            = 2;
+    OptimismSignatureExchange   optimism_signature_exchange    = 3;
     FindCommonOptimismSignature find_common_optimism_signature = 4;
   }
 }
 
 message OptimismSignature {
-  string id = 1;
-  string previous_id = 2;
-  bytes signer = 3;
-  bytes contract = 4;
+  string id           = 1;
+  string previous_id  = 2;
+  bytes  signer       = 3;
+  bytes  contract     = 4;
   uint64 rollup_index = 5;
-  bytes rollup_hash = 6;
-  bool approved = 10;
-  bytes signature = 11;
+  bytes  rollup_hash  = 6;
+  bool   approved     = 10;
+  bytes  signature    = 11;
 
   // These are fields that do not exist in OPStack and will be removed.
-  uint64 batch_size = 7 [ deprecated = true ];
-  uint64 prev_total_elements = 8 [ deprecated = true ];
-  bytes extra_data = 9 [ deprecated = true ];
+  uint64 batch_size          = 7 [deprecated = true];
+  uint64 prev_total_elements = 8 [deprecated = true];
+  bytes  extra_data          = 9 [deprecated = true];
 }
 
 message OptimismSignatureExchange {
-  repeated OptimismSignature latests = 1;
-  repeated Request requests = 2;
+  repeated OptimismSignature latests   = 1;
+  repeated Request           requests  = 2;
   repeated OptimismSignature responses = 3;
 
   message Request {
-    bytes signer = 1;
+    bytes  signer   = 1;
     string id_after = 2;
   }
 }
 
 message FindCommonOptimismSignature {
-  repeated Local locals = 1;
-  optional OptimismSignature found = 2;
+  repeated Local             locals = 1;
+  optional OptimismSignature found  = 2;
 
   message Local {
-    string id = 1;
+    string id          = 1;
     string previous_id = 2;
   }
 }

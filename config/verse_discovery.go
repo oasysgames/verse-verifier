@@ -20,17 +20,23 @@ type VerseDiscovery struct {
 }
 
 func NewVerseDiscovery(
+	ctx context.Context,
 	client *http.Client,
 	url string,
 	refreshInterval time.Duration,
-) *VerseDiscovery {
-	return &VerseDiscovery{
+) (disc *VerseDiscovery, err error) {
+	disc = &VerseDiscovery{
 		client:          client,
 		url:             url,
 		refreshInterval: refreshInterval,
 		topic:           util.NewTopic(),
 		log:             log.New("worker", "verse-discovery"),
 	}
+	// Commented out the initial fetch, as it will be done in the worker
+	// if _, err = disc.fetch(ctx); err != nil {
+	// 	return nil, fmt.Errorf("the inital verse discovery failed, make sure the url(%s) is reachable: %w", url, err)
+	// }
+	return
 }
 
 func (w *VerseDiscovery) Subscribe(ctx context.Context) *VerseSubscription {

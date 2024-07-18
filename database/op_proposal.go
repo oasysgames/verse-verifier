@@ -43,7 +43,7 @@ func (row *OpstackProposal) GetRollupHash() common.Hash {
 	return crypto.Keccak256Hash(msg)
 }
 
-func (row *OpstackProposal) assignEvent(contract *OptimismContract, e any) error {
+func (row *OpstackProposal) AssignEvent(contract *OptimismContract, e any) error {
 	t, ok := e.(*l2oo.OasysL2OutputOracleOutputProposed)
 	if !ok {
 		return errors.New("invalid event")

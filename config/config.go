@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -72,10 +73,15 @@ func Defaults() map[string]interface{} {
 		"verifier.state_collect_limit":   1000,
 		"verifier.state_collect_timeout": 15 * time.Second,
 		"verifier.db_optimize_interval":  time.Hour,
+		"verifier.confirmations":         3,                // 3 confirmations are enough for later than v1.3.0 L1.
+		"verifier.start_block_offset":    uint64(5760 * 2), // 2 days
 
-		"submitter.interval":              15 * time.Second,
+		// The minimum interval for Verse v0 is 15 seconds.
+		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
+		// Balance the two by setting the default to 30 seconds.
+		"submitter.interval":              30 * time.Second,
 		"submitter.concurrency":           50,
-		"submitter.confirmations":         6,
+		"submitter.confirmations":         3, // 3 confirmations are enough for later than v1.3.0 L1.
 		"submitter.gas_multiplier":        1.1,
 		"submitter.batch_size":            20,
 		"submitter.max_gas":               5_000_000,
@@ -105,7 +111,7 @@ func Defaults() map[string]interface{} {
 }
 
 // Build configuration.
-func NewConfig(input []byte) (*Config, error) {
+func NewConfig(input []byte, enableStrictValidation bool) (*Config, error) {
 	k := koanf.New(".")
 
 	// load default values
@@ -126,7 +132,7 @@ func NewConfig(input []byte) (*Config, error) {
 	}
 
 	// run validation
-	if err := Validate(&conf); err != nil {
+	if err := Validate(&conf, enableStrictValidation); err != nil {
 		return nil, err
 	}
 
@@ -150,8 +156,22 @@ func MustNewDefaultConfig() *Config {
 	return &conf
 }
 
-func Validate(conf *Config) error {
-	return validate.Struct(conf)
+func Validate(conf *Config, strict bool) error {
+	if err := validate.Struct(conf); err != nil {
+		return err
+	}
+	if strict {
+		// validate verse discovery configuration
+		if conf.VerseLayer.Discovery.Endpoint == "" && len(conf.VerseLayer.Directs) == 0 {
+			return errors.New("either verse.discovery or verse.directs must be set")
+		}
+		// NOTE: Commented out because bootnode disable verifier and submitter
+		// validate verifier and submitter configuration
+		// if !conf.Verifier.Enable && !conf.Submitter.Enable {
+		// 	return errors.New("either verifier.enable or submitter.enable must be set")
+		// }
+	}
+	return nil
 }
 
 // App configuration.
@@ -375,6 +395,13 @@ type Verifier struct {
 
 	// Interval to optimize database.
 	OptimizeInterval time.Duration `koanf:"db_optimize_interval"`
+
+	// Number of confirmation blocks for transaction receipt.
+	Confirmations int
+
+	// The number of start fetching events is offset from the current block.
+	// This offset is used at the first time to fetch events.
+	StartBlockOffset uint64 `koanf:"start_block_offset"`
 }
 
 type Submitter struct {

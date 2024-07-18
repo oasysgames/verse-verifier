@@ -3,11 +3,17 @@ package database
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"gorm.io/gorm"
+)
+
+const (
+	DeleteOldsLimit             = 1024
+	FindUnverifiedBySignerLimit = 64
 )
 
 type OptimismSignatureDB db
@@ -128,6 +134,41 @@ func (db *OptimismSignatureDB) FindLatestsBySigner(
 	return rows, nil
 }
 
+func (db *OptimismSignatureDB) FindUnverifiedBySigner(
+	signer common.Address,
+	unverifiedIndex uint64,
+	contract *common.Address,
+	limit int,
+) ([]*OptimismSignature, error) {
+	_signer, err := db.db.Signer.FindOrCreate(signer)
+	if err != nil {
+		return nil, err
+	}
+
+	tx := db.rawdb.
+		Joins("Signer").
+		Joins("Contract").
+		Where("optimism_signatures.signer_id = ?", _signer.ID).
+		Where("optimism_signatures.batch_index >= ?", unverifiedIndex).
+		Order("optimism_signatures.batch_index").
+		Limit(limit)
+
+	if contract != nil {
+		_contract, err := db.db.OPContract.FindOrCreate(*contract)
+		if err != nil {
+			return nil, err
+		}
+		tx = tx.Where("optimism_signatures.optimism_scc_id = ?", _contract.ID)
+	}
+	var rows []*OptimismSignature
+	tx = tx.Find(&rows)
+
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return rows, nil
+}
+
 func (db *OptimismSignatureDB) Save(
 	id, previousID *string,
 	signer common.Address,
@@ -205,7 +246,7 @@ func (db *OptimismSignatureDB) Save(
 	return &created, nil
 }
 
-// Delete signatures after the specified rollup index.
+// Delete signatures after the specified rollup index by signer.
 func (db *OptimismSignatureDB) Deletes(
 	signer common.Address,
 	contract common.Address,
@@ -220,6 +261,46 @@ func (db *OptimismSignatureDB) Deletes(
 			Joins("Contract").
 			Where("Signer.address = ? AND Contract.address = ?", signer, contract).
 			Where("optimism_signatures.batch_index >= ?", rollupIndex).
+			Pluck("optimism_signatures.id", &ids)
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		tx = s.Where("id IN (?)", ids).Delete(&OptimismSignature{})
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		affected = tx.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return -1, err
+	}
+
+	return affected, nil
+}
+
+// Delete signatures after the specified rollup index.
+func (db *OptimismSignatureDB) DeleteOlds(
+	contract common.Address,
+	rollupIndex uint64,
+	limit int,
+) (int64, error) {
+	_contract, err := db.db.OPContract.FindOrCreate(contract)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find contract(%s) during delete old signatures: %w", contract.Hex(), err)
+	}
+
+	var affected int64
+	err = db.rawdb.Transaction(func(s *gorm.DB) error {
+
+		var ids []string
+		tx := s.
+			Model(&OptimismSignature{}).
+			Where("optimism_signatures.optimism_scc_id = ?", _contract.ID).
+			Where("optimism_signatures.batch_index <= ?", rollupIndex).
+			Limit(limit).
 			Pluck("optimism_signatures.id", &ids)
 		if tx.Error != nil {
 			return tx.Error
