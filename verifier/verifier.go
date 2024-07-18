@@ -175,6 +175,9 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 	var logs []types.Log
 	if !skipFetchlog {
 		if logs, err = w.l1Signer.FilterLogsWithRateThottling(ctx, verse.NewEventLogFilter(start, end, []common.Address{task.RollupContract()})); err != nil {
+			if errors.Is(err, ethutil.ErrTooManyRequests) {
+				log.Warn("Rate limit exceeded", "start", start, "end", end, "err", err)
+			}
 			return fmt.Errorf("failed to fetch(start: %d, end: %d) event logs from hub-layer: %w", start, end, err)
 		}
 	}

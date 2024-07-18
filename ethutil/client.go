@@ -2,6 +2,7 @@ package ethutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -18,6 +19,10 @@ import (
 	"github.com/lmittmann/w3/module/eth"
 	"github.com/lmittmann/w3/w3types"
 	"golang.org/x/sync/semaphore"
+)
+
+var (
+	ErrTooManyRequests = errors.New("too many requests")
 )
 
 type SignDataFn = func(hash []byte) (sig []byte, err error)
@@ -96,6 +101,7 @@ func (c *client) FilterLogsWithRateThottling(ctx context.Context, q ethereum.Fil
 	if err != nil && strings.Contains(err.Error(), "too many requests") {
 		// sleep longer if the rate limit is reached.
 		time.Sleep(3 * time.Second)
+		err = fmt.Errorf("%w: %v", ErrTooManyRequests, err)
 		return
 	}
 

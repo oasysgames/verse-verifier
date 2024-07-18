@@ -132,7 +132,7 @@ func (op *verifiableOPLegacy) Verify(
 		}
 	}
 
-	log.Info("Collected L2 states", "elapsed", time.Since(st))
+	log.Debug("Collected L2 states", "elapsed", time.Since(st))
 
 	// calc and compare state root
 	merkleRoot, err := CalcMerkleRoot(elements)
