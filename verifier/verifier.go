@@ -363,7 +363,7 @@ func (w *Verifier) retryBackoff() func() (delay, remain time.Duration, attempts 
 	return func() (time.Duration, time.Duration, int) {
 		// backoff delay: 0.1s, 0.8s, 6.4s, 51.2s, 409.6s(7m), 3276.8s(54m),
 		delay := 100 << (3 * attempts) * time.Millisecond
-		if delay <= 0 || delay > w.cfg.MaxRetryBackoff {
+		if delay <= 0 || delay > w.cfg.MaxRetryBackoff { // delay <= 0 is overflow
 			delay = w.cfg.MaxRetryBackoff
 		}
 
