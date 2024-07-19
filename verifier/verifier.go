@@ -17,10 +17,6 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 )
 
-const (
-	VerifyRetryLimit = 3
-)
-
 // Worker to verify rollups.
 type Verifier struct {
 	cfg      *config.Verifier
@@ -199,14 +195,25 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 
 	// verify the fetched logs
 	var (
-		opsigs = []*database.OptimismSignature{}
-		// flag at least one log verification failed
-		atLeastOneLogVerificationFailed bool
+		opsigs                          = []*database.OptimismSignature{}
+		atLeastOneLogVerificationFailed bool // flag at least one log verification failed
+		// retry settings
+		retryTimeLimit            = 24 * time.Hour // give up retry if the retry time limit is exceeded
+		started                   = time.Now()     // time limit is started now applying all logs, not each log
+		maxDelay                  = 1 * time.Hour
+		exponentialBackoffWithMax = func(times int, max time.Duration) time.Duration {
+			// backoff delay: 0.1s, 0.8s, 6.4s, 51.2s, 409.6s(7m), 3276.8s(54m),
+			delay := 100 << (3 * times) * time.Millisecond
+			if delay > max {
+				delay = max
+			}
+			return delay
+		}
 	)
 	for i := range logs {
 		// verify with retry
 		var row *database.OptimismSignature
-		for counter := 0; counter < VerifyRetryLimit; counter++ {
+		for counter := 0; ; counter++ {
 			if row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log); err != nil {
 				log.Warn("retry verification", "retry-counter", counter, "err", err)
 				if errors.Is(err, context.Canceled) {
@@ -220,8 +227,13 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 					defer cancel()
 					continue // retry immediately
 				}
-				// retry after backoff delay: 100ms, 1600ms, 25600ms
-				time.Sleep(100 << (4 * counter) * time.Millisecond)
+				// give up if the retry time limit is exceeded
+				if time.Since(started) > retryTimeLimit {
+					break
+				}
+				// exponential backoff til max delay
+				delay := exponentialBackoffWithMax(counter, maxDelay)
+				time.Sleep(delay)
 				continue
 			}
 			// break if the verification is successful
@@ -231,7 +243,7 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 		// verification failed
 		if err != nil {
 			// skip the log if the verification failed
-			log.Error("Failed to verification", "log-index", i, "err", err)
+			log.Error("Failed to verify a log", "log-index", i, "err", err)
 			atLeastOneLogVerificationFailed = true
 		}
 
@@ -269,8 +281,8 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 
 	if atLeastOneLogVerificationFailed {
 		// Remove task if at least one log verification failed.
-		// The removed task will be added again in the next verse discovery.
-		// As the verse discovery interval is 1h, the faild log verification will be retried 1h later.
+		// dinamic discovery on : The removed task will be added again in the next verse discovery
+		// dinamic discovery off: restarting is required to add the removed task again
 		w.RemoveTask(task.RollupContract())
 	}
 
