@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"strings"
+	"time"
 
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/spf13/cobra"
@@ -27,8 +28,10 @@ type configLoader struct {
 		scc, l2oo string
 	}
 	verifier struct {
-		use    bool
-		wallet config.Wallet
+		use             bool
+		wallet          config.Wallet
+		MaxRetryBackoff time.Duration
+		RetryTimeout    time.Duration
 	}
 	submitter struct {
 		use     bool
@@ -101,10 +104,12 @@ func mustNewConfigLoader(cmd *cobra.Command) *configLoader {
 		{
 			name: "verifier",
 			flags: map[string]func(name string){
-				"":                argConfigFlag(&opts.verifier.use, f.BoolVar, "Enable the verifier feature"),
-				"wallet.address":  argConfigFlag(&opts.verifier.wallet.Address, f.StringVar, "Address of the verifier wallet"),
-				"wallet.password": argConfigFlag(&opts.verifier.wallet.Password, f.StringVar, "Password file of the verifier wallet"),
-				"wallet.plain":    argConfigFlag(&opts.verifier.wallet.Plain, f.StringVar, "Plaintext private key of the verifier wallet"),
+				"":                  argConfigFlag(&opts.verifier.use, f.BoolVar, "Enable the verifier feature"),
+				"wallet.address":    argConfigFlag(&opts.verifier.wallet.Address, f.StringVar, "Address of the verifier wallet"),
+				"wallet.password":   argConfigFlag(&opts.verifier.wallet.Password, f.StringVar, "Password file of the verifier wallet"),
+				"wallet.plain":      argConfigFlag(&opts.verifier.wallet.Plain, f.StringVar, "Plaintext private key of the verifier wallet"),
+				"max-retry-backoff": argConfigFlag(&opts.verifier.MaxRetryBackoff, f.DurationVar, "Maximum exponential backoff time for retries"),
+				"retry-timeout":     argConfigFlag(&opts.verifier.RetryTimeout, f.DurationVar, "Maximum duration to attempt retries"),
 			},
 		},
 		{
@@ -177,6 +182,12 @@ func (opts *configLoader) load(enableStrictValidation bool) (*config.Config, err
 		opts.cfg.Wallets["verifier"] = &opts.verifier.wallet
 		opts.cfg.Verifier.Enable = true
 		opts.cfg.Verifier.Wallet = "verifier"
+		if opts.verifier.MaxRetryBackoff > 0 {
+			opts.cfg.Verifier.MaxRetryBackoff = opts.verifier.MaxRetryBackoff
+		}
+		if opts.verifier.RetryTimeout > 0 {
+			opts.cfg.Verifier.RetryTimeout = opts.verifier.RetryTimeout
+		}
 	}
 
 	if opts.submitter.use {

@@ -74,14 +74,12 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		enable: true
 		wallet: wallet1
 		interval: 5s
-		concurrency: 10
-		block_limit: 500
-		event_filter_limit: 50
 		state_collect_limit: 5
 		state_collect_timeout: 1s
-		db_optimize_interval: 2s
 		confirmations: 4
 		start_block_offset: 5760
+		max_retry_backoff: 1m
+		retry_timeout: 2m
 
 	submitter:
 		enable: true
@@ -236,14 +234,12 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			Enable:              true,
 			Wallet:              "wallet1",
 			Interval:            5 * time.Second,
-			Concurrency:         10,
-			BlockLimit:          500,
-			EventFilterLimit:    50,
 			StateCollectLimit:   5,
 			StateCollectTimeout: time.Second,
-			OptimizeInterval:    time.Second * 2,
 			Confirmations:       4,
 			StartBlockOffset:    5760,
+			MaxRetryBackoff:     time.Minute,
+			RetryTimeout:        time.Minute * 2,
 		},
 		Submitter: Submitter{
 			Enable:              true,
@@ -408,13 +404,11 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal("oasvlfy", got.IPC.Sockname)
 
 	s.Equal(15*time.Second, got.Verifier.Interval)
-	s.Equal(50, got.Verifier.Concurrency)
-	s.Equal(1000, got.Verifier.BlockLimit)
-	s.Equal(1000, got.Verifier.EventFilterLimit)
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
-	s.Equal(time.Hour, got.Verifier.OptimizeInterval)
 	s.Equal(3, got.Verifier.Confirmations)
+	s.Equal(time.Hour, got.Verifier.MaxRetryBackoff)
+	s.Equal(time.Hour*24, got.Verifier.RetryTimeout)
 
 	s.Equal(30*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)
