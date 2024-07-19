@@ -217,7 +217,8 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 		var row *database.OptimismSignature
 		for counter := 0; ; counter++ {
 			if row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log); err != nil {
-				log.Warn("retry verification", "retry-counter", counter, "err", err)
+				remainingTime := retryTimeLimit - time.Since(started)
+				log.Warn("retry verification", "retry-counter", counter, "remaining-time", remainingTime, "err", err)
 				if errors.Is(err, context.Canceled) {
 					// exit if context have been canceled
 					return err
@@ -230,7 +231,7 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 					continue // retry immediately
 				}
 				// give up if the retry time limit is exceeded
-				if time.Since(started) > retryTimeLimit {
+				if remainingTime <= 0 {
 					break
 				}
 				// exponential backoff til max delay
