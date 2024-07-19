@@ -17,6 +17,10 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 )
 
+const (
+	VerifyRetryLimit = 3
+)
+
 // Worker to verify rollups.
 type Verifier struct {
 	cfg      *config.Verifier
@@ -200,30 +204,35 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 		atLeastOneLogVerificationFailed bool
 	)
 	for i := range logs {
-		row, err := w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				// exit if context have been canceled
-				return err
-			} else if errors.Is(err, context.DeadlineExceeded) {
-				// retry if the deadline is exceeded
-				log.Warn("too much time spent on log iteration", "current-index", i)
-				cancel()                                                     // cancel previous context
-				ctx, cancel = context.WithTimeout(ctxOrigin, 30*time.Second) // expand the deadline
-				defer cancel()
-				row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log)
-				if err != nil {
-					// give up if the retry fails
-					log.Error("Failed to verification", "err", err, "rollup-index", nextIndex.Uint64())
-					atLeastOneLogVerificationFailed = true
-					continue
+		// verify with retry
+		var row *database.OptimismSignature
+		for counter := 0; counter < VerifyRetryLimit; counter++ {
+			if row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log); err != nil {
+				log.Warn("retry verification", "retry-counter", counter, "err", err)
+				if errors.Is(err, context.Canceled) {
+					// exit if context have been canceled
+					return err
+				} else if errors.Is(err, context.DeadlineExceeded) {
+					// expand the deadline if the deadline is exceeded
+					log.Info("expand the deadline", "log-index", i)
+					cancel()                                                     // cancel previous context
+					ctx, cancel = context.WithTimeout(ctxOrigin, 30*time.Second) // expand the deadline
+					defer cancel()
+					continue // retry immediately
 				}
-			} else {
-				// continue if other errors
-				log.Error("Failed to verification", "err", err, "rollup-index", nextIndex.Uint64())
-				atLeastOneLogVerificationFailed = true
+				// retry after backoff delay: 100ms, 1600ms, 25600ms
+				time.Sleep(100 << (4 * counter) * time.Millisecond)
 				continue
 			}
+			// break if the verification is successful
+			break
+		}
+
+		// verification failed
+		if err != nil {
+			// skip the log if the verification failed
+			log.Error("Failed to verification", "log-index", i, "err", err)
+			atLeastOneLogVerificationFailed = true
 		}
 
 		if row == nil {
