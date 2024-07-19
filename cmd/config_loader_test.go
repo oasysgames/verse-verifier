@@ -92,6 +92,8 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigFromYAML() {
 	verifier:
 		enable: true
 		wallet: verifier
+		max_retry_backoff: 1m
+		retry_timeout: 2m
 
 	submitter:
 		enable: true
@@ -186,6 +188,8 @@ func (s *ConfigLoaderTestSuite) TestLoadConfigWithVerifierArgs() {
 		"--config.verifier.wallet.address", "0x08E9441C28c9f34dcB1fa06f773a0450f15B6F43",
 		"--config.verifier.wallet.password", s.passwdFile1.Name(),
 		"--config.verifier.wallet.plain", "0x5ea366a14e0bd46e7da7e894c8cc896ebecd1f6452b674aaa41688878f45ff73",
+		"--config.verifier.max-retry-backoff", "1m",
+		"--config.verifier.retry-timeout", "2m",
 	})
 
 	s.Equal(want, got)
@@ -331,14 +335,12 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 			Enable:              false,
 			Wallet:              "",
 			Interval:            defaults["verifier.interval"].(time.Duration),
-			Concurrency:         defaults["verifier.concurrency"].(int),
-			BlockLimit:          defaults["verifier.block_limit"].(int),
-			EventFilterLimit:    defaults["verifier.event_filter_limit"].(int),
 			StateCollectLimit:   defaults["verifier.state_collect_limit"].(int),
 			StateCollectTimeout: defaults["verifier.state_collect_timeout"].(time.Duration),
-			OptimizeInterval:    defaults["verifier.db_optimize_interval"].(time.Duration),
 			Confirmations:       defaults["verifier.confirmations"].(int),
 			StartBlockOffset:    defaults["verifier.start_block_offset"].(uint64),
+			MaxRetryBackoff:     defaults["verifier.max_retry_backoff"].(time.Duration),
+			RetryTimeout:        defaults["verifier.retry_timeout"].(time.Duration),
 		},
 		Submitter: config.Submitter{
 			Enable:              false,
@@ -417,6 +419,8 @@ func (s *ConfigLoaderTestSuite) applyVerifierCliArgs(c *config.Config) {
 	}
 	c.Verifier.Enable = true
 	c.Verifier.Wallet = "verifier"
+	c.Verifier.MaxRetryBackoff = time.Minute
+	c.Verifier.RetryTimeout = time.Minute * 2
 }
 
 func (s *ConfigLoaderTestSuite) applySubmitterCliArgs(c *config.Config) {

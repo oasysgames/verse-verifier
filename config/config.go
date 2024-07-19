@@ -67,14 +67,12 @@ func Defaults() map[string]interface{} {
 		"ipc.sockname": "oasvlfy",
 
 		"verifier.interval":              15 * time.Second,
-		"verifier.concurrency":           50,
-		"verifier.block_limit":           1000,
-		"verifier.event_filter_limit":    1000,
 		"verifier.state_collect_limit":   1000,
 		"verifier.state_collect_timeout": 15 * time.Second,
-		"verifier.db_optimize_interval":  time.Hour,
 		"verifier.confirmations":         3,                // 3 confirmations are enough for later than v1.3.0 L1.
 		"verifier.start_block_offset":    uint64(5760 * 2), // 2 days
+		"verifier.max_retry_backoff":     time.Hour,
+		"verifier.retry_timeout":         time.Hour * 24,
 
 		// The minimum interval for Verse v0 is 15 seconds.
 		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
@@ -378,23 +376,11 @@ type Verifier struct {
 	// Interval for get block data.
 	Interval time.Duration
 
-	// Number of concurrent executions.
-	Concurrency int
-
-	// Number of block headers to collect at a time.
-	BlockLimit int `koanf:"block_limit"`
-
-	// Number of blocks to event filter.
-	EventFilterLimit int `koanf:"event_filter_limit"`
-
 	// Number of state root to collect at a time.
 	StateCollectLimit int `koanf:"state_collect_limit"`
 
 	// Timeout for state root collection.
 	StateCollectTimeout time.Duration `koanf:"state_collect_timeout"`
-
-	// Interval to optimize database.
-	OptimizeInterval time.Duration `koanf:"db_optimize_interval"`
 
 	// Number of confirmation blocks for transaction receipt.
 	Confirmations int
@@ -402,6 +388,12 @@ type Verifier struct {
 	// The number of start fetching events is offset from the current block.
 	// This offset is used at the first time to fetch events.
 	StartBlockOffset uint64 `koanf:"start_block_offset"`
+
+	// The maximum exponential backoff time for retries.
+	MaxRetryBackoff time.Duration `koanf:"max_retry_backoff"`
+
+	// The maximum duration to attempt retries.
+	RetryTimeout time.Duration `koanf:"retry_timeout"`
 }
 
 type Submitter struct {
