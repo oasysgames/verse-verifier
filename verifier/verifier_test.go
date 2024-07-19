@@ -43,7 +43,6 @@ func (s *VerifierTestSuite) SetupTest() {
 	s.sigsCh = make(chan []*database.OptimismSignature, 4)
 	s.verifier = NewVerifier(&config.Verifier{
 		Interval:            50 * time.Millisecond,
-		Concurrency:         10,
 		StateCollectLimit:   3,
 		StateCollectTimeout: time.Second,
 		Confirmations:       2,

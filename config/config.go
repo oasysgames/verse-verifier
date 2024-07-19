@@ -67,12 +67,8 @@ func Defaults() map[string]interface{} {
 		"ipc.sockname": "oasvlfy",
 
 		"verifier.interval":              15 * time.Second,
-		"verifier.concurrency":           50,
-		"verifier.block_limit":           1000,
-		"verifier.event_filter_limit":    1000,
 		"verifier.state_collect_limit":   1000,
 		"verifier.state_collect_timeout": 15 * time.Second,
-		"verifier.db_optimize_interval":  time.Hour,
 		"verifier.confirmations":         3,                // 3 confirmations are enough for later than v1.3.0 L1.
 		"verifier.start_block_offset":    uint64(5760 * 2), // 2 days
 
@@ -378,23 +374,11 @@ type Verifier struct {
 	// Interval for get block data.
 	Interval time.Duration
 
-	// Number of concurrent executions.
-	Concurrency int
-
-	// Number of block headers to collect at a time.
-	BlockLimit int `koanf:"block_limit"`
-
-	// Number of blocks to event filter.
-	EventFilterLimit int `koanf:"event_filter_limit"`
-
 	// Number of state root to collect at a time.
 	StateCollectLimit int `koanf:"state_collect_limit"`
 
 	// Timeout for state root collection.
 	StateCollectTimeout time.Duration `koanf:"state_collect_timeout"`
-
-	// Interval to optimize database.
-	OptimizeInterval time.Duration `koanf:"db_optimize_interval"`
 
 	// Number of confirmation blocks for transaction receipt.
 	Confirmations int
