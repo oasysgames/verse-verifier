@@ -198,6 +198,8 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 		opsigs                          = []*database.OptimismSignature{}
 		atLeastOneLogVerificationFailed bool // flag at least one log verification failed
 		// retry settings
+		// As the replica syncing is not real-time, the retry mechanism is required.
+		// If the retry backoff is short, often failed to collect state roots for legacy verification.
 		retryTimeLimit            = 24 * time.Hour // give up retry if the retry time limit is exceeded
 		started                   = time.Now()     // time limit is started now applying all logs, not each log
 		maxDelay                  = 1 * time.Hour
