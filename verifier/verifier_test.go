@@ -124,6 +124,43 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	}
 }
 
+func (s *VerifierTestSuite) TestRetryBackoff() {
+	verifier := &Verifier{
+		cfg: &config.Verifier{
+			MaxRetryBackoff: time.Minute,
+			RetryTimeout:    time.Millisecond * 100,
+		},
+	}
+
+	backoff := verifier.retryBackoff()
+
+	wait := time.Millisecond * 10
+	for i := 0; i < 10; i++ {
+		delay, remain, attempts := backoff()
+
+		s.Equal(i+1, attempts)
+		s.Less(remain, verifier.cfg.RetryTimeout-wait*time.Duration(i))
+
+		switch i {
+		case 0:
+			s.Equal(delay, time.Millisecond*100)
+		case 1:
+			s.Equal(delay, time.Millisecond*800)
+		case 2:
+			s.Equal(delay, time.Millisecond*6400)
+		case 3:
+			s.Equal(delay, time.Millisecond*51200)
+		default: // i >= 4
+			s.Equal(delay, time.Minute)
+		}
+
+		time.Sleep(wait)
+	}
+
+	_, remain, _ := backoff()
+	s.Equal(remain, time.Duration(0))
+}
+
 func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.Header) {
 	ctx := context.Background()
 	to := common.HexToAddress("0x09ad74977844F513E61AdE2B50b0C06268A4f6d7")

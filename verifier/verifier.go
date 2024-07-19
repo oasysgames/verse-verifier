@@ -116,18 +116,15 @@ func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, c
 	}
 }
 
-func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId uint64, nextStart *uint64, publishAllUnverifiedSigs bool) error {
+func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chainId uint64, nextStart *uint64, publishAllUnverifiedSigs bool) error {
 	// run verification tasks until time out
-	var (
-		cancel       context.CancelFunc
-		ctxOrigin    = ctx
-		setNextStart = func(endBlock uint64) {
-			// Next start block is the current end block + 1
-			endBlock += 1
-			*nextStart = endBlock
-		}
-	)
-	ctx, cancel = context.WithTimeout(ctx, w.cfg.StateCollectTimeout)
+	setNextStart := func(endBlock uint64) {
+		// Next start block is the current end block + 1
+		endBlock += 1
+		*nextStart = endBlock
+	}
+
+	ctx, cancel := context.WithTimeout(parent, w.cfg.StateCollectTimeout)
 	defer cancel()
 
 	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
@@ -195,52 +192,46 @@ func (w *Verifier) work(ctx context.Context, task verse.VerifiableVerse, chainId
 
 	// verify the fetched logs
 	var (
-		opsigs                          = []*database.OptimismSignature{}
-		atLeastOneLogVerificationFailed bool // flag at least one log verification failed
-		// retry settings
+		opsigs []*database.OptimismSignature
+		// flag at least one log verification failed.
+		atLeastOneLogVerificationFailed bool
 		// As the replica syncing is not real-time, the retry mechanism is required.
-		// If the retry backoff is short, often failed to collect state roots for legacy verification.
-		retryTimeLimit            = 24 * time.Hour // give up retry if the retry time limit is exceeded
-		started                   = time.Now()     // time limit is started now applying all logs, not each log
-		maxDelay                  = 1 * time.Hour
-		exponentialBackoffWithMax = func(times int, max time.Duration) time.Duration {
-			// backoff delay: 0.1s, 0.8s, 6.4s, 51.2s, 409.6s(7m), 3276.8s(54m),
-			delay := 100 << (3 * times) * time.Millisecond
-			if delay > max {
-				delay = max
-			}
-			return delay
-		}
+		retryBackoff = w.retryBackoff()
 	)
 	for i := range logs {
-		// verify with retry
-		var row *database.OptimismSignature
-		for counter := 0; ; counter++ {
-			if row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log); err != nil {
-				remainingTime := retryTimeLimit - time.Since(started)
-				log.Warn("retry verification", "retry-counter", counter, "remaining-time", remainingTime, "err", err)
-				if errors.Is(err, context.Canceled) {
-					// exit if context have been canceled
-					return err
-				} else if errors.Is(err, context.DeadlineExceeded) {
-					// expand the deadline if the deadline is exceeded
-					log.Info("expand the deadline", "log-index", i)
-					cancel()                                                     // cancel previous context
-					ctx, cancel = context.WithTimeout(ctxOrigin, 30*time.Second) // expand the deadline
-					defer cancel()
-					continue // retry immediately
-				}
-				// give up if the retry time limit is exceeded
-				if remainingTime <= 0 {
-					break
-				}
-				// exponential backoff til max delay
-				delay := exponentialBackoffWithMax(counter, maxDelay)
-				time.Sleep(delay)
+		var (
+			row *database.OptimismSignature
+			err error
+		)
+		for {
+			row, err = w.verifyAndSaveLog(ctx, &logs[i], task, nextIndex.Uint64(), log)
+			// break if the verification is successful or skip
+			if err == nil {
+				break
+			}
+			// exit if context have been canceled
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+
+			delay, remain, attempts := retryBackoff()
+			// give up if the retry time limit is exceeded
+			if remain <= 0 {
+				break
+			}
+			// expand the deadline if the deadline is exceeded and retry immediately
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Info("expand the deadline", "log-index", i)
+				cancel() // cancel previous context
+				ctx, cancel = context.WithTimeout(parent, w.cfg.StateCollectTimeout*2)
+				defer cancel()
 				continue
 			}
-			// break if the verification is successful
-			break
+
+			// exponential backoff til max delay
+			log.Warn("retry verification",
+				"delay", delay, "remain", remain, "attempts", attempts, "err", err)
+			time.Sleep(delay)
 		}
 
 		// verification failed
@@ -363,4 +354,25 @@ func (w *Verifier) cleanOldSignatures(contract common.Address, nextIndex uint64)
 		return fmt.Errorf("failed to delete old signatures. deleteIndex: %d, : %w", deleteIndex, err)
 	}
 	return nil
+}
+
+func (w *Verifier) retryBackoff() func() (delay, remain time.Duration, attempts int) {
+	started := time.Now()
+	attempts := 0
+
+	return func() (time.Duration, time.Duration, int) {
+		// backoff delay: 0.1s, 0.8s, 6.4s, 51.2s, 409.6s(7m), 3276.8s(54m),
+		delay := 100 << (3 * attempts) * time.Millisecond
+		if delay <= 0 || delay > w.cfg.MaxRetryBackoff {
+			delay = w.cfg.MaxRetryBackoff
+		}
+
+		remain := w.cfg.RetryTimeout - time.Since(started)
+		if remain < 0 {
+			remain = 0
+		}
+
+		attempts++
+		return delay, remain, attempts
+	}
 }

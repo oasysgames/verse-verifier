@@ -78,6 +78,8 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		state_collect_timeout: 1s
 		confirmations: 4
 		start_block_offset: 5760
+		max_retry_backoff: 1m
+		retry_timeout: 2m
 
 	submitter:
 		enable: true
@@ -236,6 +238,8 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			StateCollectTimeout: time.Second,
 			Confirmations:       4,
 			StartBlockOffset:    5760,
+			MaxRetryBackoff:     time.Minute,
+			RetryTimeout:        time.Minute * 2,
 		},
 		Submitter: Submitter{
 			Enable:              true,
@@ -403,6 +407,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
 	s.Equal(3, got.Verifier.Confirmations)
+	s.Equal(time.Hour, got.Verifier.MaxRetryBackoff)
+	s.Equal(time.Hour*24, got.Verifier.RetryTimeout)
 
 	s.Equal(30*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)
