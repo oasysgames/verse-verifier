@@ -34,8 +34,8 @@ p2p:
     - /ip4/0.0.0.0/tcp/4101
     - /ip4/0.0.0.0/udp/4101/quic
   bootnodes:
-    - /ip4/34.142.254.12/tcp/4101/p2p/12D3KooWMQpbQbv9vuGj2dWQHQX6K5oHPupTTSEMNzZWJQqgsBMU
-    - /ip4/34.142.254.12/udp/4101/quic/p2p/12D3KooWMQpbQbv9vuGj2dWQHQX6K5oHPupTTSEMNzZWJQqgsBMU
+    - /dns/verse-verifier01.testnet.oasys.games/tcp/4101/p2p/12D3KooWNyNfCGYx5kwnqmwB3iMNHtzJv1ZTUiiSNpfYhMjVMzSz
+    - /dns/verse-verifier01.testnet.oasys.games/udp/4101/quic/p2p/12D3KooWNyNfCGYx5kwnqmwB3iMNHtzJv1ZTUiiSNpfYhMjVMzSz
   relay_client:
     enable: true
 

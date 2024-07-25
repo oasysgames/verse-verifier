@@ -121,7 +121,7 @@ func (op *verifiableOPLegacy) Verify(
 			if errors.Is(err, context.DeadlineExceeded) {
 				log.Warn("Time up")
 			} else {
-				log.Error("Failed to collect state roots", "err", err)
+				log.Warn("Failed to collect state roots", "err", err)
 			}
 			return false, err
 		} else if len(headers) == 0 {
