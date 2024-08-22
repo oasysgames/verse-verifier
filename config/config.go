@@ -66,7 +66,7 @@ func Defaults() map[string]interface{} {
 
 		"ipc.sockname": "oasvlfy",
 
-		"verifier.interval":              15 * time.Second,
+		"verifier.interval":              6 * time.Second,
 		"verifier.state_collect_limit":   1000,
 		"verifier.state_collect_timeout": 15 * time.Second,
 		"verifier.confirmations":         3,                // 3 confirmations are enough for later than v1.3.0 L1.

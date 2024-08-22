@@ -403,7 +403,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal("oasvlfy", got.IPC.Sockname)
 
-	s.Equal(15*time.Second, got.Verifier.Interval)
+	s.Equal(6*time.Second, got.Verifier.Interval)
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
 	s.Equal(3, got.Verifier.Confirmations)
