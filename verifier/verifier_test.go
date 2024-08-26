@@ -42,11 +42,12 @@ func (s *VerifierTestSuite) SetupTest() {
 
 	s.sigsCh = make(chan []*database.OptimismSignature, 4)
 	s.verifier = NewVerifier(&config.Verifier{
-		Interval:            50 * time.Millisecond,
-		StateCollectLimit:   3,
-		StateCollectTimeout: time.Second,
-		Confirmations:       2,
-		StartBlockOffset:    100,
+		Interval:              50 * time.Millisecond,
+		StateCollectLimit:     3,
+		StateCollectTimeout:   time.Second,
+		Confirmations:         2,
+		StartBlockOffset:      100,
+		MaxLogFetchBlockRange: 5760,
 	}, s.DB, &MockP2P{sigsCh: s.sigsCh}, s.SignableHub)
 
 	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)

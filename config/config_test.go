@@ -78,6 +78,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		state_collect_timeout: 1s
 		confirmations: 4
 		start_block_offset: 5760
+		max_log_fetch_block_range: 5760
 		max_retry_backoff: 1m
 		retry_timeout: 2m
 
@@ -231,15 +232,16 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		},
 		IPC: IPC{Sockname: "testsock"},
 		Verifier: Verifier{
-			Enable:              true,
-			Wallet:              "wallet1",
-			Interval:            5 * time.Second,
-			StateCollectLimit:   5,
-			StateCollectTimeout: time.Second,
-			Confirmations:       4,
-			StartBlockOffset:    5760,
-			MaxRetryBackoff:     time.Minute,
-			RetryTimeout:        time.Minute * 2,
+			Enable:                true,
+			Wallet:                "wallet1",
+			Interval:              5 * time.Second,
+			StateCollectLimit:     5,
+			StateCollectTimeout:   time.Second,
+			Confirmations:         4,
+			StartBlockOffset:      5760,
+			MaxLogFetchBlockRange: 5760,
+			MaxRetryBackoff:       time.Minute,
+			RetryTimeout:          time.Minute * 2,
 		},
 		Submitter: Submitter{
 			Enable:              true,
@@ -403,7 +405,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal("oasvlfy", got.IPC.Sockname)
 
-	s.Equal(15*time.Second, got.Verifier.Interval)
+	s.Equal(6*time.Second, got.Verifier.Interval)
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
 	s.Equal(3, got.Verifier.Confirmations)
