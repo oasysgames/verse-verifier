@@ -143,7 +143,7 @@ func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chai
 	var (
 		start        uint64
 		skipFetchlog bool
-		oneDayBlocks = uint64(5760)
+		maxRange     = w.cfg.MaxLogFetchBlockRange
 	)
 	end, err := w.l1Signer.BlockNumber(ctx)
 	if err != nil {
@@ -163,9 +163,9 @@ func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chai
 			start = end - offset
 		}
 	}
-	if start < end && oneDayBlocks < end-start {
+	if start < end && maxRange < end-start {
 		// If the range is too wide, divide it into one-day blocks.
-		end = start + oneDayBlocks
+		end = start + maxRange
 	}
 	log = log.New("start", start, "end", end)
 

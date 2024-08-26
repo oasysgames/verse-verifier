@@ -66,13 +66,14 @@ func Defaults() map[string]interface{} {
 
 		"ipc.sockname": "oasvlfy",
 
-		"verifier.interval":              6 * time.Second,
-		"verifier.state_collect_limit":   1000,
-		"verifier.state_collect_timeout": 15 * time.Second,
-		"verifier.confirmations":         3,                // 3 confirmations are enough for later than v1.3.0 L1.
-		"verifier.start_block_offset":    uint64(5760 * 2), // 2 days
-		"verifier.max_retry_backoff":     time.Hour,
-		"verifier.retry_timeout":         time.Hour * 24,
+		"verifier.interval":                  6 * time.Second,
+		"verifier.state_collect_limit":       1000,
+		"verifier.state_collect_timeout":     15 * time.Second,
+		"verifier.confirmations":             3,                 // 3 confirmations are enough for later than v1.3.0 L1.
+		"verifier.start_block_offset":        uint64(14400 * 2), // 2 days in case of 6s block time
+		"verifier.max_log_fetch_block_range": uint64(14400),     // 1 day in case of 6s block time
+		"verifier.max_retry_backoff":         time.Hour,
+		"verifier.retry_timeout":             time.Hour * 24,
 
 		// The minimum interval for Verse v0 is 15 seconds.
 		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
@@ -388,6 +389,9 @@ type Verifier struct {
 	// The number of start fetching events is offset from the current block.
 	// This offset is used at the first time to fetch events.
 	StartBlockOffset uint64 `koanf:"start_block_offset"`
+
+	// The max block range to fetch events.
+	MaxLogFetchBlockRange uint64 `koanf:"max_log_fetch_block_range"`
 
 	// The maximum exponential backoff time for retries.
 	MaxRetryBackoff time.Duration `koanf:"max_retry_backoff"`
