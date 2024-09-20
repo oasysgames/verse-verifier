@@ -9,6 +9,10 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 )
 
+const (
+	WalkBackMultiple = 10
+)
+
 var ErrStartBlockIsTooLarge = errors.New("start block is too large")
 
 type EventFetchingBlockRangeManager struct {
@@ -42,11 +46,8 @@ func (m *EventFetchingBlockRangeManager) CheckIfStartTooLarge(nextRollupIndex *b
 		return nil
 	}
 	// NG if the first event rollup index is greater than the next index.
-	nextStart := m.nextStart - m.maxRange*4
-	if m.nextStart < m.maxRange*4 {
-		nextStart = 0
-	}
-	m.nextStart = nextStart
+	m.walkBackNextStart()
+
 	return fmt.Errorf("the first event rollup index(%d) is greater than the next index(%d), %w", firstEventRollupIndex, nextRollupIndex, ErrStartBlockIsTooLarge)
 }
 
@@ -85,6 +86,14 @@ func (m *EventFetchingBlockRangeManager) GetBlockRange(ctx context.Context) (sta
 	m.nextStart = end + 1
 
 	return
+}
+
+func (m *EventFetchingBlockRangeManager) walkBackNextStart() {
+	nextStart := m.nextStart - m.maxRange*WalkBackMultiple
+	if m.nextStart < m.maxRange*WalkBackMultiple {
+		nextStart = 0
+	}
+	m.nextStart = nextStart
 }
 
 func (m *EventFetchingBlockRangeManager) RestoreNextStart() {
