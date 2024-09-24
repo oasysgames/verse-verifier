@@ -19,14 +19,13 @@ import (
 
 // Worker to verify rollups.
 type Verifier struct {
-	cfg               *config.Verifier
-	db                *database.Database
-	l1Signer          ethutil.SignableClient
-	p2p               P2P
-	tasks             sync.Map
-	blockRangeManager *EventFetchingBlockRangeManager
-	log               log.Logger
-	running           *sync.Map
+	cfg      *config.Verifier
+	db       *database.Database
+	l1Signer ethutil.SignableClient
+	p2p      P2P
+	tasks    sync.Map
+	log      log.Logger
+	running  *sync.Map
 }
 
 type P2P interface {
