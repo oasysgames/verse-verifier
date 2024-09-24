@@ -41,13 +41,12 @@ func NewVerifier(
 	l1Signer ethutil.SignableClient,
 ) *Verifier {
 	return &Verifier{
-		cfg:               cfg,
-		db:                db,
-		p2p:               p2p,
-		l1Signer:          l1Signer,
-		blockRangeManager: NewEventFetchingBlockRangeManager(l1Signer, cfg.MaxLogFetchBlockRange, cfg.StartBlockOffset),
-		log:               log.New("worker", "verifier"),
-		running:           &sync.Map{},
+		cfg:      cfg,
+		db:       db,
+		p2p:      p2p,
+		l1Signer: l1Signer,
+		log:      log.New("worker", "verifier"),
+		running:  &sync.Map{},
 	}
 }
 
@@ -91,6 +90,7 @@ func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, c
 	var (
 		tick                     = time.NewTicker(w.cfg.Interval)
 		counter                  int
+		blockRangeManager        = NewEventFetchingBlockRangeManager(w.l1Signer, w.cfg.MaxLogFetchBlockRange, w.cfg.StartBlockOffset)
 		publishAllUnverifiedSigs = func() bool {
 			counter++
 			// Publish all unverified signatures every 4 times.
@@ -110,7 +110,7 @@ func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, c
 				w.log.Info("exit verifier as task is evicted", "chainId", chainId)
 				return
 			}
-			if err := w.work(ctx, task, chainId, publishAllUnverifiedSigs()); err != nil {
+			if err := w.work(ctx, task, chainId, blockRangeManager, publishAllUnverifiedSigs()); err != nil {
 				if errors.Is(err, ErrStartBlockIsTooLarge) {
 					w.log.Warn("Walk back the start block number to ensure the next index is correctly verified", "chainId", chainId, "err", err)
 				} else {
@@ -121,7 +121,7 @@ func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, c
 	}
 }
 
-func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chainId uint64, publishAllUnverifiedSigs bool) error {
+func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chainId uint64, blockRangeManager *EventFetchingBlockRangeManager, publishAllUnverifiedSigs bool) error {
 	ctx, cancel := context.WithTimeout(parent, w.cfg.StateCollectTimeout)
 	defer cancel()
 
@@ -138,7 +138,7 @@ func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chai
 	}
 
 	// determine the start block number
-	start, end, skipFetchlog, err := w.blockRangeManager.GetBlockRange(ctx)
+	start, end, skipFetchlog, err := blockRangeManager.GetBlockRange(ctx)
 	if err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chai
 				log.Warn("Rate limit exceeded", "err", err)
 			}
 			// Restore the next start block number if the fetching logs failed.
-			w.blockRangeManager.RestoreNextStart()
+			blockRangeManager.RestoreNextStart()
 			return fmt.Errorf("failed to fetch(start: %d, end: %d) event logs from hub-layer: %w", start, end, err)
 		}
 	}
@@ -225,7 +225,7 @@ func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chai
 		log.Debug("Verification completed", "approved", row.Approved, "rollup-index", row.RollupIndex)
 
 		// Make sure the first event rollup index is less than the next index, to prosess the next index correctly.
-		if err := w.blockRangeManager.CheckIfStartTooLarge(nextIndex, row.RollupIndex); err != nil {
+		if err := blockRangeManager.CheckIfStartTooLarge(nextIndex, row.RollupIndex); err != nil {
 			return err
 		}
 	}
