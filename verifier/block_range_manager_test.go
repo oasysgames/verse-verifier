@@ -14,7 +14,7 @@ type BlockRangeManagerTestSuite struct {
 
 	startOffSet       uint64
 	maxRange          uint64
-	blockRangeManager *EventFetchingBlockRangeManager
+	blockRangeManager *eventFetchingBlockRangeManager
 }
 
 func TestBlockRangeManager(t *testing.T) {
@@ -25,7 +25,7 @@ func (s *BlockRangeManagerTestSuite) SetupTest() {
 	s.BackendSuite.SetupTest()
 	s.startOffSet = 10
 	s.maxRange = 5
-	s.blockRangeManager = NewEventFetchingBlockRangeManager(s.SignableHub, s.maxRange, s.startOffSet)
+	s.blockRangeManager = NeweventFetchingBlockRangeManager(s.SignableHub, s.maxRange, s.startOffSet)
 }
 
 func (s *BlockRangeManagerTestSuite) TestGetBlockRange() {

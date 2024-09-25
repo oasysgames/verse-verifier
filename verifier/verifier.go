@@ -89,7 +89,7 @@ func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, c
 	var (
 		tick                     = time.NewTicker(w.cfg.Interval)
 		counter                  int
-		blockRangeManager        = NewEventFetchingBlockRangeManager(w.l1Signer, w.cfg.MaxLogFetchBlockRange, w.cfg.StartBlockOffset)
+		blockRangeManager        = NeweventFetchingBlockRangeManager(w.l1Signer, w.cfg.MaxLogFetchBlockRange, w.cfg.StartBlockOffset)
 		publishAllUnverifiedSigs = func() bool {
 			counter++
 			// Publish all unverified signatures every 4 times.
@@ -120,7 +120,7 @@ func (w *Verifier) startVerifier(ctx context.Context, contract common.Address, c
 	}
 }
 
-func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chainId uint64, blockRangeManager *EventFetchingBlockRangeManager, publishAllUnverifiedSigs bool) error {
+func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chainId uint64, blockRangeManager *eventFetchingBlockRangeManager, publishAllUnverifiedSigs bool) error {
 	ctx, cancel := context.WithTimeout(parent, w.cfg.StateCollectTimeout)
 	defer cancel()
 

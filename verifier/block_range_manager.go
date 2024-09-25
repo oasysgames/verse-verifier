@@ -15,7 +15,7 @@ const (
 
 var ErrStartBlockIsTooLarge = errors.New("start block is too large")
 
-type EventFetchingBlockRangeManager struct {
+type eventFetchingBlockRangeManager struct {
 	l1Signer         ethutil.SignableClient
 	maxRange         uint64
 	startBlockOffset uint64
@@ -25,8 +25,8 @@ type EventFetchingBlockRangeManager struct {
 	startTooLargeCheckPassed bool
 }
 
-func NewEventFetchingBlockRangeManager(l1Signer ethutil.SignableClient, maxRange, startBlockOffset uint64) *EventFetchingBlockRangeManager {
-	return &EventFetchingBlockRangeManager{
+func NeweventFetchingBlockRangeManager(l1Signer ethutil.SignableClient, maxRange, startBlockOffset uint64) *eventFetchingBlockRangeManager {
+	return &eventFetchingBlockRangeManager{
 		l1Signer:         l1Signer,
 		maxRange:         maxRange,
 		startBlockOffset: startBlockOffset,
@@ -36,7 +36,7 @@ func NewEventFetchingBlockRangeManager(l1Signer ethutil.SignableClient, maxRange
 // Check if the start block number is too large.
 // If the rollup index of the first event is greater than the next index, the start block number is too large.
 // Move back the start block number to ensure the nex index is correctly verified.
-func (m *EventFetchingBlockRangeManager) CheckIfStartTooLarge(nextRollupIndex *big.Int, firstEventRollupIndex uint64) error {
+func (m *eventFetchingBlockRangeManager) CheckIfStartTooLarge(nextRollupIndex *big.Int, firstEventRollupIndex uint64) error {
 	if m.startTooLargeCheckPassed {
 		return nil
 	}
@@ -51,7 +51,7 @@ func (m *EventFetchingBlockRangeManager) CheckIfStartTooLarge(nextRollupIndex *b
 	return fmt.Errorf("the first event rollup index(%d) is greater than the next index(%d), %w", firstEventRollupIndex, nextRollupIndex, ErrStartBlockIsTooLarge)
 }
 
-func (m *EventFetchingBlockRangeManager) GetBlockRange(ctx context.Context) (start, end uint64, skipFetchlog bool, err error) {
+func (m *eventFetchingBlockRangeManager) GetBlockRange(ctx context.Context) (start, end uint64, skipFetchlog bool, err error) {
 	// Basically, the end block number is the latest block number.
 	if end, err = m.l1Signer.BlockNumber(ctx); err != nil {
 		err = fmt.Errorf("failed to fetch the latest block number: %w", err)
@@ -88,14 +88,16 @@ func (m *EventFetchingBlockRangeManager) GetBlockRange(ctx context.Context) (sta
 	return
 }
 
-func (m *EventFetchingBlockRangeManager) walkBackNextStart() {
-	nextStart := m.nextStart - m.maxRange*WalkBackMultiple
+func (m *eventFetchingBlockRangeManager) walkBackNextStart() {
+	var nextStart uint64
 	if m.nextStart < m.maxRange*WalkBackMultiple {
 		nextStart = 0
+	} else {
+		nextStart = m.nextStart - m.maxRange*WalkBackMultiple
 	}
 	m.nextStart = nextStart
 }
 
-func (m *EventFetchingBlockRangeManager) RestoreNextStart() {
+func (m *eventFetchingBlockRangeManager) RestoreNextStart() {
 	m.nextStart = m.lastStart
 }
