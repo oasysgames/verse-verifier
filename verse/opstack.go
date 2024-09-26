@@ -45,7 +45,7 @@ func (op *opstack) EventDB() database.IOPEventDB {
 }
 
 func (op *opstack) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
-	confirmedNumber, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
+	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
 		return nil, err
 	}
@@ -53,23 +53,28 @@ func (op *opstack) NextIndex(ctx context.Context, confirmation int, waits bool) 
 	if err != nil {
 		return nil, err
 	}
-	return lo.NextVerifyIndex(&bind.CallOpts{Context: ctx, BlockNumber: confirmedNumber})
+	opts := &bind.CallOpts{
+		Context:     ctx,
+		BlockNumber: new(big.Int).SetUint64(confirmed),
+	}
+	return lo.NextVerifyIndex(opts)
 }
 
-func (op *opstack) NextIndexEventEmittedBlock(ctx context.Context, confirmation int, waits bool) (*big.Int, uint64, error) {
-	nextIndex, err := op.NextIndex(ctx, confirmation, waits)
+func (op *opstack) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {
+	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 	lo, err := newL2ooContract(op)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
-	e, err := findOutputProposed(ctx, lo, nextIndex.Uint64())
+	e, err := findOutputProposed(
+		lo, &bind.FilterOpts{Context: ctx, End: &confirmed}, rollupIndex)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
-	return nextIndex, e.Raw.BlockNumber, nil
+	return e.Raw.BlockNumber, nil
 }
 
 func (op *opstack) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
@@ -118,7 +123,7 @@ func (op *transactableOPStack) Transact(
 		return nil, err
 	}
 
-	e, err := findOutputProposed(opts.Context, lo, rollupIndex)
+	e, err := findOutputProposed(lo, &bind.FilterOpts{Context: opts.Context}, rollupIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -146,13 +151,12 @@ func newL2ooContract(op Verse) (*l2oo.OasysL2OutputOracle, error) {
 }
 
 func findOutputProposed(
-	ctx context.Context,
 	lo *l2oo.OasysL2OutputOracle,
+	opts *bind.FilterOpts,
 	outputIndex uint64,
 ) (event *l2oo.OasysL2OutputOracleOutputProposed, err error) {
-	opts := &bind.FilterOpts{Context: ctx}
-
-	iter, err := lo.FilterOutputProposed(opts, nil, []*big.Int{new(big.Int).SetUint64(outputIndex)}, nil)
+	iter, err := lo.FilterOutputProposed(
+		opts, nil, []*big.Int{new(big.Int).SetUint64(outputIndex)}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +173,7 @@ func findOutputProposed(
 	}
 
 	if event == nil {
-		err = errors.New("not found")
+		err = ErrEventNotFound
 	}
 	return event, err
 }

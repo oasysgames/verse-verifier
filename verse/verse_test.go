@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
@@ -89,11 +88,11 @@ func (s *VerseTestSuite) Test_decideConfirmationBlockNumber() {
 	_, err = decideConfirmationBlockNumber(ctx, 5, s.l1Client, false)
 	s.ErrorContains(err, "not enough blocks to confirm")
 
-	var last *types.Header
+	var last uint64
 	for i := 0; i < 10; i++ {
-		last = s.l1Client.Mining()
+		last = s.l1Client.Mining().Number.Uint64()
 	}
 
 	got, _ := decideConfirmationBlockNumber(ctx, 5, s.l1Client, true)
-	s.Equal(last.Number.Uint64()-5, got.Uint64())
+	s.Equal(last-5, got)
 }

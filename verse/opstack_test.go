@@ -58,32 +58,28 @@ func (s *OPStackTestSuite) TestNextIndex() {
 	s.Equal(uint64(10), got2.Uint64())
 }
 
-func (s *OPStackTestSuite) TestNextIndexEventEmittedBlock() {
+func (s *OPStackTestSuite) TestGetEventEmittedBlock() {
 	ctx := context.Background()
 	confirmation := 0
 	waits := false
-	nextIndex := 10
+	nextIndex := uint64(10)
 
-	s.EmitOutputProposed(nextIndex - 1)
-	tx, _ := s.EmitOutputProposed(nextIndex)
-	s.EmitOutputProposed(nextIndex + 1)
+	s.EmitOutputProposed(int(nextIndex) - 1)
+	tx, _ := s.EmitOutputProposed(int(nextIndex))
+	s.EmitOutputProposed(int(nextIndex) + 1)
 
 	s.TL2OO.SetNextVerifyIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
 	s.Mining()
 
 	expect, _ := s.Hub.TransactionReceipt(ctx, tx.Hash())
 
-	got0_ni, got0_blk, _ := s.verse.NextIndexEventEmittedBlock(ctx, confirmation, waits)
-	got1_ni, got1_blk, _ := s.verifiable.NextIndexEventEmittedBlock(ctx, confirmation, waits)
-	got2_ni, got2_blk, _ := s.transactable.NextIndexEventEmittedBlock(ctx, confirmation, waits)
+	got0, _ := s.verse.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
+	got1, _ := s.verifiable.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
+	got2, _ := s.transactable.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
 
-	s.Equal(uint64(10), got0_ni.Uint64())
-	s.Equal(uint64(10), got1_ni.Uint64())
-	s.Equal(uint64(10), got2_ni.Uint64())
-
-	s.Equal(expect.BlockNumber.Uint64(), got0_blk)
-	s.Equal(expect.BlockNumber.Uint64(), got1_blk)
-	s.Equal(expect.BlockNumber.Uint64(), got2_blk)
+	s.Equal(expect.BlockNumber.Uint64(), got0)
+	s.Equal(expect.BlockNumber.Uint64(), got1)
+	s.Equal(expect.BlockNumber.Uint64(), got2)
 }
 
 func (s *OPStackTestSuite) TestVerify() {

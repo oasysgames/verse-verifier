@@ -17,6 +17,7 @@ import (
 
 var (
 	ErrNotSufficientConfirmations = errors.New("not sufficient confirmations")
+	ErrEventNotFound              = errors.New("event not found")
 )
 
 type Verse interface {
@@ -33,11 +34,11 @@ type Verse interface {
 	// sufficiently, there won't be any waiting.)
 	NextIndex(ctx context.Context, confirmation int, waits bool) (nextIndex *big.Int, err error)
 
-	// Returns the rollup index and the emitted L1 block number for the next event to be verified.
+	// Returns the block number at which the event with the given rollup index was emitted on the Hub-Layer.
 	// If the confirmation is greater than 1, call the method with the block number of 'latest - confirmation'.
 	// If the latest block is smaller than `confirmation` and `waits` is true, it will wait for the
 	// number of confirmations to pass. (Since the mainnet/testnet has grown sufficiently, there won't be any waiting.)
-	NextIndexEventEmittedBlock(ctx context.Context, confirmation int, waits bool) (nextIndex *big.Int, l1Block uint64, err error)
+	GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error)
 
 	WithVerifiable(l2Client ethutil.Client) VerifiableVerse
 	WithTransactable(l1Signer ethutil.SignableClient, verifyContract common.Address) TransactableVerse
@@ -95,7 +96,7 @@ func (v *verse) EventDB() database.IOPEventDB      { panic("not implemented") }
 func (v *verse) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
 	panic("not implemented")
 }
-func (v *verse) NextIndexEventEmittedBlock(ctx context.Context, confirmation int, waits bool) (*big.Int, uint64, error) {
+func (v *verse) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {
 	panic("not implemented")
 }
 func (v *verse) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
@@ -149,9 +150,9 @@ func newVerseFactory(conv func(Verse) Verse) VerseFactory {
 	}
 }
 
-func decideConfirmationBlockNumber(ctx context.Context, confirmation int, client ethutil.Client, waits bool) (*big.Int, error) {
+func decideConfirmationBlockNumber(ctx context.Context, confirmation int, client ethutil.Client, waits bool) (uint64, error) {
 	if confirmation < 0 || confirmation > 16 {
-		return nil, errors.New("confirmation must be between 0 and 16")
+		return 0, errors.New("confirmation must be between 0 and 16")
 	}
 	confirmationU64 := uint64(confirmation)
 
@@ -164,18 +165,16 @@ func decideConfirmationBlockNumber(ctx context.Context, confirmation int, client
 	for {
 		latest, err = client.BlockNumber(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch latest block height: %w", err)
+			return 0, fmt.Errorf("failed to fetch latest block height: %w", err)
 		}
 		if latest >= confirmationU64 {
 			break
 		}
 		if !waits {
-			return nil, fmt.Errorf("not enough blocks to confirm: %d < %d, %w", latest, confirmation, ErrNotSufficientConfirmations)
+			return 0, fmt.Errorf("not enough blocks to confirm: %d < %d, %w", latest, confirmation, ErrNotSufficientConfirmations)
 		}
 		// wait for the next block, then retry
 		time.Sleep(10 * time.Second)
 	}
-
-	confirmedNumber := latest - confirmationU64
-	return new(big.Int).SetUint64(confirmedNumber), nil
+	return latest - confirmationU64, nil
 }

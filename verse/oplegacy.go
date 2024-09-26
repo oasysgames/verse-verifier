@@ -48,7 +48,7 @@ func (op *oplegacy) EventDB() database.IOPEventDB {
 }
 
 func (op *oplegacy) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
-	confirmedNumber, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
+	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
 		return nil, err
 	}
@@ -56,23 +56,28 @@ func (op *oplegacy) NextIndex(ctx context.Context, confirmation int, waits bool)
 	if err != nil {
 		return nil, err
 	}
-	return sc.NextIndex(&bind.CallOpts{Context: ctx, BlockNumber: confirmedNumber})
+	opts := &bind.CallOpts{
+		Context:     ctx,
+		BlockNumber: new(big.Int).SetUint64(confirmed),
+	}
+	return sc.NextIndex(opts)
 }
 
-func (op *oplegacy) NextIndexEventEmittedBlock(ctx context.Context, confirmation int, waits bool) (*big.Int, uint64, error) {
-	nextIndex, err := op.NextIndex(ctx, confirmation, waits)
+func (op *oplegacy) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {
+	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 	sc, err := newSccContract(op)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
-	e, err := findStateBatchAppendedEvent(ctx, sc, nextIndex.Uint64())
+	e, err := findStateBatchAppendedEvent(
+		sc, &bind.FilterOpts{Context: ctx, End: &confirmed}, rollupIndex)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
-	return nextIndex, e.Raw.BlockNumber, nil
+	return e.Raw.BlockNumber, nil
 }
 
 func (op *oplegacy) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
@@ -162,7 +167,7 @@ func (op *transactableOPLegacy) Transact(
 		return nil, err
 	}
 
-	e, err := findStateBatchAppendedEvent(opts.Context, sc, rollupIndex)
+	e, err := findStateBatchAppendedEvent(sc, &bind.FilterOpts{Context: opts.Context}, rollupIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -264,12 +269,10 @@ func newSccContract(op Verse) (*scc.Scc, error) {
 }
 
 func findStateBatchAppendedEvent(
-	ctx context.Context,
 	scc *scc.Scc,
+	opts *bind.FilterOpts,
 	batchIndex uint64,
 ) (event *scc.SccStateBatchAppended, err error) {
-	opts := &bind.FilterOpts{Context: ctx}
-
 	iter, err := scc.FilterStateBatchAppended(
 		opts, []*big.Int{new(big.Int).SetUint64(batchIndex)})
 	if err != nil {
@@ -288,7 +291,7 @@ func findStateBatchAppendedEvent(
 	}
 
 	if event == nil {
-		err = errors.New("not found")
+		err = ErrEventNotFound
 	}
 	return event, err
 }
