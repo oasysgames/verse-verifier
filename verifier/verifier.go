@@ -5,27 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
 	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
+	"github.com/oasysgames/oasys-optimism-verifier/util"
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 )
 
 // Worker to verify rollups.
 type Verifier struct {
+	// fields passed during construction
 	cfg      *config.Verifier
 	db       *database.Database
 	l1Signer ethutil.SignableClient
 	p2p      P2P
-	tasks    sync.Map
 	log      log.Logger
-	running  *sync.Map
+
+	// internal fields
+	l1Latest atomic.Pointer[types.Header]
+	tasks    sync.Map
 }
 
 type P2P interface {
@@ -39,14 +43,17 @@ func NewVerifier(
 	p2p P2P,
 	l1Signer ethutil.SignableClient,
 ) *Verifier {
-	return &Verifier{
+	verifier := &Verifier{
 		cfg:      cfg,
 		db:       db,
 		p2p:      p2p,
 		l1Signer: l1Signer,
 		log:      log.New("worker", "verifier"),
-		running:  &sync.Map{},
 	}
+
+	go verifier.l1LatestUpdater()
+
+	return verifier
 }
 
 func (w *Verifier) L1Signer() ethutil.SignableClient {
@@ -125,7 +132,7 @@ func (w *Verifier) work(parent context.Context, task verse.VerifiableVerse, chai
 	defer cancel()
 
 	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
-	nextIndex, err := task.NextIndexWithConfirm(&bind.CallOpts{Context: ctx}, uint64(w.cfg.Confirmations), true)
+	nextIndex, err := task.NextIndex(ctx, uint64(w.cfg.Confirmations), true)
 	if err != nil {
 		return fmt.Errorf("failed to call the NextIndex method: %w", err)
 	}
@@ -351,5 +358,22 @@ func (w *Verifier) retryBackoff() func() (delay, remain time.Duration, attempts 
 
 		attempts++
 		return delay, remain, attempts
+	}
+}
+
+// Updater for the `l1Latest` field.
+func (w *Verifier) l1LatestUpdater() {
+	tick := util.NewTicker(w.cfg.Interval, 1)
+	defer tick.Stop()
+
+	for range tick.C {
+		ctx, cancel := context.WithTimeout(context.Background(), w.cfg.Interval/2)
+		if h, err := w.l1Signer.HeaderByNumber(ctx, nil); err != nil {
+			w.log.Warn("Failed to update L1 latest block", "err", err)
+		} else {
+			w.log.Info("Updated L1 latest block", "number", h.Number, "hash", h.Hash())
+			w.l1Latest.Store(h)
+		}
+		cancel()
 	}
 }

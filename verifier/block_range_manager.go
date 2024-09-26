@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-
-	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 )
 
 const (
@@ -15,8 +13,12 @@ const (
 
 var ErrStartBlockIsTooLarge = errors.New("start block is too large")
 
+type l1Signer interface {
+	BlockNumber(ctx context.Context) (uint64, error)
+}
+
 type eventFetchingBlockRangeManager struct {
-	l1Signer         ethutil.SignableClient
+	l1Signer         l1Signer
 	maxRange         uint64
 	startBlockOffset uint64
 
@@ -25,7 +27,7 @@ type eventFetchingBlockRangeManager struct {
 	startTooLargeCheckPassed bool
 }
 
-func NeweventFetchingBlockRangeManager(l1Signer ethutil.SignableClient, maxRange, startBlockOffset uint64) *eventFetchingBlockRangeManager {
+func NeweventFetchingBlockRangeManager(l1Signer l1Signer, maxRange, startBlockOffset uint64) *eventFetchingBlockRangeManager {
 	return &eventFetchingBlockRangeManager{
 		l1Signer:         l1Signer,
 		maxRange:         maxRange,

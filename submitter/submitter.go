@@ -220,7 +220,7 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, veri
 	defer cancel()
 
 	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
-	nextIndex, err := task.NextIndexWithConfirm(&bind.CallOpts{Context: ctx}, uint64(w.cfg.Confirmations), false)
+	nextIndex, err := task.NextIndex(ctx, uint64(w.cfg.Confirmations), false)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch next index: %w", err)
 	}

@@ -48,15 +48,47 @@ func (s *OPLegacyTestSuite) TestEventDB() {
 }
 
 func (s *OPLegacyTestSuite) TestNextIndex() {
-	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(context.Background()), big.NewInt(10))
+	ctx := context.Background()
+	confirmation := 0
+	waits := false
+
+	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(10))
 	s.Mining()
 
-	got0, _ := s.verse.NextIndex(&bind.CallOpts{})
-	got1, _ := s.verifiable.NextIndex(&bind.CallOpts{})
-	got2, _ := s.transactable.NextIndex(&bind.CallOpts{})
+	got0, _ := s.verse.NextIndex(ctx, confirmation, waits)
+	got1, _ := s.verifiable.NextIndex(ctx, confirmation, waits)
+	got2, _ := s.transactable.NextIndex(ctx, confirmation, waits)
 	s.Equal(uint64(10), got0.Uint64())
 	s.Equal(uint64(10), got1.Uint64())
 	s.Equal(uint64(10), got2.Uint64())
+}
+
+func (s *OPLegacyTestSuite) TestNextIndexEventEmittedBlock() {
+	ctx := context.Background()
+	confirmation := 0
+	waits := false
+	nextIndex := 10
+
+	s.EmitStateBatchAppended(nextIndex - 1)
+	tx, _ := s.EmitStateBatchAppended(nextIndex)
+	s.EmitStateBatchAppended(nextIndex + 1)
+
+	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
+	s.Mining()
+
+	expect, _ := s.Hub.TransactionReceipt(ctx, tx.Hash())
+
+	got0_ni, got0_l1blk, _ := s.verse.NextIndexEventEmittedBlock(ctx, confirmation, waits)
+	got1_ni, got1_l1blk, _ := s.verifiable.NextIndexEventEmittedBlock(ctx, confirmation, waits)
+	got2_ni, got2_l1blk, _ := s.transactable.NextIndexEventEmittedBlock(ctx, confirmation, waits)
+
+	s.Equal(uint64(10), got0_ni.Uint64())
+	s.Equal(uint64(10), got1_ni.Uint64())
+	s.Equal(uint64(10), got2_ni.Uint64())
+
+	s.Equal(expect.BlockNumber.Uint64(), got0_l1blk)
+	s.Equal(expect.BlockNumber.Uint64(), got1_l1blk)
+	s.Equal(expect.BlockNumber.Uint64(), got2_l1blk)
 }
 
 func (s *OPLegacyTestSuite) TestVerify() {

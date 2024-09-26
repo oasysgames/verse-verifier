@@ -1,13 +1,14 @@
 package verse
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/oasysgames/oasys-optimism-verifier/config"
 	"github.com/oasysgames/oasys-optimism-verifier/database"
-	"github.com/oasysgames/oasys-optimism-verifier/ethutil"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	"github.com/stretchr/testify/suite"
@@ -21,8 +22,8 @@ type VerseTestSuite struct {
 	rollupContract,
 	verifyContract common.Address
 	l1Client,
-	l2Client ethutil.Client
-	l1Signer ethutil.SignableClient
+	l2Client *backend.Backend
+	l1Signer *backend.SignableBackend
 
 	verse        Verse
 	verifiable   VerifiableVerse
@@ -74,4 +75,25 @@ func (s *VerseTestSuite) TestL1Signer() {
 
 func (s *VerseTestSuite) TestVerifyContract() {
 	s.Equal(s.verifyContract, s.transactable.VerifyContract())
+}
+
+func (s *VerseTestSuite) Test_decideConfirmationBlockNumber() {
+	ctx := context.Background()
+
+	_, err := decideConfirmationBlockNumber(ctx, -1, s.l1Client, true)
+	s.ErrorContains(err, "confirmation must be between 0 and 16")
+
+	_, err = decideConfirmationBlockNumber(ctx, 20, s.l1Client, true)
+	s.ErrorContains(err, "confirmation must be between 0 and 16")
+
+	_, err = decideConfirmationBlockNumber(ctx, 5, s.l1Client, false)
+	s.ErrorContains(err, "not enough blocks to confirm")
+
+	var last *types.Header
+	for i := 0; i < 10; i++ {
+		last = s.l1Client.Mining()
+	}
+
+	got, _ := decideConfirmationBlockNumber(ctx, 5, s.l1Client, true)
+	s.Equal(last.Number.Uint64()-5, got.Uint64())
 }

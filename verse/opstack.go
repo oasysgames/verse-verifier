@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -45,30 +44,32 @@ func (op *opstack) EventDB() database.IOPEventDB {
 	return database.NewOPEventDB[database.OpstackProposal](op.DB())
 }
 
-func (op *opstack) NextIndex(opts *bind.CallOpts) (*big.Int, error) {
-	lo, err := l2oo.NewOasysL2OutputOracle(op.RollupContract(), op.L1Client())
+func (op *opstack) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
+	confirmedNumber, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
 		return nil, err
 	}
-	return lo.NextVerifyIndex(opts)
+	lo, err := newL2ooContract(op)
+	if err != nil {
+		return nil, err
+	}
+	return lo.NextVerifyIndex(&bind.CallOpts{Context: ctx, BlockNumber: confirmedNumber})
 }
 
-func (op *opstack) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
-	var err error
-	if opts.BlockNumber, err = decideConfirmationBlockNumber(opts, confirmation, op.L1Client()); err != nil {
-		if errors.Is(err, ErrNotSufficientConfirmations) && waits {
-			// wait for the next block, then retry
-			time.Sleep(10 * time.Second)
-			return op.NextIndexWithConfirm(opts, confirmation, waits)
-		}
-		return nil, err
-	}
-
-	lo, err := l2oo.NewOasysL2OutputOracle(op.RollupContract(), op.L1Client())
+func (op *opstack) NextIndexEventEmittedBlock(ctx context.Context, confirmation int, waits bool) (*big.Int, uint64, error) {
+	nextIndex, err := op.NextIndex(ctx, confirmation, waits)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return lo.NextVerifyIndex(opts)
+	lo, err := newL2ooContract(op)
+	if err != nil {
+		return nil, 0, err
+	}
+	e, err := findOutputProposed(ctx, lo, nextIndex.Uint64())
+	if err != nil {
+		return nil, 0, err
+	}
+	return nextIndex, e.Raw.BlockNumber, nil
 }
 
 func (op *opstack) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
@@ -108,7 +109,7 @@ func (op *transactableOPStack) Transact(
 	approved bool,
 	signatures [][]byte,
 ) (*types.Transaction, error) {
-	lc, err := l2oo.NewOasysL2OutputOracle(op.RollupContract(), op.L1Client())
+	lo, err := newL2ooContract(op)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +118,7 @@ func (op *transactableOPStack) Transact(
 		return nil, err
 	}
 
-	e, err := findOutputProposed(opts.Context, lc, rollupIndex)
+	e, err := findOutputProposed(opts.Context, lo, rollupIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +139,10 @@ func (op *transactableOPStack) Transact(
 		},
 		signatures,
 	)
+}
+
+func newL2ooContract(op Verse) (*l2oo.OasysL2OutputOracle, error) {
+	return l2oo.NewOasysL2OutputOracle(op.RollupContract(), op.L1Client())
 }
 
 func findOutputProposed(

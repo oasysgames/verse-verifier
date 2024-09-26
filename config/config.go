@@ -388,10 +388,10 @@ type Verifier struct {
 
 	// The number of start fetching events is offset from the current block.
 	// This offset is used at the first time to fetch events.
-	StartBlockOffset uint64 `koanf:"start_block_offset"`
+	StartBlockOffset int `koanf:"start_block_offset"`
 
 	// The max block range to fetch events.
-	MaxLogFetchBlockRange uint64 `koanf:"max_log_fetch_block_range"`
+	MaxLogFetchBlockRange int `koanf:"max_log_fetch_block_range"`
 
 	// The maximum exponential backoff time for retries.
 	MaxRetryBackoff time.Duration `koanf:"max_retry_backoff"`

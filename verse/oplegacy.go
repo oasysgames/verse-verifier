@@ -47,30 +47,32 @@ func (op *oplegacy) EventDB() database.IOPEventDB {
 	return database.NewOPEventDB[database.OptimismState](op.DB())
 }
 
-func (op *oplegacy) NextIndex(opts *bind.CallOpts) (*big.Int, error) {
-	sc, err := scc.NewScc(op.RollupContract(), op.L1Client())
+func (op *oplegacy) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
+	confirmedNumber, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
 		return nil, err
 	}
-	return sc.NextIndex(opts)
+	sc, err := newSccContract(op)
+	if err != nil {
+		return nil, err
+	}
+	return sc.NextIndex(&bind.CallOpts{Context: ctx, BlockNumber: confirmedNumber})
 }
 
-func (op *oplegacy) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
-	var err error
-	if opts.BlockNumber, err = decideConfirmationBlockNumber(opts, confirmation, op.L1Client()); err != nil {
-		if errors.Is(err, ErrNotSufficientConfirmations) && waits {
-			// wait for the next block, then retry
-			time.Sleep(10 * time.Second)
-			return op.NextIndexWithConfirm(opts, confirmation, waits)
-		}
-		return nil, err
-	}
-
-	sc, err := scc.NewScc(op.RollupContract(), op.L1Client())
+func (op *oplegacy) NextIndexEventEmittedBlock(ctx context.Context, confirmation int, waits bool) (*big.Int, uint64, error) {
+	nextIndex, err := op.NextIndex(ctx, confirmation, waits)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return sc.NextIndex(opts)
+	sc, err := newSccContract(op)
+	if err != nil {
+		return nil, 0, err
+	}
+	e, err := findStateBatchAppendedEvent(ctx, sc, nextIndex.Uint64())
+	if err != nil {
+		return nil, 0, err
+	}
+	return nextIndex, e.Raw.BlockNumber, nil
 }
 
 func (op *oplegacy) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
@@ -150,7 +152,7 @@ func (op *transactableOPLegacy) Transact(
 	approved bool,
 	signatures [][]byte,
 ) (*types.Transaction, error) {
-	sc, err := scc.NewScc(op.RollupContract(), op.L1Client())
+	sc, err := newSccContract(op)
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +257,10 @@ func CalcMerkleRoot(elements [][32]byte) ([32]byte, error) {
 	}
 
 	return elements[0], nil
+}
+
+func newSccContract(op Verse) (*scc.Scc, error) {
+	return scc.NewScc(op.RollupContract(), op.L1Client())
 }
 
 func findStateBatchAppendedEvent(
