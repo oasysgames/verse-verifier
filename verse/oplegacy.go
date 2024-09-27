@@ -47,20 +47,24 @@ func (op *oplegacy) EventDB() database.IOPEventDB {
 	return database.NewOPEventDB[database.OptimismState](op.DB())
 }
 
-func (op *oplegacy) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
+func (op *oplegacy) NextIndex(ctx context.Context, confirmation int, waits bool) (uint64, error) {
 	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	sc, err := newSccContract(op)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	opts := &bind.CallOpts{
 		Context:     ctx,
 		BlockNumber: new(big.Int).SetUint64(confirmed),
 	}
-	return sc.NextIndex(opts)
+	b, err := sc.NextIndex(opts)
+	if err != nil {
+		return 0, err
+	}
+	return b.Uint64(), nil
 }
 
 func (op *oplegacy) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {

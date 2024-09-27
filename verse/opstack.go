@@ -44,20 +44,24 @@ func (op *opstack) EventDB() database.IOPEventDB {
 	return database.NewOPEventDB[database.OpstackProposal](op.DB())
 }
 
-func (op *opstack) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
+func (op *opstack) NextIndex(ctx context.Context, confirmation int, waits bool) (uint64, error) {
 	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	lo, err := newL2ooContract(op)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	opts := &bind.CallOpts{
 		Context:     ctx,
 		BlockNumber: new(big.Int).SetUint64(confirmed),
 	}
-	return lo.NextVerifyIndex(opts)
+	b, err := lo.NextVerifyIndex(opts)
+	if err != nil {
+		return 0, err
+	}
+	return b.Uint64(), nil
 }
 
 func (op *opstack) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {

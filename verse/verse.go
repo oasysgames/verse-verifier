@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -32,7 +31,7 @@ type Verse interface {
 	// If the latest block is smaller than `confirmation` and `waits` is true, it will
 	// wait for the number of confirmations to pass. (Since the mainnet/testnet has grown
 	// sufficiently, there won't be any waiting.)
-	NextIndex(ctx context.Context, confirmation int, waits bool) (nextIndex *big.Int, err error)
+	NextIndex(ctx context.Context, confirmation int, waits bool) (nextIndex uint64, err error)
 
 	// Returns the block number at which the event with the given rollup index was emitted on the Hub-Layer.
 	// If the confirmation is greater than 1, call the method with the block number of 'latest - confirmation'.
@@ -93,7 +92,7 @@ func (v *verse) DB() *database.Database            { return v.db }
 func (v *verse) L1Client() ethutil.Client          { return v.l1Client }
 func (v *verse) RollupContract() common.Address    { return v.rollupContract }
 func (v *verse) EventDB() database.IOPEventDB      { panic("not implemented") }
-func (v *verse) NextIndex(ctx context.Context, confirmation int, waits bool) (*big.Int, error) {
+func (v *verse) NextIndex(ctx context.Context, confirmation int, waits bool) (uint64, error) {
 	panic("not implemented")
 }
 func (v *verse) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {

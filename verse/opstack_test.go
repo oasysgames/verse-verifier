@@ -53,9 +53,9 @@ func (s *OPStackTestSuite) TestNextIndex() {
 	got0, _ := s.verse.NextIndex(ctx, confirmation, waits)
 	got1, _ := s.verifiable.NextIndex(ctx, confirmation, waits)
 	got2, _ := s.transactable.NextIndex(ctx, confirmation, waits)
-	s.Equal(uint64(10), got0.Uint64())
-	s.Equal(uint64(10), got1.Uint64())
-	s.Equal(uint64(10), got2.Uint64())
+	s.Equal(uint64(10), got0)
+	s.Equal(uint64(10), got1)
+	s.Equal(uint64(10), got2)
 }
 
 func (s *OPStackTestSuite) TestGetEventEmittedBlock() {

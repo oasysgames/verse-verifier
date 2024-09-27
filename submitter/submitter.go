@@ -220,19 +220,19 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, veri
 	defer cancel()
 
 	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
-	nextIndex, err := task.NextIndex(ctx, uint64(w.cfg.Confirmations), false)
+	nextIndex, err := task.NextIndex(ctx, w.cfg.Confirmations, false)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch next index: %w", err)
 	}
 	log = log.New("next-index", nextIndex)
 
 	if verifiedIndex != nil {
-		if *verifiedIndex == nextIndex.Uint64() {
+		if *verifiedIndex == nextIndex {
 			// Skip if the nextIndex is already verified
-			return nextIndex.Uint64(), ErrAlreadyVerified
-		} else if *verifiedIndex > nextIndex.Uint64() {
+			return nextIndex, ErrAlreadyVerified
+		} else if *verifiedIndex > nextIndex {
 			// Continue as purhaps reorged
-			log.Warn("Possible reorged. next index is smaller than the verified index", "verified-index", *verifiedIndex, "next-index", nextIndex.Uint64())
+			log.Warn("Possible reorged. next index is smaller than the verified index", "verified-index", *verifiedIndex, "next-index", nextIndex)
 		}
 	}
 
@@ -240,7 +240,7 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, veri
 		db:           w.db,
 		stakemanager: w.stakemanager,
 		contract:     task.RollupContract(),
-		rollupIndex:  nextIndex.Uint64(),
+		rollupIndex:  nextIndex,
 	}
 
 	var tx *types.Transaction
@@ -251,14 +251,14 @@ func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, veri
 	}
 	if err != nil {
 		log.Debug(err.Error())
-		return nextIndex.Uint64(), fmt.Errorf("failed to send transaction: %w", err)
+		return nextIndex, fmt.Errorf("failed to send transaction: %w", err)
 	}
 
 	if err = w.waitForReceipt(ctx, task.L1Signer(), tx); err != nil {
-		return nextIndex.Uint64(), fmt.Errorf("failed to wait for receipt: %w", err)
+		return nextIndex, fmt.Errorf("failed to wait for receipt: %w", err)
 	}
 
-	return nextIndex.Uint64(), nil
+	return nextIndex, nil
 }
 
 func (w *Submitter) sendNormalTx(
