@@ -251,6 +251,8 @@ func (w *Verifier) work(
 			atLeastOneLogVerificationFailed = true
 		}
 
+		backoffDecr()
+
 		if row == nil {
 			// skip if the row is nil
 			// - when the event is not a rollup event
@@ -258,7 +260,6 @@ func (w *Verifier) work(
 			continue
 		}
 
-		backoffDecr()
 		opsigs = append(opsigs, row)
 
 		if i > 0 && i%50 == 0 {
