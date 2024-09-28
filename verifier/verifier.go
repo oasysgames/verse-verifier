@@ -28,7 +28,7 @@ type Verifier struct {
 	db       *database.Database
 	l1Signer ethutil.SignableClient
 	newSigP2P,
-	unverifiedSigP2P P2P
+	unverifiedSigP2P P2P // Separated for testing.
 	log log.Logger
 
 	// internal fields
