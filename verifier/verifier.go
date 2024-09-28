@@ -99,11 +99,11 @@ func (w *Verifier) startVerifier(parent context.Context, contract common.Address
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	// It might take some time for the main work, so I'll run it in the background.
+	// Run it in the background as the main work may take some time.
 	// Note: Must pass a cancelable context to exit when `RemoveTask` in `work``.
 	// Note: It must be executed first because other tasks depend on its.
-	go w.nextIndexUpdater(ctx, task, chainId, w.cfg.Interval*4)
-	go w.unverifiedSigsPublisher(ctx, task, chainId, w.cfg.Interval*10)
+	go w.nextIndexUpdater(ctx, task, chainId)
+	go w.unverifiedSigsPublisher(ctx, task, chainId)
 
 	// Create block range manager. The manager has an internal state,
 	// so it must be created outside the Work loop.
@@ -155,7 +155,7 @@ func (w *Verifier) work(
 	}
 
 	// determine the start block number
-	maxEnd, err := w.determineMaxEnd(log, l1ctx, task, nextIndex)
+	maxEnd, err := w.determineMaxEnd(l1ctx, task, nextIndex)
 	if err != nil {
 		return err
 	}
@@ -421,11 +421,10 @@ func (w *Verifier) nextIndexUpdater(
 	ctx context.Context,
 	task verse.VerifiableVerse,
 	chainId uint64,
-	interval time.Duration,
 ) {
 	log := w.log.New("chain-id", chainId)
-	util.Retry(ctx, 0, interval, func() error {
-		ctx, cancel := context.WithTimeout(ctx, interval/2)
+	util.Retry(ctx, 0, w.cfg.Interval, func() error {
+		ctx, cancel := context.WithTimeout(ctx, w.cfg.Interval/2)
 		defer cancel()
 
 		// Assume the fetched nextIndex is not reorged,
@@ -448,16 +447,13 @@ func (w *Verifier) nextIndexUpdater(
 
 // Publish all unverified signatures.
 // Note: This method loops infinitely until it is canceled.
-func (w *Verifier) unverifiedSigsPublisher(
-	ctx context.Context,
-	task verse.VerifiableVerse,
-	chainId uint64,
-	interval time.Duration,
-) {
+func (w *Verifier) unverifiedSigsPublisher(ctx context.Context, task verse.VerifiableVerse, chainId uint64) {
 	log := w.log.New("chain-id", chainId)
-	contract := task.RollupContract()
 
-	util.Retry(ctx, 0, interval, func() error {
+	contract := task.RollupContract()
+	publishInterval, _ := util.MinMax(w.cfg.Interval*8, time.Minute)
+
+	util.Retry(ctx, 0, publishInterval, func() error {
 		nextIndex, ok := w.nextIndexCache.Load(contract)
 		if !ok {
 			log.Debug("Next index is unknown")
@@ -529,7 +525,6 @@ func (w *Verifier) getBlockRangeManager(
 // Determine the upper limit of the end block.
 // Note: This method retries infinitely until it succeeds or is canceled.
 func (w *Verifier) determineMaxEnd(
-	log log.Logger,
 	ctx context.Context,
 	task verse.VerifiableVerse,
 	nextIndex uint64,

@@ -411,8 +411,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(3, got.Verifier.Confirmations)
 	s.Equal(14400, got.Verifier.MaxLogFetchBlockRange)
 	s.Equal(1440, got.Verifier.MaxIndexDiff)
-	s.Equal(time.Hour, got.Verifier.MaxRetryBackoff)
-	s.Equal(time.Hour*24, got.Verifier.RetryTimeout)
+	s.Equal(time.Minute*5, got.Verifier.MaxRetryBackoff)
+	s.Equal(time.Hour, got.Verifier.RetryTimeout)
 
 	s.Equal(30*time.Second, got.Submitter.Interval)
 	s.Equal(50, got.Submitter.Concurrency)

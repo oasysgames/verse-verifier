@@ -314,29 +314,29 @@ func (s *VerifierTestSuite) TestDetermineMaxEnd() {
 	latest := s.Hub.Minings(10)[9]
 	s.waitForL1HeadUpdated()
 
-	got, _ := s.verifier.determineMaxEnd(s.verifier.log, ctx, s.task, uint64(nextIndex))
+	got, _ := s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 1.
 	nextIndex = 1
-	got, _ = s.verifier.determineMaxEnd(s.verifier.log, ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 3.
 	nextIndex = 3
-	got, _ = s.verifier.determineMaxEnd(s.verifier.log, ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 6.
 	// The Key point is that `6+MaxIndexDiff`` has not yet exceeded the maximum index.
 	nextIndex = 6
-	got, _ = s.verifier.determineMaxEnd(s.verifier.log, ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 7.
 	// Since `7+MaxIndexDiff` exceeds the maximum index, `L1Head-Confirmations` should be returned.
 	nextIndex = 7
-	got, _ = s.verifier.determineMaxEnd(s.verifier.log, ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
 	s.Equal(latest.Number.Uint64()-uint64(s.cfg.Confirmations), got)
 }
 

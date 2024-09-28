@@ -72,8 +72,8 @@ func Defaults() map[string]interface{} {
 		"verifier.confirmations":             3,               // 3 confirmations are enough for later than v1.3.0 L1.
 		"verifier.max_log_fetch_block_range": 14400,           // 1 day in case of 6s block time
 		"verifier.max_index_diff":            86400 * 2 / 120, // Number of rollups for 2days(L2BlockTime=1s,RollupInterval=120s)
-		"verifier.max_retry_backoff":         time.Hour,
-		"verifier.retry_timeout":             time.Hour * 24,
+		"verifier.max_retry_backoff":         time.Minute * 5,
+		"verifier.retry_timeout":             time.Hour,
 
 		// The minimum interval for Verse v0 is 15 seconds.
 		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
