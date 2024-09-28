@@ -181,3 +181,17 @@ func (b *Backend) Mining() *types.Header {
 	b.Commit()
 	return b.Blockchain().CurrentHeader()
 }
+
+func (b *Backend) Minings(count int) []*types.Header {
+	headers := make([]*types.Header, count)
+	for i := 0; i < count; i++ {
+		b.Commit()
+		headers[i] = b.Blockchain().CurrentHeader()
+	}
+	return headers
+}
+
+func (b *Backend) MiningTo(target uint64) []*types.Header {
+	latest := b.Blockchain().CurrentHeader().Number.Uint64()
+	return b.Minings(int(target - latest))
+}

@@ -69,9 +69,9 @@ func Defaults() map[string]interface{} {
 		"verifier.interval":                  6 * time.Second,
 		"verifier.state_collect_limit":       1000,
 		"verifier.state_collect_timeout":     15 * time.Second,
-		"verifier.confirmations":             3,                 // 3 confirmations are enough for later than v1.3.0 L1.
-		"verifier.start_block_offset":        uint64(14400 * 2), // 2 days in case of 6s block time
-		"verifier.max_log_fetch_block_range": uint64(14400),     // 1 day in case of 6s block time
+		"verifier.confirmations":             3,               // 3 confirmations are enough for later than v1.3.0 L1.
+		"verifier.max_log_fetch_block_range": 14400,           // 1 day in case of 6s block time
+		"verifier.max_index_diff":            86400 * 2 / 120, // Number of rollups for 2days(L2BlockTime=1s,RollupInterval=120s)
 		"verifier.max_retry_backoff":         time.Hour,
 		"verifier.retry_timeout":             time.Hour * 24,
 
@@ -386,12 +386,11 @@ type Verifier struct {
 	// Number of confirmation blocks for transaction receipt.
 	Confirmations int
 
-	// The number of start fetching events is offset from the current block.
-	// This offset is used at the first time to fetch events.
-	StartBlockOffset int `koanf:"start_block_offset"`
-
 	// The max block range to fetch events.
 	MaxLogFetchBlockRange int `koanf:"max_log_fetch_block_range"`
+
+	// Do not verify if `rollup index - next index` is greater than this value.
+	MaxIndexDiff int `koanf:"max_index_diff"`
 
 	// The maximum exponential backoff time for retries.
 	MaxRetryBackoff time.Duration `koanf:"max_retry_backoff"`

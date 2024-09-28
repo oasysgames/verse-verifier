@@ -77,8 +77,8 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		state_collect_limit: 5
 		state_collect_timeout: 1s
 		confirmations: 4
-		start_block_offset: 5760
 		max_log_fetch_block_range: 5760
+		max_index_diff: 57601
 		max_retry_backoff: 1m
 		retry_timeout: 2m
 
@@ -238,8 +238,8 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			StateCollectLimit:     5,
 			StateCollectTimeout:   time.Second,
 			Confirmations:         4,
-			StartBlockOffset:      5760,
 			MaxLogFetchBlockRange: 5760,
+			MaxIndexDiff:          57601,
 			MaxRetryBackoff:       time.Minute,
 			RetryTimeout:          time.Minute * 2,
 		},
@@ -409,6 +409,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
 	s.Equal(3, got.Verifier.Confirmations)
+	s.Equal(14400, got.Verifier.MaxLogFetchBlockRange)
+	s.Equal(1440, got.Verifier.MaxIndexDiff)
 	s.Equal(time.Hour, got.Verifier.MaxRetryBackoff)
 	s.Equal(time.Hour*24, got.Verifier.RetryTimeout)
 
