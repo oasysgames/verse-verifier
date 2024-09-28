@@ -468,7 +468,7 @@ func (w *Verifier) getBlockRangeManager(
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Created BlockRangeManager", "next-index", *nextIndex, "initial-start", emittedBlock)
+	log.Info("Initial block has been determined", "block", emittedBlock, "next-index", *nextIndex)
 	return newEventFetchingBlockRangeManager(w.cfg.MaxLogFetchBlockRange, emittedBlock), nil
 }
 
@@ -506,7 +506,6 @@ func (w *Verifier) determineMaxEnd(
 		if inErr != nil {
 			return inErr
 		}
-		log.Info("Override upper limit of end block", "before", max, "after", emittedBlock)
 		max = emittedBlock
 		return nil
 	})
