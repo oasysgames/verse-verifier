@@ -368,10 +368,10 @@ func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.H
 }
 
 func (s *VerifierTestSuite) waitForL1HeadUpdated() (newPtr *types.Header) {
-	oldPtr := s.verifier.l1Head.Load()
+	oldPtr := s.verifier.l1HeadCache.Load()
 	for {
 		time.Sleep(time.Millisecond * 10)
-		if newPtr = s.verifier.l1Head.Load(); newPtr != oldPtr {
+		if newPtr = s.verifier.l1HeadCache.Load(); newPtr != oldPtr {
 			return
 		}
 	}
