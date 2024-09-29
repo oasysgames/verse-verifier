@@ -419,13 +419,13 @@ func (w *Verifier) l1HeadUpdater(interval time.Duration) {
 // Updater for the next index.
 // Note: This method loops infinitely until it is canceled.
 func (w *Verifier) nextIndexUpdater(
-	ctx context.Context,
+	parent context.Context,
 	task verse.VerifiableVerse,
 	chainId uint64,
 ) {
 	log := w.log.New("chain-id", chainId)
-	util.Retry(ctx, 0, w.cfg.Interval, func() error {
-		ctx, cancel := context.WithTimeout(ctx, w.cfg.Interval/2)
+	util.Retry(parent, 0, w.cfg.Interval, func() error {
+		ctx, cancel := context.WithTimeout(parent, w.cfg.Interval/2)
 		defer cancel()
 
 		// Assume the fetched nextIndex is not reorged,
@@ -444,6 +444,7 @@ func (w *Verifier) nextIndexUpdater(
 
 		return errRetry
 	})
+	log.Info("Next index cache updater stopped")
 }
 
 // Publish all unverified signatures.
@@ -476,6 +477,7 @@ func (w *Verifier) unverifiedSigsPublisher(ctx context.Context, task verse.Verif
 
 		return errRetry
 	})
+	log.Info("Unverified signatures publisher stopped")
 }
 
 // Fetch the NextIndex that should be verified next, and create a BlockRangeManager
