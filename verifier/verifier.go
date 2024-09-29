@@ -38,7 +38,7 @@ type Verifier struct {
 }
 
 type P2P interface {
-	PublishSignatures(ctx context.Context, sigs []*database.OptimismSignature)
+	PublishSignatures(ctx context.Context, sigs []*database.OptimismSignature) error
 }
 
 // Returns the new verifier.
@@ -466,9 +466,12 @@ func (w *Verifier) unverifiedSigsPublisher(ctx context.Context, task verse.Verif
 		if err != nil {
 			log.Error("Failed to find unverified signatures", "err", err)
 		} else if len(rows) > 0 {
-			w.unverifiedSigP2P.PublishSignatures(ctx, rows)
-			log.Info("Published unverified signatures", "count", len(rows),
-				"first-rollup-index", rows[0].RollupIndex, "last-rollup-index", rows[len(rows)-1].RollupIndex)
+			if err := w.unverifiedSigP2P.PublishSignatures(ctx, rows); err != nil {
+				log.Error("Failed to publish unverified signatures", "err", err)
+			} else {
+				log.Info("Published unverified signatures", "count", len(rows),
+					"first-rollup-index", rows[0].RollupIndex, "last-rollup-index", rows[len(rows)-1].RollupIndex)
+			}
 		}
 
 		return errRetry

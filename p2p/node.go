@@ -706,7 +706,7 @@ func (w *Node) publishLatestSignatures(ctx context.Context) {
 	}
 }
 
-func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismSignature) {
+func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismSignature) error {
 	sigs := &pb.OptimismSignatureExchange{
 		Latests: make([]*pb.OptimismSignature, len(rows)),
 	}
@@ -717,10 +717,7 @@ func (w *Node) PublishSignatures(ctx context.Context, rows []*database.OptimismS
 	m := &pb.PubSub{Body: &pb.PubSub_OptimismSignatureExchange{
 		OptimismSignatureExchange: sigs,
 	}}
-	if err := publish(ctx, w.topic, m); err != nil {
-		w.log.Error("Failed to publish latest signatures", "err", err)
-		return
-	}
+	return publish(ctx, w.topic, m)
 }
 
 func (w *Node) openStream(ctx context.Context, peer peer.ID) (network.Stream, error) {

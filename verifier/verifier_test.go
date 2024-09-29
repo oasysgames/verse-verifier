@@ -37,8 +37,9 @@ type MockP2P struct {
 	sigsCh chan []*database.OptimismSignature
 }
 
-func (m *MockP2P) PublishSignatures(ctx context.Context, sigs []*database.OptimismSignature) {
+func (m *MockP2P) PublishSignatures(ctx context.Context, sigs []*database.OptimismSignature) error {
 	m.sigsCh <- sigs
+	return nil
 }
 
 func (s *VerifierTestSuite) SetupTest() {
