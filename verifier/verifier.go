@@ -273,9 +273,12 @@ func (w *Verifier) work(
 
 	if len(opsigs) > 0 {
 		// publish all signatures at once
-		w.newSigP2P.PublishSignatures(parent, opsigs)
-		log.Info("Published new signatures", "count-sigs", len(opsigs),
-			"first-rollup-index", opsigs[0].RollupIndex, "last-rollup-index", opsigs[len(opsigs)-1].RollupIndex)
+		if err := w.newSigP2P.PublishSignatures(parent, opsigs); err != nil {
+			log.Error("Failed to publish new signatures", "err", err)
+		} else {
+			log.Info("Published new signatures", "count-sigs", len(opsigs),
+				"first-rollup-index", opsigs[0].RollupIndex, "last-rollup-index", opsigs[len(opsigs)-1].RollupIndex)
+		}
 	} else {
 		log.Info("No signatures to publish")
 	}
