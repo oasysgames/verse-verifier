@@ -106,9 +106,15 @@ func (w *Submitter) startSubmitter(ctx context.Context, contract common.Address,
 				continue
 			} else if errors.Is(err, &StakeAmountShortage{}) {
 				// Wait until enough signatures are collected
-				t := err.(*StakeAmountShortage)
+				var (
+					shortageErr      *StakeAmountShortage
+					required, actual *big.Int
+				)
+				if errors.As(err, &shortageErr) {
+					required, actual = fromWei(shortageErr.required), fromWei(shortageErr.actual)
+				}
 				w.log.Info("Waiting for enough signatures(stake amount shortage)",
-					"nextIndex", nextIndex, "chainId", chainId, "required", t.required, "actual", t.actual)
+					"nextIndex", nextIndex, "chainId", chainId, "required", required, "actual", actual)
 				// Reset the ticker to shorten the interval to be able to submit verify tx without waiting for the next interval
 				resetDuration(w.cfg.Interval / 10)
 				continue
