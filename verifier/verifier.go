@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	errRetry = errors.New("continue")
+	errContinue = errors.New("continue")
 )
 
 // Worker to verify rollups.
@@ -415,7 +415,7 @@ func (w *Verifier) l1HeadUpdater(interval time.Duration) {
 			}
 		}
 
-		return errRetry
+		return errContinue
 	})
 }
 
@@ -445,7 +445,7 @@ func (w *Verifier) nextIndexUpdater(
 			}
 		}
 
-		return errRetry
+		return errContinue
 	})
 	log.Info("Next index cache updater stopped")
 }
@@ -462,7 +462,7 @@ func (w *Verifier) unverifiedSigsPublisher(ctx context.Context, task verse.Verif
 		nextIndex, ok := w.nextIndexCache.Load(contract)
 		if !ok {
 			log.Debug("Next index is unknown")
-			return errRetry
+			return errContinue
 		}
 
 		rows, err := w.db.OPSignature.FindUnverifiedBySigner(
@@ -478,7 +478,7 @@ func (w *Verifier) unverifiedSigsPublisher(ctx context.Context, task verse.Verif
 			}
 		}
 
-		return errRetry
+		return errContinue
 	})
 	log.Info("Unverified signatures publisher stopped")
 }
@@ -496,7 +496,7 @@ func (w *Verifier) getBlockRangeManager(
 		nextIndex, ok := w.nextIndexCache.Load(task.RollupContract())
 		if !ok {
 			log.Debug("Next index is unknown")
-			return errRetry
+			return errContinue
 		}
 
 		// If NextIndex is 1 or greater, there is a possibility that verification has been
@@ -520,7 +520,7 @@ func (w *Verifier) getBlockRangeManager(
 			log.Info("Failed to fetch event for next index", "next-index", nextIndex, "err", err)
 		}
 
-		return errRetry
+		return errContinue
 	})
 
 	// Exit if canceled by caller
