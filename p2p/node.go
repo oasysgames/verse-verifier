@@ -66,7 +66,6 @@ type Node struct {
 
 	meterPubsubSubscribed,
 	meterPubsubUnknownMsg,
-	meterPubsubWorkers,
 	meterStreamOpend,
 	meterStreamHandled,
 	meterStreamClosed,
@@ -85,8 +84,7 @@ type Node struct {
 	meterRelayConnections,
 	meterRelayHopStreams,
 	meterRelayStopStreams,
-	meterVerifierStreams,
-	meterPubsubJobs meter.Gauge
+	meterVerifierStreams meter.Gauge
 }
 
 func NewNode(
@@ -128,8 +126,6 @@ func NewNode(
 
 		meterPubsubSubscribed: meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "subscribed"}, ""),
 		meterPubsubUnknownMsg: meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "unknown", "messages"}, ""),
-		meterPubsubWorkers:    meter.GetOrRegisterCounter([]string{"p2p", "pubsub", "workers"}, ""),
-		meterPubsubJobs:       meter.GetOrRegisterGauge([]string{"p2p", "pubsub", "jobs"}, ""),
 		meterStreamOpend:      meter.GetOrRegisterCounter([]string{"p2p", "stream", "opened"}, ""),
 		meterStreamHandled:    meter.GetOrRegisterCounter([]string{"p2p", "stream", "handled"}, ""),
 		meterStreamClosed:     meter.GetOrRegisterCounter([]string{"p2p", "stream", "closed"}, ""),
@@ -206,18 +202,6 @@ func (w *Node) Routing() routing.Routing         { return w.dht }
 func (w *Node) HolePunchHelper() HolePunchHelper { return w.hpHelper }
 
 func (w *Node) subscribeLoop(ctx context.Context) {
-	type job struct {
-		ctx    context.Context
-		cancel context.CancelFunc
-		peer   peer.ID
-		remote *pb.OptimismSignature
-		logctx []any
-	}
-
-	// Storing workers and jobs.
-	workers := util.NewWorkerGroup(100)
-	procs := &sync.Map{}
-
 	w.log.Info("Start subscribing to pubsub messages")
 
 	for {
@@ -249,46 +233,7 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 				continue
 			}
 
-			// add new worker
-			wname := signer.Hex()
-			if !workers.Has(wname) {
-				workers.AddWorker(ctx, wname, func(_ context.Context, rname string, data interface{}) {
-					job := data.(*job)
-					defer job.cancel()
-
-					procs.Store(rname, job)
-					defer procs.Delete(rname)
-
-					w.handleOptimismSignatureExchangeFromPubSub(job.ctx, job.peer, job.remote)
-					w.meterPubsubJobs.Decr()
-				})
-				w.meterPubsubWorkers.Incr()
-			}
-
-			if data, ok := procs.Load(wname); ok {
-				proc := data.(*job)
-				if peer == proc.peer {
-					continue
-				}
-				if strings.Compare(remote.Id, proc.remote.Id) < 1 {
-					w.log.Debug("Skipped old signature",
-						append(proc.logctx, "skipped-peer", peer, "skipped-id", remote.Id)...)
-					continue
-				}
-
-				w.log.Info("Worker canceled because newer signature were received",
-					append(proc.logctx, "newer-peer", peer, "newer-id", remote.Id)...)
-				proc.cancel()
-			}
-
-			ctx, cancel := context.WithCancel(ctx)
-			job := &job{
-				ctx: ctx, cancel: cancel,
-				peer: peer, remote: remote,
-				logctx: []any{"peer", peer, "signer", wname, "remote-id", remote.Id},
-			}
-			workers.Enqueue(wname, job)
-			w.meterPubsubJobs.Incr()
+			w.handleOptimismSignatureExchangeFromPubSub(ctx, peer, remote)
 		}
 	}
 }
