@@ -16,27 +16,38 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/verse"
 )
 
-var (
-	errContinue = errors.New("continue")
+const (
+	// Parameters for worker pool.
+	maxIdleWorkerDuration      = time.Minute
+	workerReleaseCheckInterval = time.Second
+	workerReleaseCheckTimeout  = time.Duration(0) // no timeout
 )
 
 // Worker to verify rollups.
 type Verifier struct {
 	// fields passed during construction
-	cfg      *config.Verifier
-	db       *database.Database
-	l1Signer ethutil.SignableClient
+	cfg        *config.Verifier
+	db         *database.Database
+	l1Signer   ethutil.SignableClient
+	l2ClientFn L2ClientFn
 	newSigP2P,
 	unverifiedSigP2P P2P // Separated for testing.
-	log log.Logger
+	versepool verse.VersePool
+	log       log.Logger
 
 	// internal fields
-	tasks          util.SyncMap[common.Address, verse.VerifiableVerse]
-	nextIndexCache util.SyncMap[common.Address, uint64]
+	tasks util.SyncMap[common.Address, *taskT]
 }
 
 type P2P interface {
 	PublishSignatures(ctx context.Context, sigs []*database.OptimismSignature) error
+}
+
+type L2ClientFn func(url string, blockTime time.Duration) (ethutil.Client, error)
+
+type taskT struct {
+	verse    verse.VerifiableVerse
+	rangeMgr *eventFetchingBlockRangeManager
 }
 
 // Returns the new verifier.
@@ -45,142 +56,209 @@ func NewVerifier(
 	db *database.Database,
 	p2p P2P,
 	l1Signer ethutil.SignableClient,
+	l2ClientFn L2ClientFn,
+	versepool verse.VersePool,
 ) *Verifier {
-	verifier := &Verifier{
+	return &Verifier{
 		cfg:              cfg,
 		db:               db,
 		newSigP2P:        p2p,
 		unverifiedSigP2P: p2p,
 		l1Signer:         l1Signer,
+		l2ClientFn:       l2ClientFn,
+		versepool:        versepool,
 		log:              log.New("worker", "verifier"),
 	}
-
-	return verifier
-}
-
-func (w *Verifier) L1Signer() ethutil.SignableClient {
-	return w.l1Signer
-}
-
-func (w *Verifier) HasTask(contract common.Address, l2RPC string) bool {
-	task, ok := w.tasks.Load(contract)
-	if !ok {
-		return false
-	}
-	// If the L2 RPC is changed, replace the worker.
-	return l2RPC == task.L2Client().URL()
-}
-
-func (w *Verifier) AddTask(ctx context.Context, task verse.VerifiableVerse, chainId uint64) {
-	_, exists := w.tasks.Load(task.RollupContract())
-	w.tasks.Store(task.RollupContract(), task)
-	if !exists {
-		// Start the verifier by each contract.
-		go w.startVerifier(ctx, task.RollupContract(), chainId)
-	}
-}
-
-func (w *Verifier) GetTask(contract common.Address) (task verse.VerifiableVerse, found bool) {
-	return w.tasks.Load(contract)
 }
 
 func (w *Verifier) RemoveTask(contract common.Address) {
 	w.tasks.Delete(contract)
 }
 
-func (w *Verifier) startVerifier(parent context.Context, contract common.Address, chainId uint64) {
-	log := w.log.New("chain-id", chainId)
-	task, _ := w.GetTask(contract)
+func (w *Verifier) Start(ctx context.Context) {
+	w.log.Info("Verifier started", "config", w.cfg)
 
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
+	maxVerificationWorkers := w.cfg.MaxWorkers
+	verificationInterval := w.cfg.Interval
 
-	// Run it in the background as the main work may take some time.
-	// Note: Must pass a cancelable context to exit when `RemoveTask` in `work``.
-	// Note: It must be executed first because other tasks depend on its.
-	go w.nextIndexUpdater(ctx, task, chainId)
-	go w.unverifiedSigsPublisher(ctx, task, chainId)
+	// Publish workers run expensive database queries, so the number of workers should be small.
+	// P2P publishing is asynchronous and sufficiently fast.
+	_, maxPublishWorkers := util.MinMax(maxVerificationWorkers/5, 2)
+	publishInterval, _ := util.MinMax(verificationInterval*10, time.Minute)
 
-	// Create block range manager. The manager has an internal state,
-	// so it must be created outside the Work loop.
-	// Note: Depends on `nextIndexUpdater`.
-	rangeMgr, err := w.getBlockRangeManager(log, ctx, task)
-	if err != nil {
-		return // canceled by parent context
-	}
+	// Workers performing verification.
+	go func() {
+		// Manage running tasks to prevent dups.
+		var running util.SyncMap[common.Address, time.Time]
 
-	tick := time.NewTicker(w.cfg.Interval)
-	defer tick.Stop()
+		// Create woker pool.
+		wp := util.NewWorkerPool(w.log, w.verify, maxVerificationWorkers,
+			maxIdleWorkerDuration, workerReleaseCheckInterval, workerReleaseCheckTimeout)
+		wp.Start()
+		defer wp.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("Verifying work stopped")
-			return
-		case <-tick.C:
-			task, found := w.GetTask(contract)
-			if !found {
-				log.Info("Exit verifier as task is evicted")
+		tick := time.NewTicker(verificationInterval)
+		defer tick.Stop()
+
+		w.log.Info("Verification workers started",
+			"max-workers", maxVerificationWorkers, "interval", verificationInterval)
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("Verification workers stopped")
 				return
-			}
-			if err := w.work(ctx, task, chainId, rangeMgr); err != nil {
-				log.Error("Failed to run verification", "err", err)
+			case <-tick.C:
+				w.versepool.Range(func(item *verse.VersePoolItem) bool {
+					log := item.Verse().Logger(w.log)
+
+					// The RPC URL should not be used as a cache key. This is because the upgraded
+					// Verse-Layer holds two contracts, v0 and v1, although they are the same URL.
+					cacheKey := item.Verse().RollupContract()
+
+					// Skip if previous task is running
+					if started, isRunning := running.Load(cacheKey); isRunning {
+						log.Info("Skip duplicate verification", "elapsed", time.Since(started))
+						return true
+					}
+					running.Store(cacheKey, time.Now())
+
+					// Since worker run asynchronously, should not call `running.Delete()` here.
+					release := func() { running.Delete(cacheKey) }
+
+					// If the cache does not exist or the RPC URL has changed, open a new connection.
+					var task *taskT
+					if cache, ok := w.tasks.Load(cacheKey); ok && cache.verse.L2Client().URL() == item.Verse().URL() {
+						task = cache
+					} else {
+						if l2Client, err := w.l2ClientFn(item.Verse().URL(), 0); err != nil {
+							log.Error("Failed to construct verse-layer client", "err", err)
+						} else if rangeMgr, err := w.getBlockRangeManager(log, ctx, item.Verse()); err != nil {
+							log.Error("Failed to construct block range manager", "err", err)
+						} else {
+							task = &taskT{
+								verse:    item.Verse().WithVerifiable(l2Client),
+								rangeMgr: rangeMgr,
+							}
+							w.tasks.Store(cacheKey, task)
+						}
+					}
+
+					if task != nil {
+						wp.Work(ctx, task, func(context.Context, *taskT) { release() })
+					} else {
+						release()
+					}
+					return true
+				})
 			}
 		}
-	}
+	}()
+
+	// Workers performing publish unverified signatures.
+	go func() {
+		// Manage running tasks to prevent dups.
+		var running util.SyncMap[common.Address, time.Time]
+
+		// Create woker pool.
+		wp := util.NewWorkerPool(w.log, w.publish, maxPublishWorkers,
+			maxIdleWorkerDuration, workerReleaseCheckInterval, workerReleaseCheckTimeout)
+		wp.Start()
+		defer wp.Stop()
+
+		tick := time.NewTicker(publishInterval)
+		defer tick.Stop()
+
+		w.log.Info("Publish workers started",
+			"max-workers", maxPublishWorkers, "interval", publishInterval)
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("Publish workers stopped")
+				return
+			case <-tick.C:
+				w.versepool.Range(func(item *verse.VersePoolItem) bool {
+					log := item.Verse().Logger(w.log)
+					cacheKey := item.Verse().RollupContract()
+
+					// Skip if previous task is running
+					if started, isRunning := running.Load(cacheKey); isRunning {
+						log.Info("Skip duplicate publish", "elapsed", time.Since(started))
+						return true
+					}
+					running.Store(cacheKey, time.Now())
+					release := func() { running.Delete(cacheKey) }
+
+					if cache, ok := w.tasks.Load(cacheKey); ok {
+						wp.Work(ctx, cache, func(context.Context, *taskT) { release() })
+					} else {
+						// Task generation is left to the verification worker
+						log.Warn("Task not found")
+						release()
+					}
+					return true
+				})
+			}
+		}
+	}()
+
+	<-ctx.Done()
+	w.log.Info("Verifier stopped", "config", w.cfg)
 }
 
-func (w *Verifier) work(
-	parent context.Context,
-	task verse.VerifiableVerse,
-	chainId uint64,
-	rangeMgr *eventFetchingBlockRangeManager,
-) error {
+// Fetch and verify rollup events from the Hub-Layer.
+func (w *Verifier) verify(parent context.Context, task *taskT) {
+	log := task.verse.Logger(w.log)
+
 	l1ctx, l1cancel := context.WithTimeout(parent, w.cfg.StateCollectTimeout)
 	defer l1cancel()
 
-	nextIndex, ok := w.nextIndexCache.Load(task.RollupContract())
-	if !ok {
-		return fmt.Errorf("next index is unknown")
+	nextIndex, err := w.versepool.NextIndex(l1ctx, task.verse.RollupContract(), w.cfg.Confirmations, true)
+	if err != nil {
+		w.log.Error("Failed to fetch next index", "err", err)
+		return
 	}
-	log := w.log.New("chain-id", chainId, "next-index", nextIndex)
+	log = log.New("next-index", nextIndex)
 
 	// Clean up old signatures
-	if err := w.cleanOldSignatures(task.RollupContract(), nextIndex); err != nil {
+	if err = w.cleanOldSignatures(task.verse.RollupContract(), nextIndex); err != nil {
 		log.Warn("Failed to delete old signatures", "err", err)
 	}
 
 	// determine the start block number
-	maxEnd, err := w.determineMaxEnd(l1ctx, task, nextIndex)
+	maxEnd, err := w.determineMaxEnd(l1ctx, task.verse, nextIndex)
 	if err != nil {
-		return err
+		w.log.Error("Failed to determine the maximum end block", "err", err)
+		return
 	}
-	start, end, skipFetchlog := rangeMgr.get(maxEnd)
+	start, end, skipFetchlog := task.rangeMgr.get(maxEnd)
 	log = log.New("max-end", maxEnd, "start", start, "end", end)
 
 	if skipFetchlog {
 		log.Info("Skip fetching logs")
-		return nil
+		return
 	}
 
 	// fetch event logs
 	var logs []types.Log
 	if !skipFetchlog {
 		logs, err = w.l1Signer.FilterLogsWithRateThottling(
-			l1ctx, verse.NewEventLogFilter(start, end, []common.Address{task.RollupContract()}))
+			l1ctx, verse.NewEventLogFilter(start, end, []common.Address{task.verse.RollupContract()}))
 		if err != nil {
 			if errors.Is(err, ethutil.ErrTooManyRequests) {
 				log.Warn("Rate limit exceeded", "err", err)
 			}
 			// Restore the next start block number if the fetching logs failed.
-			rangeMgr.restore()
-			return fmt.Errorf("failed to fetch(start: %d, end: %d) event logs from hub-layer: %w", start, end, err)
+			task.rangeMgr.restore()
+			log.Error("Failed to fetch event logs from hub-layer", "err", err)
+			return
 		}
 	}
 
 	if len(logs) == 0 {
 		log.Info("Skip verify")
-		return nil
+		return
 	}
 
 	log = log.New("count-logs", len(logs))
@@ -203,7 +281,7 @@ func (w *Verifier) work(
 		)
 		for {
 			l2ctx, l2cancel := context.WithTimeout(parent, w.cfg.StateCollectTimeout*2)
-			row, err = w.verifyAndSaveLog(l2ctx, &logs[i], task, nextIndex, log)
+			row, err = w.verifyAndSaveLog(l2ctx, &logs[i], task.verse, nextIndex, log)
 			l2cancel()
 
 			// break if the verification is successful or skip
@@ -212,7 +290,7 @@ func (w *Verifier) work(
 			}
 			// exit if context have been canceled
 			if errors.Is(err, context.Canceled) {
-				return err
+				return
 			}
 
 			// retry immediately if deadline exceeded
@@ -235,7 +313,7 @@ func (w *Verifier) work(
 				"delay", delay, "remain", remain, "attempts", attempts, "err", err)
 			select {
 			case <-parent.Done():
-				return parent.Err()
+				return
 			case <-time.NewTimer(delay).C:
 			}
 		}
@@ -283,10 +361,35 @@ func (w *Verifier) work(
 		// Remove task if at least one log verification failed.
 		// dinamic discovery on : The removed task will be added again in the next verse discovery
 		// dinamic discovery off: restarting is required to add the removed task again
-		w.RemoveTask(task.RollupContract())
+		w.RemoveTask(task.verse.RollupContract())
+	}
+}
+
+// Publish all unverified signatures.
+func (w *Verifier) publish(parent context.Context, task *taskT) {
+	log := task.verse.Logger(w.log)
+
+	contract := task.verse.RollupContract()
+	nextIndex, err := w.versepool.NextIndex(parent, contract, w.cfg.Confirmations, true)
+	if err != nil {
+		log.Error("Failed to fetch next index", "err", err)
+		return
 	}
 
-	return nil
+	rows, err := w.db.OPSignature.FindUnverifiedBySigner(
+		w.l1Signer.Signer(), nextIndex, &contract, database.FindUnverifiedBySignerLimit)
+	if err != nil {
+		log.Error("Failed to find unverified signatures", "err", err)
+		return
+	}
+	if len(rows) > 0 {
+		if err := w.unverifiedSigP2P.PublishSignatures(parent, rows); err != nil {
+			log.Error("Failed to publish unverified signatures", "err", err)
+		} else {
+			log.Info("Published unverified signatures", "count", len(rows),
+				"first-rollup-index", rows[0].RollupIndex, "last-rollup-index", rows[len(rows)-1].RollupIndex)
+		}
+	}
 }
 
 func (w *Verifier) verifyAndSaveLog(ctx context.Context, log *types.Log, task verse.VerifiableVerse, nextIndex uint64, logger log.Logger) (*database.OptimismSignature, error) {
@@ -392,116 +495,49 @@ func (w *Verifier) retryBackoff() (incr func() (delay, remain time.Duration, att
 	return
 }
 
-// Updater for the next index.
-// Note: This method loops infinitely until it is canceled.
-func (w *Verifier) nextIndexUpdater(
-	parent context.Context,
-	task verse.VerifiableVerse,
-	chainId uint64,
-) {
-	log := w.log.New("chain-id", chainId)
-	util.Retry(parent, 0, w.cfg.Interval, func() error {
-		ctx, cancel := context.WithTimeout(parent, w.cfg.Interval/2)
-		defer cancel()
-
-		// Assume the fetched nextIndex is not reorged,
-		// as we confirm `w.cfg.Confirmations` blocks
-		nextIndex, err := task.NextIndex(ctx, w.cfg.Confirmations, true)
-
-		if err != nil {
-			log.Warn("Failed to call the NextIndex method", "err", err)
-		} else {
-			if old, ok := w.nextIndexCache.Swap(task.RollupContract(), nextIndex); !ok {
-				log.Info("Set next index cache", "new", nextIndex)
-			} else if old != nextIndex {
-				log.Info("Update next index cache", "new", nextIndex, "old", old)
-			}
-		}
-
-		return errContinue
-	})
-	log.Info("Next index cache updater stopped")
-}
-
-// Publish all unverified signatures.
-// Note: This method loops infinitely until it is canceled.
-func (w *Verifier) unverifiedSigsPublisher(ctx context.Context, task verse.VerifiableVerse, chainId uint64) {
-	log := w.log.New("chain-id", chainId)
-
-	contract := task.RollupContract()
-	publishInterval, _ := util.MinMax(w.cfg.Interval*8, time.Minute)
-
-	util.Retry(ctx, 0, publishInterval, func() error {
-		nextIndex, ok := w.nextIndexCache.Load(contract)
-		if !ok {
-			log.Debug("Next index is unknown")
-			return errContinue
-		}
-
-		rows, err := w.db.OPSignature.FindUnverifiedBySigner(
-			w.l1Signer.Signer(), nextIndex, &contract, database.FindUnverifiedBySignerLimit)
-		if err != nil {
-			log.Error("Failed to find unverified signatures", "err", err)
-		} else if len(rows) > 0 {
-			if err := w.unverifiedSigP2P.PublishSignatures(ctx, rows); err != nil {
-				log.Error("Failed to publish unverified signatures", "err", err)
-			} else {
-				log.Info("Published unverified signatures", "count", len(rows),
-					"first-rollup-index", rows[0].RollupIndex, "last-rollup-index", rows[len(rows)-1].RollupIndex)
-			}
-		}
-
-		return errContinue
-	})
-	log.Info("Unverified signatures publisher stopped")
-}
-
 // Fetch the NextIndex that should be verified next, and create a BlockRangeManager
 // starting from the block number where the corresponding rollup event was emitted.
 // Note: This method retries infinitely until it succeeds or is canceled.
 func (w *Verifier) getBlockRangeManager(
 	log log.Logger,
 	ctx context.Context,
-	task verse.VerifiableVerse,
+	task verse.Verse,
 ) (*eventFetchingBlockRangeManager, error) {
-	var emittedBlock uint64
-	err := util.Retry(ctx, 0, w.cfg.Interval, func() error {
-		nextIndex, ok := w.nextIndexCache.Load(task.RollupContract())
-		if !ok {
-			log.Debug("Next index is unknown")
-			return errContinue
-		}
-
-		// If NextIndex is 1 or greater, there is a possibility that verification has been
-		// completed up to the latest rollup, so set the starting point to the previous event.
-		if nextIndex > 0 {
-			nextIndex--
-		}
-
-		// Fetch the L1 block number where the event matching the nextIndex was emitted.
-		var err error
-		emittedBlock, err = task.GetEventEmittedBlock(ctx, nextIndex, w.cfg.Confirmations, true)
-		if err == nil {
-			return nil
-		}
-
-		if errors.Is(err, verse.ErrEventNotFound) {
-			// If event does not exist, wait until it is rollup.
-			log.Warn("Event not found")
-			time.Sleep(w.cfg.Interval * 4)
-		} else {
-			log.Info("Failed to fetch event for next index", "next-index", nextIndex, "err", err)
-		}
-
-		return errContinue
-	})
-
-	// Exit if canceled by caller
+	nextIndex, err := w.versepool.NextIndex(ctx, task.RollupContract(), w.cfg.Confirmations, true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch next index: %w", err)
 	}
-	log.Info("Initial block has been determined", "block", emittedBlock)
-	return newEventFetchingBlockRangeManager(w.cfg.MaxLogFetchBlockRange, emittedBlock), nil
+
+	// If NextIndex is 1 or greater, there is a possibility that verification has been
+	// completed up to the latest rollup, so set the starting point to the previous event.
+	if nextIndex > 0 {
+		nextIndex--
+	}
+	log = log.New("next-index", nextIndex)
+
+	// Fetch the L1 block number where the event matching the next index was emitted.
+	tick := time.NewTicker(w.cfg.Interval)
+	defer tick.Stop()
+
+	for {
+		emittedBlock, err := w.versepool.EventEmittedBlock(
+			ctx, task.RollupContract(), nextIndex, w.cfg.Confirmations, true)
+		if err == nil {
+			log.Info("Initial block has been determined", "block", emittedBlock)
+			return newEventFetchingBlockRangeManager(w.cfg.MaxLogFetchBlockRange, emittedBlock), nil
+		}
+		if errors.Is(err, verse.ErrEventNotFound) {
+			log.Warn("Event not found, wait until it is rollup")
+		} else {
+			return nil, fmt.Errorf("failed to fetch the event(index=%d) emitted block: %w", nextIndex, err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-tick.C:
+		}
+	}
 }
 
 // Determine the upper limit of the end block.
@@ -510,38 +546,26 @@ func (w *Verifier) determineMaxEnd(
 	ctx context.Context,
 	task verse.VerifiableVerse,
 	nextIndex uint64,
-) (max uint64, err error) {
-	if header, err := w.l1Signer.HeaderWithCache(ctx); err != nil {
-		// If the L1 head is not fetched, nothing to do.
-		return 0, fmt.Errorf("failed to fetch the L1 head: %w", err)
-	} else {
-		// Basically, upper limit is the head.
-		max = header.Number.Uint64()
-		if max > uint64(w.cfg.Confirmations) {
-			max -= uint64(w.cfg.Confirmations)
-		}
-	}
-
+) (uint64, error) {
 	// Fetch the L1 block number where the event matching the `nextIndex+w.cfg.MaxIndexDiff`
 	// was emitted. It is to avoid excessively verifying new events, as the Submitter node
 	// might not be subscribed to PubSub.
-	maxIndex := nextIndex + uint64(w.cfg.MaxIndexDiff)
-	err = util.Retry(ctx, 0, w.cfg.Interval, func() error {
-		emittedBlock, inErr := task.GetEventEmittedBlock(ctx, maxIndex, w.cfg.Confirmations, true)
-		// If it does not exist, verify up to the head.
-		if errors.Is(inErr, verse.ErrEventNotFound) {
-			return nil
-		}
-		// Retry if any errors
-		if inErr != nil {
-			return inErr
-		}
-		max = emittedBlock
-		return nil
-	})
-	// Exit if canceled by caller
+	emittedBlock, err := w.versepool.EventEmittedBlock(
+		ctx, task.RollupContract(), nextIndex+uint64(w.cfg.MaxIndexDiff), w.cfg.Confirmations, true)
+	if err == nil {
+		return emittedBlock, nil
+	}
+
+	// If it does not exist or any errors occurs, verify up to the head.
+	header, err := w.l1Signer.HeaderWithCache(ctx)
 	if err != nil {
-		return 0, err
+		// If the L1 head is not fetched, nothing to do.
+		return 0, fmt.Errorf("failed to fetch the L1 head: %w", err)
+	}
+
+	max := header.Number.Uint64()
+	if max > uint64(w.cfg.Confirmations) {
+		max -= uint64(w.cfg.Confirmations)
 	}
 	return max, nil
 }

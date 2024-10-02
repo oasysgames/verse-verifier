@@ -53,9 +53,12 @@ type WorkerPool[T any] struct {
 }
 
 type workerPoolJob[T any] struct {
-	Context context.Context
-	Data    T
+	ctx     context.Context
+	data    T
+	cleanup workerPoolJobCleanupFn[T]
 }
+
+type workerPoolJobCleanupFn[T any] func(context.Context, T)
 
 type workerChan[T any] struct {
 	lastUseTime time.Time
@@ -177,7 +180,13 @@ func (wp *WorkerPool[T]) clean(scratch *[]*workerChan[T]) {
 	}
 }
 
-func (wp *WorkerPool[T]) Work(ctx context.Context, data T) bool {
+// Enqueue a new job to the pool. If there are no idle workers in the pool and
+// `workerReleaseCheckInterval` is set to zero, it will immediately return false.
+// Otherwise, the call will be blocked until it is canceled.  Jobs are executed
+// asynchronously, so if you want to do something when the job finishes, pass `cleanup`.
+// Note: The worker will not be released until the cleanup completes, so please
+// avoid performing long take tasks.
+func (wp *WorkerPool[T]) Work(ctx context.Context, data T, cleanup workerPoolJobCleanupFn[T]) bool {
 	waitTick, waitTimeout := wp.getWorkerReleaseTimers()
 	if waitTick != nil {
 		defer waitTick.Stop()
@@ -205,7 +214,7 @@ func (wp *WorkerPool[T]) Work(ctx context.Context, data T) bool {
 	if ch == nil {
 		return false
 	}
-	ch.ch <- &workerPoolJob[T]{Context: ctx, Data: data}
+	ch.ch <- &workerPoolJob[T]{ctx: ctx, data: data, cleanup: cleanup}
 	return true
 }
 
@@ -275,7 +284,10 @@ func (wp *WorkerPool[T]) workerFunc(ch *workerChan[T]) {
 			break
 		}
 
-		wp.workerFuncFn(job.Context, job.Data)
+		wp.workerFuncFn(job.ctx, job.data)
+		if job.cleanup != nil {
+			job.cleanup(job.ctx, job.data)
+		}
 		if !wp.release(ch) {
 			break
 		}

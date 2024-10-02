@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -12,6 +13,10 @@ import (
 	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
+)
+
+const (
+	l1BlockTime = time.Second * 6
 )
 
 var (
@@ -36,7 +41,7 @@ func init() {
 
 func Defaults() map[string]interface{} {
 	return map[string]interface{}{
-		"hub_layer.block_time": time.Second * 6,
+		"hub_layer.block_time": l1BlockTime,
 
 		"verse_layer.discovery.refresh_interval": time.Hour,
 
@@ -68,7 +73,8 @@ func Defaults() map[string]interface{} {
 
 		"ipc.sockname": "oasvlfy",
 
-		"verifier.interval":                  6 * time.Second,
+		"verifier.max_workers":               10,
+		"verifier.interval":                  l1BlockTime,
 		"verifier.state_collect_limit":       1000,
 		"verifier.state_collect_timeout":     15 * time.Second,
 		"verifier.confirmations":             3,               // 3 confirmations are enough for later than v1.3.0 L1.
@@ -80,8 +86,8 @@ func Defaults() map[string]interface{} {
 		// The minimum interval for Verse v0 is 15 seconds.
 		// On the other hand, the minimum interval for Verse v1 is 80 seconds.
 		// Balance the two by setting the default to 30 seconds.
+		"submitter.max_workers":           5,
 		"submitter.interval":              30 * time.Second,
-		"submitter.concurrency":           50,
 		"submitter.confirmations":         3, // 3 confirmations are enough for later than v1.3.0 L1.
 		"submitter.gas_multiplier":        1.1,
 		"submitter.batch_size":            20,
@@ -379,6 +385,9 @@ type Verifier struct {
 	// Name of the wallet to create signature.
 	Wallet string `validate:"required_if=Enable true"`
 
+	// Maximum number of concurrent workers.
+	MaxWorkers int `koanf:"max_workers"`
+
 	// Interval for get block data.
 	Interval time.Duration
 
@@ -404,15 +413,25 @@ type Verifier struct {
 	RetryTimeout time.Duration `koanf:"retry_timeout"`
 }
 
+func (c *Verifier) String() string {
+	return fmt.Sprintf(
+		"wallet:%s max_workers:%d interval:%s state_collect_limit:%d state_collect_timeout:%s"+
+			" confirmations:%d max_log_fetch_block_range:%d max_index_diff:%d max_retry_backoff:%s"+
+			" retry_timeout:%s",
+		c.Wallet, c.MaxWorkers, c.Interval, c.StateCollectLimit, c.StateCollectTimeout,
+		c.Confirmations, c.MaxLogFetchBlockRange, c.MaxIndexDiff, c.MaxRetryBackoff,
+		c.RetryTimeout)
+}
+
 type Submitter struct {
 	// Whether to enable worker.
 	Enable bool `koanf:"enable"`
 
+	// Maximum number of concurrent workers.
+	MaxWorkers int `koanf:"max_workers"`
+
 	// Interval for send transaction.
 	Interval time.Duration
-
-	// Number of concurrent executions.
-	Concurrency int
 
 	// Number of confirmation blocks for transaction receipt.
 	Confirmations int
@@ -438,6 +457,20 @@ type Submitter struct {
 
 	// List of verses to submit signatures
 	Targets []*SubmitterTarget `validate:"dive"`
+}
+
+func (c *Submitter) String() string {
+	var targets []string
+	for _, tg := range c.Targets {
+		targets = append(targets, fmt.Sprintf("{chain_id=%d wallet=%s}", tg.ChainID, tg.Wallet))
+	}
+
+	return fmt.Sprintf("max_workers:%d interval:%s confirmations:%d gas_multiplier:%f"+
+		" max_gas:%d batch_size:%d scc_verifier_address:%s l2oo_verifier_address:%s"+
+		" use_multicall:%v multicall_address:%s targets:[%s]",
+		c.MaxWorkers, c.Interval, c.Confirmations, c.GasMultiplier,
+		c.MaxGas, c.BatchSize, c.SCCVerifierAddress, c.L2OOVerifierAddress,
+		c.UseMulticall, c.MulticallAddress, strings.Join(targets, ","))
 }
 
 type SubmitterTarget struct {

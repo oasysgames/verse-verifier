@@ -49,7 +49,7 @@ func TestWorkerPool(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	for i := 0; i < maxWorkers*2; i++ {
 		start := time.Now()
-		ok := wp.Work(ctx, i)
+		ok := wp.Work(ctx, i, nil)
 		elapsed := time.Since(start)
 
 		if i < maxWorkers {
@@ -79,7 +79,7 @@ func TestWorkerPool(t *testing.T) {
 	assert.Equal(0, len(wp.ready))
 
 	// It should be run now that it has been released.
-	assert.True(wp.Work(ctx, maxWorkers+1))
+	assert.True(wp.Work(ctx, maxWorkers+1, nil))
 }
 
 func TestWorkerPool_WithWaitForRelease_WithoutTimeout(t *testing.T) {
@@ -117,7 +117,7 @@ func TestWorkerPool_WithWaitForRelease_WithoutTimeout(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < maxWorkers*2; i++ {
 		start := time.Now()
-		ok := wp.Work(ctx, i)
+		ok := wp.Work(ctx, i, nil)
 		elapsed := time.Since(start)
 
 		assert.True(ok)
@@ -164,7 +164,7 @@ func TestWorkerPool_WithWaitForRelease_WithTimeout(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < maxWorkers*2; i++ {
 		start := time.Now()
-		ok := wp.Work(ctx, i)
+		ok := wp.Work(ctx, i, nil)
 		elapsed := time.Since(start)
 
 		if i < maxWorkers {
@@ -175,4 +175,32 @@ func TestWorkerPool_WithWaitForRelease_WithTimeout(t *testing.T) {
 			assert.Greater(elapsed, workerReleaseCheckTimeout)
 		}
 	}
+}
+
+func TestWorkerPool_Cleanup(t *testing.T) {
+	assert := assert.New(t)
+
+	maxWorkers := 1
+	maxIdle := time.Millisecond * 10
+	workerReleaseCheckInterval := time.Millisecond
+	workerReleaseCheckTimeout := workerReleaseCheckInterval * 2
+
+	var handlerCalled, cleanupCalled int
+	handler := func(ctx context.Context, job int) {
+		handlerCalled = job
+	}
+	cleanup := func(ctx context.Context, job int) {
+		cleanupCalled = job
+	}
+
+	wp := NewWorkerPool(log.Root(), handler, maxWorkers, maxIdle,
+		workerReleaseCheckInterval, workerReleaseCheckTimeout)
+	wp.Start()
+	defer wp.Stop()
+
+	assert.True(wp.Work(context.Background(), 1, cleanup))
+	time.Sleep(time.Microsecond * 100)
+
+	assert.Equal(1, handlerCalled)
+	assert.Equal(1, cleanupCalled)
 }

@@ -335,6 +335,7 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 		Verifier: config.Verifier{
 			Enable:                false,
 			Wallet:                "",
+			MaxWorkers:            defaults["verifier.max_workers"].(int),
 			Interval:              defaults["verifier.interval"].(time.Duration),
 			StateCollectLimit:     defaults["verifier.state_collect_limit"].(int),
 			StateCollectTimeout:   defaults["verifier.state_collect_timeout"].(time.Duration),
@@ -347,7 +348,7 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 		Submitter: config.Submitter{
 			Enable:              false,
 			Confirmations:       defaults["submitter.confirmations"].(int),
-			Concurrency:         defaults["submitter.concurrency"].(int),
+			MaxWorkers:          defaults["submitter.max_workers"].(int),
 			Interval:            defaults["submitter.interval"].(time.Duration),
 			GasMultiplier:       defaults["submitter.gas_multiplier"].(float64),
 			BatchSize:           defaults["submitter.batch_size"].(int),
