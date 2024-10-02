@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -33,7 +32,6 @@ type Verifier struct {
 
 	// internal fields
 	tasks          util.SyncMap[common.Address, verse.VerifiableVerse]
-	l1HeadCache    atomic.Pointer[types.Header]
 	nextIndexCache util.SyncMap[common.Address, uint64]
 }
 
@@ -56,8 +54,6 @@ func NewVerifier(
 		l1Signer:         l1Signer,
 		log:              log.New("worker", "verifier"),
 	}
-
-	go verifier.l1HeadUpdater(cfg.Interval)
 
 	return verifier
 }
@@ -396,29 +392,6 @@ func (w *Verifier) retryBackoff() (incr func() (delay, remain time.Duration, att
 	return
 }
 
-// Updater for the L1 head.
-// Note: This method will loop infinitely until the process terminates.
-func (w *Verifier) l1HeadUpdater(interval time.Duration) {
-	util.Retry(context.Background(), 0, interval, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), interval/2)
-		defer cancel()
-
-		if h, err := w.l1Signer.HeaderByNumber(ctx, nil); err != nil {
-			w.log.Warn("Failed to update L1 head", "err", err)
-		} else {
-			new := fmt.Sprintf("%d:%s", h.Number, h.Hash())
-			if old := w.l1HeadCache.Swap(h); old == nil {
-				w.log.Info("Set L1 head cache", "new", new)
-			} else if old.Hash() != h.Hash() {
-				w.log.Info("Update L1 head cache",
-					"new", new, "old", fmt.Sprintf("%d:%s", old.Number, old.Hash()))
-			}
-		}
-
-		return errContinue
-	})
-}
-
 // Updater for the next index.
 // Note: This method loops infinitely until it is canceled.
 func (w *Verifier) nextIndexUpdater(
@@ -538,13 +511,12 @@ func (w *Verifier) determineMaxEnd(
 	task verse.VerifiableVerse,
 	nextIndex uint64,
 ) (max uint64, err error) {
-	if l1head := w.l1HeadCache.Load(); l1head == nil {
+	if header, err := w.l1Signer.HeaderWithCache(ctx); err != nil {
 		// If the L1 head is not fetched, nothing to do.
-		err = errors.New("L1 head is unknown")
-		return
+		return 0, fmt.Errorf("failed to fetch the L1 head: %w", err)
 	} else {
 		// Basically, upper limit is the head.
-		max = l1head.Number.Uint64()
+		max = header.Number.Uint64()
 		if max > uint64(w.cfg.Confirmations) {
 			max -= uint64(w.cfg.Confirmations)
 		}

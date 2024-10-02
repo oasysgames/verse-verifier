@@ -36,6 +36,8 @@ func init() {
 
 func Defaults() map[string]interface{} {
 	return map[string]interface{}{
+		"hub_layer.block_time": time.Second * 6,
+
 		"verse_layer.discovery.refresh_interval": time.Hour,
 
 		"p2p.no_announce": []string{
@@ -240,6 +242,9 @@ type HubLayer struct {
 
 	// RPC of the Hub-Layer(HTTP or WebSocket).
 	RPC string `validate:"url"`
+
+	// Block interval of the Hub-Layer.
+	BlockTime time.Duration `koanf:"block_time"`
 }
 
 type Verse struct {

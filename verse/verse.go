@@ -155,17 +155,15 @@ func decideConfirmationBlockNumber(ctx context.Context, confirmation int, client
 	}
 	confirmationU64 := uint64(confirmation)
 
-	var (
-		latest uint64
-		err    error
-	)
 	// The block heights of the Mainnet/Testnet have grown sufficiently,
 	// so this loop is intended for the local chain.
+	var latest uint64
 	for {
-		latest, err = client.BlockNumber(ctx)
+		header, err := client.HeaderWithCache(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("failed to fetch latest block height: %w", err)
 		}
+		latest = header.Number.Uint64()
 		if latest >= confirmationU64 {
 			break
 		}

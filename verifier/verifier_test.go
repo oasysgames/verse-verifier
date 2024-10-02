@@ -133,7 +133,6 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	}
 
 	s.Hub.Minings(10)
-	s.waitForL1HeadUpdated()
 
 	// Run a task to check that the received unverified
 	// signatures are greater than or equal to NextIndex.
@@ -177,7 +176,6 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 		nextIndex++
 		s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
 		s.Hub.Minings(1 + s.cfg.Confirmations)
-		s.waitForL1HeadUpdated()
 
 		sigs = append(sigs, <-s.newSigP2P.sigsCh...)
 		unverifiedWait.Lock()
@@ -193,7 +191,6 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	nextIndex = rollups[len(rollups)-s.cfg.MaxIndexDiff]
 	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
 	s.Hub.Minings(1 + s.cfg.Confirmations)
-	s.waitForL1HeadUpdated()
 
 	sigs = append(sigs, <-s.newSigP2P.sigsCh...)
 	unverifiedWait.Lock()
@@ -313,7 +310,6 @@ func (s *VerifierTestSuite) TestDetermineMaxEnd() {
 		}
 	}
 	latest := s.Hub.Minings(10)[9]
-	s.waitForL1HeadUpdated()
 
 	got, _ := s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
@@ -366,14 +362,4 @@ func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.H
 		headers = append(headers, h)
 	}
 	return headers
-}
-
-func (s *VerifierTestSuite) waitForL1HeadUpdated() (newPtr *types.Header) {
-	oldPtr := s.verifier.l1HeadCache.Load()
-	for {
-		time.Sleep(time.Millisecond * 10)
-		if newPtr = s.verifier.l1HeadCache.Load(); newPtr != oldPtr {
-			return
-		}
-	}
 }

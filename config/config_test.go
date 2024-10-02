@@ -32,6 +32,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 	hub_layer:
 		chain_id: 12345
 		rpc: http://127.0.0.1:8545/
+		block_time: 1m
 
 	verse_layer:
 		discovery:
@@ -136,8 +137,9 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			},
 		},
 		HubLayer: HubLayer{
-			ChainID: 12345,
-			RPC:     "http://127.0.0.1:8545/",
+			ChainID:   12345,
+			RPC:       "http://127.0.0.1:8545/",
+			BlockTime: time.Minute,
 		},
 		VerseLayer: VerseLayer{
 			Discovery: struct {
@@ -375,6 +377,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	got, err := NewConfig(s.toBytes(input), false)
 	s.NoError(err)
+
+	s.Equal(time.Second*6, got.HubLayer.BlockTime)
 
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 

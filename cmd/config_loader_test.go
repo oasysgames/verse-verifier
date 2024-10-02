@@ -244,8 +244,9 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 		Keystore:  s.keystoreDir,
 		Wallets:   map[string]*config.Wallet{},
 		HubLayer: config.HubLayer{
-			ChainID: 1,
-			RPC:     "https://rpc.hub.example.com/",
+			ChainID:   1,
+			RPC:       "https://rpc.hub.example.com/",
+			BlockTime: time.Second * 6,
 		},
 		VerseLayer: config.VerseLayer{
 			Discovery: struct {

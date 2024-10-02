@@ -67,6 +67,10 @@ func (b *Backend) HeaderByHash(
 	return b.Client().HeaderByHash(ctx, hash)
 }
 
+func (c *Backend) HeaderWithCache(ctx context.Context) (header *types.Header, err error) {
+	return c.HeaderByNumber(ctx, nil)
+}
+
 func (b *Backend) TransactionByHash(
 	ctx context.Context,
 	txHash common.Hash,

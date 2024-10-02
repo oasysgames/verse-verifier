@@ -179,14 +179,14 @@ func mustNewServer(ctx context.Context) *server {
 	}
 
 	// construct hub-layer client
-	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC); err != nil {
+	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC, s.conf.HubLayer.BlockTime); err != nil {
 		log.Crit("Failed to construct hub-layer client", "err", err)
 	}
 
 	// Make sue the s.hub can connect to the chain
 	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
-	if _, err := s.hub.BlockNumber(ctx); err != nil {
+	if _, err := s.hub.HeaderWithCache(ctx); err != nil {
 		log.Crit("Failed to connect to the hub-layer chain", "err", err)
 	}
 
@@ -381,6 +381,11 @@ func (s *server) startVerseDiscovery(ctx context.Context) {
 	}()
 }
 
+var verseBlockTimes = map[string]time.Duration{
+	SCCName:  0,           // v0 may create multiple blocks with the same timestamp
+	L2OOName: time.Second, // v1 is fixed at the minimum block time in the specification
+}
+
 func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.Verse) {
 	if s.verifier == nil && s.submitter == nil {
 		log.Warn("Both Verifier and Submitter are disabled")
@@ -397,9 +402,10 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 	}
 
 	type verse_ struct {
-		cfg    *config.Verse
-		verse  verse.Verse
-		verify common.Address
+		cfg       *config.Verse
+		verse     verse.Verse
+		verify    common.Address
+		blockTime time.Duration
 	}
 	var (
 		verses        []*verse_
@@ -409,9 +415,10 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 		for name, addr := range cfg.L1Contracts {
 			if factory, ok := verseFactories[name]; ok {
 				verses = append(verses, &verse_{
-					cfg:    cfg,
-					verse:  factory(s.db, s.hub, common.HexToAddress(addr)),
-					verify: verifyContracts[name],
+					cfg:       cfg,
+					verse:     factory(s.db, s.hub, common.HexToAddress(addr)),
+					verify:    verifyContracts[name],
+					blockTime: verseBlockTimes[name],
 				})
 				verseChainIDs = append(verseChainIDs, cfg.ChainID)
 			}
@@ -423,7 +430,7 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 	for _, x := range verses {
 		// add verse to Verifier
 		if s.verifier != nil && !s.verifier.HasTask(x.verse.RollupContract(), x.cfg.RPC) {
-			l2Client, err := ethutil.NewClient(x.cfg.RPC)
+			l2Client, err := ethutil.NewClient(x.cfg.RPC, x.blockTime)
 			if err != nil {
 				log.Error("Failed to construct verse-layer client", "err", err)
 			} else {
