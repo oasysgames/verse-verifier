@@ -21,7 +21,7 @@ import (
 // specified by `workerReleaseCheckTimeout(default=0s)`. If zero is specified, it will attempt retries indefinitely.
 func NewWorkerPool[T any](
 	log log.Logger,
-	handler func(*WorkerPoolJob[T]),
+	handler func(context.Context, T),
 	maxWorkersCount int,
 	maxIdleWorkerDuration,
 	workerReleaseCheckInterval, workerReleaseCheckTimeout time.Duration,
@@ -38,7 +38,7 @@ func NewWorkerPool[T any](
 
 type WorkerPool[T any] struct {
 	logger          log.Logger
-	workerFuncFn    func(*WorkerPoolJob[T])
+	workerFuncFn    func(context.Context, T)
 	maxWorkersCount int
 	maxIdleWorkerDuration,
 	workerReleaseCheckInterval,
@@ -52,14 +52,14 @@ type WorkerPool[T any] struct {
 	mustStop       bool
 }
 
-type WorkerPoolJob[T any] struct {
+type workerPoolJob[T any] struct {
 	Context context.Context
 	Data    T
 }
 
 type workerChan[T any] struct {
 	lastUseTime time.Time
-	ch          chan *WorkerPoolJob[T]
+	ch          chan *workerPoolJob[T]
 }
 
 func (wp *WorkerPool[T]) Start() {
@@ -70,7 +70,7 @@ func (wp *WorkerPool[T]) Start() {
 	stopCh := wp.stopCh
 	wp.workerChanPool.New = func() any {
 		return &workerChan[T]{
-			ch: make(chan *WorkerPoolJob[T], workerChanCap),
+			ch: make(chan *workerPoolJob[T], workerChanCap),
 		}
 	}
 	go func() {
@@ -205,7 +205,7 @@ func (wp *WorkerPool[T]) Work(ctx context.Context, data T) bool {
 	if ch == nil {
 		return false
 	}
-	ch.ch <- &WorkerPoolJob[T]{Context: ctx, Data: data}
+	ch.ch <- &workerPoolJob[T]{Context: ctx, Data: data}
 	return true
 }
 
@@ -269,13 +269,13 @@ func (wp *WorkerPool[T]) release(ch *workerChan[T]) bool {
 }
 
 func (wp *WorkerPool[T]) workerFunc(ch *workerChan[T]) {
-	var job *WorkerPoolJob[T]
+	var job *workerPoolJob[T]
 	for job = range ch.ch {
 		if job == nil {
 			break
 		}
 
-		wp.workerFuncFn(job)
+		wp.workerFuncFn(job.Context, job.Data)
 		if !wp.release(ch) {
 			break
 		}

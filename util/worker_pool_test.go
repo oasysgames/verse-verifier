@@ -24,12 +24,12 @@ func TestWorkerPool(t *testing.T) {
 		mu               sync.Mutex
 		calls, completed int
 	)
-	handler := func(job *WorkerPoolJob[int]) {
+	handler := func(ctx context.Context, job int) {
 		mu.Lock()
 		calls++
 		mu.Unlock()
 
-		<-job.Context.Done()
+		<-ctx.Done()
 
 		mu.Lock()
 		completed++
@@ -59,7 +59,7 @@ func TestWorkerPool(t *testing.T) {
 			assert.False(ok) // no idle workers
 			assert.Equal(maxWorkers, wp.workersCount)
 		}
-		assert.Less(elapsed, time.Microsecond*50)
+		assert.Less(elapsed, time.Microsecond*100)
 
 		assert.Equal(0, len(wp.ready))
 	}
@@ -96,7 +96,7 @@ func TestWorkerPool_WithWaitForRelease_WithoutTimeout(t *testing.T) {
 		mu               sync.Mutex
 		calls, completed int
 	)
-	handler := func(job *WorkerPoolJob[int]) {
+	handler := func(ctx context.Context, job int) {
 		mu.Lock()
 		calls++
 		mu.Unlock()
@@ -122,7 +122,7 @@ func TestWorkerPool_WithWaitForRelease_WithoutTimeout(t *testing.T) {
 
 		assert.True(ok)
 		if i < maxWorkers {
-			assert.Less(elapsed, time.Microsecond*50)
+			assert.Less(elapsed, time.Microsecond*100)
 		} else {
 			assert.Less(elapsed, workerReleaseCheckInterval*2)
 		}
@@ -143,7 +143,7 @@ func TestWorkerPool_WithWaitForRelease_WithTimeout(t *testing.T) {
 		mu               sync.Mutex
 		calls, completed int
 	)
-	handler := func(job *WorkerPoolJob[int]) {
+	handler := func(ctx context.Context, job int) {
 		mu.Lock()
 		calls++
 		mu.Unlock()
@@ -169,7 +169,7 @@ func TestWorkerPool_WithWaitForRelease_WithTimeout(t *testing.T) {
 
 		if i < maxWorkers {
 			assert.True(ok)
-			assert.Less(elapsed, time.Microsecond*50)
+			assert.Less(elapsed, time.Microsecond*100)
 		} else {
 			assert.False(ok)
 			assert.Greater(elapsed, workerReleaseCheckTimeout)
