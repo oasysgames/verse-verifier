@@ -23,21 +23,17 @@ type Verse interface {
 	Logger(base log.Logger) log.Logger
 	DB() *database.Database
 	L1Client() ethutil.Client
+	ChainID() uint64
+	URL() string
 	RollupContract() common.Address
+	VerifyContract() common.Address
 	EventDB() database.IOPEventDB
 
-	// Returns the next rollup index to be verified. If `confirmation` is greater
-	// than 1, call the method with the block number specified as `latest - confirmation`.
-	// If the latest block is smaller than `confirmation` and `waits` is true, it will
-	// wait for the number of confirmations to pass. (Since the mainnet/testnet has grown
-	// sufficiently, there won't be any waiting.)
-	NextIndex(ctx context.Context, confirmation int, waits bool) (nextIndex uint64, err error)
+	// Returns the next rollup index to be verified.
+	NextIndex(opts *bind.CallOpts) (uint64, error)
 
-	// Returns the block number at which the event with the given rollup index was emitted on the Hub-Layer.
-	// If the confirmation is greater than 1, call the method with the block number of 'latest - confirmation'.
-	// If the latest block is smaller than `confirmation` and `waits` is true, it will wait for the
-	// number of confirmations to pass. (Since the mainnet/testnet has grown sufficiently, there won't be any waiting.)
-	GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error)
+	// Returns the block number at which the event with the given rollup index was emitted on the L1.
+	EventEmittedBlock(opts *bind.FilterOpts, rollupIndex uint64) (uint64, error)
 
 	WithVerifiable(l2Client ethutil.Client) VerifiableVerse
 	WithTransactable(l1Signer ethutil.SignableClient, verifyContract common.Address) TransactableVerse
@@ -59,7 +55,6 @@ type TransactableVerse interface {
 	Verse
 
 	L1Signer() ethutil.SignableClient
-	VerifyContract() common.Address
 	Transact(
 		opts *bind.TransactOpts,
 		rollupIndex uint64,
@@ -69,9 +64,12 @@ type TransactableVerse interface {
 }
 
 type verse struct {
-	db             *database.Database
-	l1Client       ethutil.Client
-	rollupContract common.Address
+	db       *database.Database
+	l1Client ethutil.Client
+	chainID  uint64
+	rpc      string
+	rollupContract,
+	verifyContract common.Address
 }
 
 type verifiableVerse struct {
@@ -90,9 +88,15 @@ type transactableVerse struct {
 func (v *verse) Logger(base log.Logger) log.Logger { return base }
 func (v *verse) DB() *database.Database            { return v.db }
 func (v *verse) L1Client() ethutil.Client          { return v.l1Client }
+func (v *verse) ChainID() uint64                   { return v.chainID }
+func (v *verse) URL() string                       { return v.rpc }
 func (v *verse) RollupContract() common.Address    { return v.rollupContract }
+func (v *verse) VerifyContract() common.Address    { return v.verifyContract }
 func (v *verse) EventDB() database.IOPEventDB      { panic("not implemented") }
-func (v *verse) NextIndex(ctx context.Context, confirmation int, waits bool) (uint64, error) {
+func (v *verse) NextIndex(opts *bind.CallOpts) (uint64, error) {
+	panic("not implemented")
+}
+func (v *verse) EventEmittedBlock(opts *bind.FilterOpts, rollupIndex uint64) (uint64, error) {
 	panic("not implemented")
 }
 func (v *verse) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {
@@ -119,7 +123,6 @@ func (v *verifiableVerse) Verify(
 }
 
 func (v *transactableVerse) L1Signer() ethutil.SignableClient { return v.l1Signer }
-func (v *transactableVerse) VerifyContract() common.Address   { return v.verifyContract }
 func (v *transactableVerse) Transact(
 	*bind.TransactOpts,
 	uint64,
@@ -132,19 +135,28 @@ func (v *transactableVerse) Transact(
 type VerseFactory func(
 	db *database.Database,
 	l1Client ethutil.Client,
-	rollupContract common.Address,
+	chainID uint64,
+	rpc string,
+	rollupContract,
+	verifyContract common.Address,
 ) Verse
 
 func newVerseFactory(conv func(Verse) Verse) VerseFactory {
 	return func(
 		db *database.Database,
 		l1Client ethutil.Client,
-		rollupContract common.Address,
+		chainID uint64,
+		rpc string,
+		rollupContract,
+		verifyContract common.Address,
 	) Verse {
 		return conv(&verse{
 			db:             db,
 			l1Client:       l1Client,
+			chainID:        chainID,
+			rpc:            rpc,
 			rollupContract: rollupContract,
+			verifyContract: verifyContract,
 		})
 	}
 }

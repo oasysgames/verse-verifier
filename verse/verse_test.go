@@ -43,7 +43,7 @@ func (s *VerseTestSuite) SetupTest() {
 
 	factory := newVerseFactory(func(v Verse) Verse { return v })
 
-	s.verse = factory(s.db, s.l1Client, s.rollupContract)
+	s.verse = factory(s.db, s.l1Client, 12345, s.l1Client.URL(), s.rollupContract, s.verifyContract)
 	s.verifiable = s.verse.WithVerifiable(s.l2Client)
 	s.transactable = s.verifiable.WithTransactable(s.l1Signer, s.verifyContract)
 }

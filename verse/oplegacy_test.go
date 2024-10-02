@@ -35,7 +35,7 @@ func TestOPLegacy(t *testing.T) {
 func (s *OPLegacyTestSuite) SetupTest() {
 	s.BackendSuite.SetupTest()
 
-	s.verse = NewOPLegacy(s.DB, s.Hub, s.SCCAddr)
+	s.verse = NewOPLegacy(s.DB, s.Hub, 12345, s.Hub.URL(), s.SCCAddr, s.SCCVAddr)
 	s.verifiable = s.verse.WithVerifiable(s.Verse)
 	s.transactable = s.verse.WithTransactable(s.SignableHub, s.SCCVAddr)
 }
@@ -49,24 +49,21 @@ func (s *OPLegacyTestSuite) TestEventDB() {
 
 func (s *OPLegacyTestSuite) TestNextIndex() {
 	ctx := context.Background()
-	confirmation := 0
-	waits := false
 
 	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(10))
-	s.Mining()
+	header := s.Mining()
 
-	got0, _ := s.verse.NextIndex(ctx, confirmation, waits)
-	got1, _ := s.verifiable.NextIndex(ctx, confirmation, waits)
-	got2, _ := s.transactable.NextIndex(ctx, confirmation, waits)
+	opts := &bind.CallOpts{Context: ctx, BlockNumber: header.Number}
+	got0, _ := s.verse.NextIndex(opts)
+	got1, _ := s.verifiable.NextIndex(opts)
+	got2, _ := s.transactable.NextIndex(opts)
 	s.Equal(uint64(10), got0)
 	s.Equal(uint64(10), got1)
 	s.Equal(uint64(10), got2)
 }
 
-func (s *OPLegacyTestSuite) TestGetEventEmittedBlock() {
+func (s *OPLegacyTestSuite) TestEventEmittedBlock() {
 	ctx := context.Background()
-	confirmation := 0
-	waits := false
 	nextIndex := uint64(10)
 
 	s.EmitStateBatchAppended(int(nextIndex) - 1)
@@ -78,9 +75,10 @@ func (s *OPLegacyTestSuite) TestGetEventEmittedBlock() {
 
 	expect, _ := s.Hub.TransactionReceipt(ctx, tx.Hash())
 
-	got0, _ := s.verse.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
-	got1, _ := s.verifiable.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
-	got2, _ := s.transactable.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
+	opts := &bind.FilterOpts{Context: ctx}
+	got0, _ := s.verse.EventEmittedBlock(opts, nextIndex)
+	got1, _ := s.verifiable.EventEmittedBlock(opts, nextIndex)
+	got2, _ := s.transactable.EventEmittedBlock(opts, nextIndex)
 
 	s.Equal(expect.BlockNumber.Uint64(), got0)
 	s.Equal(expect.BlockNumber.Uint64(), got1)

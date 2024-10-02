@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -40,25 +41,17 @@ type transactableOPLegacy struct {
 }
 
 func (op *oplegacy) Logger(base log.Logger) log.Logger {
-	return base.New("scc", op.RollupContract())
+	return base.New("chain-id", fmt.Sprint(op.ChainID()), "op-version", "v0")
 }
 
 func (op *oplegacy) EventDB() database.IOPEventDB {
 	return database.NewOPEventDB[database.OptimismState](op.DB())
 }
 
-func (op *oplegacy) NextIndex(ctx context.Context, confirmation int, waits bool) (uint64, error) {
-	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
-	if err != nil {
-		return 0, err
-	}
+func (op *oplegacy) NextIndex(opts *bind.CallOpts) (uint64, error) {
 	sc, err := newSccContract(op)
 	if err != nil {
 		return 0, err
-	}
-	opts := &bind.CallOpts{
-		Context:     ctx,
-		BlockNumber: new(big.Int).SetUint64(confirmed),
 	}
 	b, err := sc.NextIndex(opts)
 	if err != nil {
@@ -67,17 +60,12 @@ func (op *oplegacy) NextIndex(ctx context.Context, confirmation int, waits bool)
 	return b.Uint64(), nil
 }
 
-func (op *oplegacy) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {
-	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
-	if err != nil {
-		return 0, err
-	}
+func (op *oplegacy) EventEmittedBlock(opts *bind.FilterOpts, rollupIndex uint64) (uint64, error) {
 	sc, err := newSccContract(op)
 	if err != nil {
 		return 0, err
 	}
-	e, err := findStateBatchAppendedEvent(
-		sc, &bind.FilterOpts{Context: ctx, End: &confirmed}, rollupIndex)
+	e, err := findStateBatchAppendedEvent(sc, opts, rollupIndex)
 	if err != nil {
 		return 0, err
 	}
