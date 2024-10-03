@@ -101,8 +101,8 @@ func (w *Verifier) Start(ctx context.Context) {
 		cacheCleanupTick := time.NewTicker(time.Hour)
 		defer cacheCleanupTick.Stop()
 
-		tick := time.NewTicker(verificationInterval)
-		defer tick.Stop()
+		workTick := time.NewTicker(verificationInterval)
+		defer workTick.Stop()
 
 		w.log.Info("Verification workers started",
 			"max-workers", maxVerificationWorkers, "interval", verificationInterval)
@@ -126,7 +126,7 @@ func (w *Verifier) Start(ctx context.Context) {
 					}
 					return true
 				})
-			case <-tick.C:
+			case <-workTick.C:
 				w.versepool.Range(func(item *verse.VersePoolItem) bool {
 					log := item.Verse().Logger(w.log)
 
