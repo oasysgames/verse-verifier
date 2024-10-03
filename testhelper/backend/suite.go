@@ -88,11 +88,12 @@ func (b *BackendSuite) SetupTest() {
 	b.SignableHub.Mining()
 }
 
-func (b *BackendSuite) Mining() {
+func (b *BackendSuite) Mining() *types.Header {
 	b.NotEmpty(b.SignableHub.Commit())
 	header, err := b.SignableHub.HeaderByNumber(context.Background(), nil)
 	b.NoError(err)
 	b.DB.Block.Save(header.Number.Uint64(), header.Hash())
+	return header
 }
 
 func (b *BackendSuite) EmitStateBatchAppended(index int) (

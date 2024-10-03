@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -25,6 +24,11 @@ import (
 const (
 	maxTxSize = 120 * 1024 // 120KB ()
 	minTxGas  = 24871      // Multicall minimum gas
+
+	// Parameters for worker pool.
+	maxIdleWorkerDuration      = time.Minute
+	workerReleaseCheckInterval = time.Second
+	workerReleaseCheckTimeout  = time.Duration(0) // no timeout
 )
 
 var (
@@ -33,106 +37,164 @@ var (
 )
 
 type Submitter struct {
+	// fields passed during construction
 	cfg          *config.Submitter
 	db           *database.Database
+	l1SignerFn   L1SignerFn
 	stakemanager *stakemanager.Cache
-	tasks        sync.Map
+	versepool    verse.VersePool
 	log          log.Logger
+
+	// internal fields
+	tasks util.SyncMap[common.Address, *taskT]
+}
+
+type L1SignerFn func(chainID uint64) ethutil.SignableClient
+
+type taskT struct {
+	verse         verse.TransactableVerse
+	verifiedIndex *uint64
 }
 
 func NewSubmitter(
 	cfg *config.Submitter,
 	db *database.Database,
+	l1SignerFn L1SignerFn,
 	stakemanager *stakemanager.Cache,
+	versepool verse.VersePool,
 ) *Submitter {
 	return &Submitter{
 		cfg:          cfg,
 		db:           db,
+		l1SignerFn:   l1SignerFn,
 		stakemanager: stakemanager,
+		versepool:    versepool,
 		log:          log.New("worker", "submitter"),
 	}
 }
 
-// Deprecated:
 func (w *Submitter) Start(ctx context.Context) {
-	w.log.Info("Submitter started",
-		"interval", w.cfg.Interval,
-		"concurrency", w.cfg.Concurrency,
-		"confirmations", w.cfg.Confirmations,
-		"gas-multiplier", w.cfg.GasMultiplier,
-		"batch-size", w.cfg.BatchSize,
-		"max-gas", w.cfg.MaxGas,
-		"scc-verifier", w.cfg.SCCVerifierAddress,
-		"l2oo-verifier", w.cfg.L2OOVerifierAddress,
-		"use-multicall", w.cfg.UseMulticall,
-		"multicall", w.cfg.MulticallAddress)
-	w.workLoop(ctx)
-}
+	w.log.Info("Submitter started", "config", w.cfg)
 
-func (w *Submitter) startSubmitter(ctx context.Context, contract common.Address, chainId uint64) {
-	var (
-		tick          = time.NewTicker(w.cfg.Interval)
-		duration      = w.cfg.Interval
-		verifiedIndex *uint64
-		resetDuration = func(target time.Duration) {
-			if duration == target {
-				return
-			}
-			duration = target
-			tick.Reset(duration)
-		}
-	)
-	defer tick.Stop()
+	// Create woker pool.
+	wp := util.NewWorkerPool(w.log, w.work, w.cfg.MaxWorkers,
+		maxIdleWorkerDuration, workerReleaseCheckInterval, workerReleaseCheckTimeout)
+	wp.Start()
+	defer wp.Stop()
+
+	// Manage running tasks to prevent dups.
+	var running util.SyncMap[common.Address, time.Time]
+
+	// Every hour, remove Verse that were deleted from the pool from the local cache as well.
+	cacheCleanupTick := time.NewTicker(time.Hour)
+	defer cacheCleanupTick.Stop()
+
+	workTick := time.NewTicker(w.cfg.Interval)
+	defer workTick.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			w.log.Info("Submitting work stopped", "chainId", chainId)
+			log.Info("Submitter stopped")
 			return
-		case <-tick.C:
-			v, found := w.GetTask(contract)
-			if !found {
-				w.log.Info("Exit submitter loop as the task is evicted", "chainId", chainId)
-				return
-			}
-			nextIndex, err := w.work(ctx, v, verifiedIndex)
-			if errors.Is(err, verse.ErrNotSufficientConfirmations) {
-				w.log.Info("Not enough confirmations", "nextIndex", nextIndex, "chainId", chainId)
-				continue
-			} else if errors.Is(err, ErrNoSignatures) {
-				w.log.Info("No signatures to submit", "nextIndex", nextIndex, "chainId", chainId)
-				// Reset the ticker to the original interval
-				resetDuration(w.cfg.Interval)
-				continue
-			} else if errors.Is(err, &StakeAmountShortage{}) {
-				// Wait until enough signatures are collected
-				w.log.Info("Waiting for enough signatures", "nextIndex", nextIndex, "chainId", chainId)
-				// Reset the ticker to shorten the interval to be able to submit verify tx without waiting for the next interval
-				resetDuration(w.cfg.Interval / 10)
-				continue
-			} else if err == nil {
-				// Finally, succeeded to verify the corresponding rollup index, So move to the next index
-				verifiedIndex = &nextIndex
-				w.log.Info("Successfully verified the rollup index", "verifiedIndex", *verifiedIndex, "chainId", chainId)
-				// Clean up old signatures
-				if err := w.cleanOldSignatures(v.RollupContract(), *verifiedIndex); err != nil {
-					w.log.Warn("Failed to delete old signatures", "verifiedIndex", *verifiedIndex, "chainId", chainId, "err", err)
+		case <-cacheCleanupTick.C:
+			w.tasks.Range(func(cacheKey common.Address, task *taskT) bool {
+				_, exists := w.versepool.Get(cacheKey)
+				if !exists {
+					task.verse.Logger(w.log).Info("Delete task cache")
+					w.tasks.Delete(cacheKey)
 				}
-				// Reset the ticker to the original interval
-				resetDuration(w.cfg.Interval)
-				continue
-			} else if errors.Is(err, ErrAlreadyVerified) {
-				// Skip if the nextIndex is already verified
-				w.log.Info("Already verified the rollup index", "nextIndex", nextIndex, "chainId", chainId)
-				continue
-			} else {
-				w.log.Error("Failed to verify the rollup index", "nextIndex", nextIndex, "chainId", chainId, "err", err)
-			}
+				return true
+			})
+		case <-workTick.C:
+			w.versepool.Range(func(item *verse.VersePoolItem) bool {
+				if !item.CanSubmit() {
+					return true
+				}
+
+				log := w.log.New("chain-id", item.Verse().ChainID())
+
+				// Task has internal state and should be cached
+				cacheKey := item.Verse().RollupContract()
+
+				// Skip if previous task is running
+				if started, isRunning := running.Load(cacheKey); isRunning {
+					log.Info("Skip", "elapsed", time.Since(started))
+					return true
+				}
+				running.Store(cacheKey, time.Now())
+
+				// Since worker run asynchronously, should not call `running.Delete()` here.
+				release := func() { running.Delete(cacheKey) }
+
+				// If the cache does not exist, create a new task.
+				var task *taskT
+				if cache, ok := w.tasks.Load(cacheKey); ok {
+					task = cache
+				} else {
+					l1Signer := w.l1SignerFn(item.Verse().ChainID())
+					if l1Signer == nil {
+						log.Error("Submitter wallet was not found")
+					} else {
+						task = &taskT{
+							verse: item.Verse().WithTransactable(
+								l1Signer, item.Verse().VerifyContract()),
+							verifiedIndex: nil, // initial value should be nil
+						}
+						w.tasks.Store(cacheKey, task)
+					}
+				}
+
+				if task != nil {
+					wp.Work(ctx, task, func(context.Context, *taskT) { release() })
+				} else {
+					release()
+				}
+				return true
+			})
 		}
 	}
 }
 
-func (w *Submitter) cleanOldSignatures(contract common.Address, verifiedIndex uint64) error {
+func (w *Submitter) work(ctx context.Context, task *taskT) {
+	nextIndex, err := w.submit(ctx, task)
+
+	log := task.verse.Logger(w.log).New("next-index", nextIndex)
+	if task.verifiedIndex != nil {
+		log = log.New("verified-index", *task.verifiedIndex)
+	}
+
+	if errors.Is(err, verse.ErrNotSufficientConfirmations) {
+		log.Info("Not enough confirmations")
+	} else if errors.Is(err, ErrNoSignatures) {
+		log.Info("No signatures to submit")
+	} else if errors.Is(err, ErrAlreadyVerified) {
+		// Skip if the nextIndex is already verified
+		log.Info("Already verified the rollup index")
+	} else if errors.Is(err, &StakeAmountShortage{}) {
+		// Wait until enough signatures are collected
+		var (
+			shortageErr      *StakeAmountShortage
+			required, actual *big.Int
+		)
+		if errors.As(err, &shortageErr) {
+			required, actual = fromWei(shortageErr.required), fromWei(shortageErr.actual)
+		}
+		log.Info("Not enough signatures(stake amount shortage)",
+			"nextIndex", nextIndex, "required", required, "actual", actual)
+	} else if err != nil {
+		log.Error("Failed to verify the rollup index", "err", err)
+	} else {
+		// Finally, succeeded to verify the corresponding rollup index, So move to the next index
+		task.verifiedIndex = &nextIndex
+		log.Info("Successfully verified the rollup index", "next-verified-index", *task.verifiedIndex)
+		if err := w.cleanupOldSignatures(task.verse.RollupContract(), *task.verifiedIndex); err != nil {
+			log.Warn("Failed to delete old signatures", "verified-index", *task.verifiedIndex, "err", err)
+		}
+	}
+}
+
+func (w *Submitter) cleanupOldSignatures(contract common.Address, verifiedIndex uint64) error {
 	if verifiedIndex == 0 {
 		return nil
 	}
@@ -144,121 +206,54 @@ func (w *Submitter) cleanOldSignatures(contract common.Address, verifiedIndex ui
 	return nil
 }
 
-// Deprecated:
-func (w *Submitter) workLoop(ctx context.Context) {
-	wg := util.NewWorkerGroup(w.cfg.Concurrency)
-	running := &sync.Map{}
-
-	tick := time.NewTicker(w.cfg.Interval)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			w.log.Info("Submitter stopped")
-			return
-		case <-tick.C:
-			w.tasks.Range(func(key, val any) bool {
-				workerID := key.(common.Address).Hex()
-				task := val.(verse.TransactableVerse)
-
-				// deduplication
-				if _, ok := running.Load(workerID); ok {
-					return true
-				}
-				running.Store(workerID, 1)
-
-				if !wg.Has(workerID) {
-					worker := func(ctx context.Context, rname string, data interface{}) {
-						defer running.Delete(rname)
-						w.work(ctx, data.(verse.TransactableVerse), nil)
-					}
-					wg.AddWorker(ctx, workerID, worker)
-				}
-
-				wg.Enqueue(workerID, task)
-				return true
-			})
-		}
-	}
-}
-
-func (w *Submitter) HasTask(contract common.Address) bool {
-	_, ok := w.tasks.Load(contract)
-	return ok
-}
-
-func (w *Submitter) AddTask(ctx context.Context, task verse.TransactableVerse, chainId uint64) {
-	exists := w.HasTask(task.RollupContract())
-	w.tasks.Store(task.RollupContract(), task)
-	if !exists {
-		// Start submitting loop by each contract.
-		// 1. Request signatures every interval
-		// 2. Submit verify tx if enough signatures are collected
-		go w.startSubmitter(ctx, task.RollupContract(), chainId)
-	}
-}
-
-func (w *Submitter) GetTask(contract common.Address) (task verse.TransactableVerse, found bool) {
-	var val any
-	val, found = w.tasks.Load(contract)
-	if !found {
-		return
-	}
-	task, found = val.(verse.TransactableVerse)
-	return
-}
-
 func (w *Submitter) RemoveTask(contract common.Address) {
 	w.tasks.Delete(contract)
 }
 
-func (w *Submitter) work(ctx context.Context, task verse.TransactableVerse, verifiedIndex *uint64) (uint64, error) {
-	log := task.Logger(w.log)
-
+func (w *Submitter) submit(ctx context.Context, task *taskT) (uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	// Assume the fetched nextIndex is not reorged, as we confirm `w.cfg.Confirmations` blocks
-	nextIndex, err := task.NextIndexWithConfirm(&bind.CallOpts{Context: ctx}, uint64(w.cfg.Confirmations), false)
+	nextIndex, err := w.versepool.NextIndex(ctx, task.verse.RollupContract(), w.cfg.Confirmations, false)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch next index: %w", err)
 	}
-	log = log.New("next-index", nextIndex)
+	log := task.verse.Logger(w.log).New("next-index", nextIndex)
 
-	if verifiedIndex != nil {
-		if *verifiedIndex == nextIndex.Uint64() {
+	if task.verifiedIndex != nil {
+		if *task.verifiedIndex == nextIndex {
 			// Skip if the nextIndex is already verified
-			return nextIndex.Uint64(), ErrAlreadyVerified
-		} else if *verifiedIndex > nextIndex.Uint64() {
+			return nextIndex, ErrAlreadyVerified
+		} else if *task.verifiedIndex > nextIndex {
 			// Continue as purhaps reorged
-			log.Warn("Possible reorged. next index is smaller than the verified index", "verified-index", *verifiedIndex, "next-index", nextIndex.Uint64())
+			log.Warn("Possible reorged. next index is smaller than the verified index",
+				"verified-index", *task.verifiedIndex, "next-index", nextIndex)
 		}
 	}
 
 	iter := &signatureIterator{
 		db:           w.db,
 		stakemanager: w.stakemanager,
-		contract:     task.RollupContract(),
-		rollupIndex:  nextIndex.Uint64(),
+		contract:     task.verse.RollupContract(),
+		rollupIndex:  nextIndex,
 	}
 
 	var tx *types.Transaction
 	if w.cfg.UseMulticall {
-		tx, err = w.sendMulticallTx(log, ctx, task, iter)
+		tx, err = w.sendMulticallTx(log, ctx, task.verse, iter)
 	} else {
-		tx, err = w.sendNormalTx(log, ctx, task, iter)
+		tx, err = w.sendNormalTx(log, ctx, task.verse, iter)
 	}
 	if err != nil {
 		log.Debug(err.Error())
-		return nextIndex.Uint64(), fmt.Errorf("failed to send transaction: %w", err)
+		return nextIndex, fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	if err = w.waitForReceipt(ctx, task.L1Signer(), tx); err != nil {
-		return nextIndex.Uint64(), fmt.Errorf("failed to wait for receipt: %w", err)
+	if err = w.waitForReceipt(ctx, task.verse.L1Signer(), tx); err != nil {
+		return nextIndex, fmt.Errorf("failed to wait for receipt: %w", err)
 	}
 
-	return nextIndex.Uint64(), nil
+	return nextIndex, nil
 }
 
 func (w *Submitter) sendNormalTx(

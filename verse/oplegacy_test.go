@@ -35,7 +35,7 @@ func TestOPLegacy(t *testing.T) {
 func (s *OPLegacyTestSuite) SetupTest() {
 	s.BackendSuite.SetupTest()
 
-	s.verse = NewOPLegacy(s.DB, s.Hub, s.SCCAddr)
+	s.verse = NewOPLegacy(s.DB, s.Hub, 12345, s.Hub.URL(), s.SCCAddr, s.SCCVAddr)
 	s.verifiable = s.verse.WithVerifiable(s.Verse)
 	s.transactable = s.verse.WithTransactable(s.SignableHub, s.SCCVAddr)
 }
@@ -48,15 +48,41 @@ func (s *OPLegacyTestSuite) TestEventDB() {
 }
 
 func (s *OPLegacyTestSuite) TestNextIndex() {
-	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(context.Background()), big.NewInt(10))
+	ctx := context.Background()
+
+	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(10))
+	header := s.Mining()
+
+	opts := &bind.CallOpts{Context: ctx, BlockNumber: header.Number}
+	got0, _ := s.verse.NextIndex(opts)
+	got1, _ := s.verifiable.NextIndex(opts)
+	got2, _ := s.transactable.NextIndex(opts)
+	s.Equal(uint64(10), got0)
+	s.Equal(uint64(10), got1)
+	s.Equal(uint64(10), got2)
+}
+
+func (s *OPLegacyTestSuite) TestEventEmittedBlock() {
+	ctx := context.Background()
+	nextIndex := uint64(10)
+
+	s.EmitStateBatchAppended(int(nextIndex) - 1)
+	tx, _ := s.EmitStateBatchAppended(int(nextIndex))
+	s.EmitStateBatchAppended(int(nextIndex) + 1)
+
+	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
 	s.Mining()
 
-	got0, _ := s.verse.NextIndex(&bind.CallOpts{})
-	got1, _ := s.verifiable.NextIndex(&bind.CallOpts{})
-	got2, _ := s.transactable.NextIndex(&bind.CallOpts{})
-	s.Equal(uint64(10), got0.Uint64())
-	s.Equal(uint64(10), got1.Uint64())
-	s.Equal(uint64(10), got2.Uint64())
+	expect, _ := s.Hub.TransactionReceipt(ctx, tx.Hash())
+
+	opts := &bind.FilterOpts{Context: ctx}
+	got0, _ := s.verse.EventEmittedBlock(opts, nextIndex)
+	got1, _ := s.verifiable.EventEmittedBlock(opts, nextIndex)
+	got2, _ := s.transactable.EventEmittedBlock(opts, nextIndex)
+
+	s.Equal(expect.BlockNumber.Uint64(), got0)
+	s.Equal(expect.BlockNumber.Uint64(), got1)
+	s.Equal(expect.BlockNumber.Uint64(), got2)
 }
 
 func (s *OPLegacyTestSuite) TestVerify() {

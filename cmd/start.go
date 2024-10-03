@@ -98,6 +98,8 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
+	s.startVerifier(ctx)
+	s.startSubmitter(ctx)
 	log.Info("All workers started")
 
 	// wait for signal
@@ -149,6 +151,7 @@ type server struct {
 	hub       ethutil.Client
 	smcache   *stakemanager.Cache
 	p2p       *p2p.Node
+	versepool verse.VersePool
 	verifier  *verifier.Verifier
 	submitter *submitter.Submitter
 	bw        *beacon.BeaconWorker
@@ -179,16 +182,19 @@ func mustNewServer(ctx context.Context) *server {
 	}
 
 	// construct hub-layer client
-	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC); err != nil {
+	if s.hub, err = ethutil.NewClient(s.conf.HubLayer.RPC, s.conf.HubLayer.BlockTime); err != nil {
 		log.Crit("Failed to construct hub-layer client", "err", err)
 	}
 
 	// Make sue the s.hub can connect to the chain
 	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
-	if _, err := s.hub.BlockNumber(ctx); err != nil {
+	if _, err := s.hub.HeaderWithCache(ctx); err != nil {
 		log.Crit("Failed to connect to the hub-layer chain", "err", err)
 	}
+
+	// construct global verse pool
+	s.versepool = verse.NewVersePool(s.hub)
 
 	// construct stakemanager cache
 	sm, err := stakemanager.NewStakemanagerCaller(
@@ -310,7 +316,8 @@ func (s *server) mustSetupVerifier() {
 	}
 
 	l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-	s.verifier = verifier.NewVerifier(&s.conf.Verifier, s.db, s.p2p, l1Signer)
+	s.verifier = verifier.NewVerifier(
+		&s.conf.Verifier, s.db, s.p2p, l1Signer, ethutil.NewClient, s.versepool)
 }
 
 func (s *server) setupSubmitter() {
@@ -318,7 +325,18 @@ func (s *server) setupSubmitter() {
 		return
 	}
 
-	s.submitter = submitter.NewSubmitter(&s.conf.Submitter, s.db, s.smcache)
+	var newSignerFn submitter.L1SignerFn = func(chainID uint64) ethutil.SignableClient {
+		for _, cfg := range s.conf.Submitter.Targets {
+			if cfg.ChainID == chainID {
+				if signer, ok := s.signers[cfg.Wallet]; ok {
+					return ethutil.NewSignableClient(
+						new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
+				}
+			}
+		}
+		return nil
+	}
+	s.submitter = submitter.NewSubmitter(&s.conf.Submitter, s.db, newSignerFn, s.smcache, s.versepool)
 }
 
 func (s *server) startVerseDiscovery(ctx context.Context) {
@@ -396,61 +414,46 @@ func (s *server) verseDiscoveryHandler(ctx context.Context, discovers []*config.
 		L2OOName: common.HexToAddress(s.conf.Submitter.L2OOVerifierAddress),
 	}
 
-	type verse_ struct {
-		cfg    *config.Verse
-		verse  verse.Verse
-		verify common.Address
+	// Delete erased Verse-Layer from the discovery JSON from the pool.
+	erased := make(map[common.Address]bool)
+	s.versepool.Range(func(item *verse.VersePoolItem) bool {
+		erased[item.Verse().RollupContract()] = true
+		return true
+	})
+
+	// Marking the Verse-Layer to be processed by the Submitter.
+	canSubmits := make(map[uint64]bool)
+	for _, cfg := range s.conf.Submitter.Targets {
+		canSubmits[cfg.ChainID] = true
 	}
-	var (
-		verses        []*verse_
-		verseChainIDs []uint64
-	)
+
+	// Create a new Verse instance and add it to the pool.
+	var chainIDs []uint64
 	for _, cfg := range discovers {
 		for name, addr := range cfg.L1Contracts {
 			if factory, ok := verseFactories[name]; ok {
-				verses = append(verses, &verse_{
-					cfg:    cfg,
-					verse:  factory(s.db, s.hub, common.HexToAddress(addr)),
-					verify: verifyContracts[name],
-				})
-				verseChainIDs = append(verseChainIDs, cfg.ChainID)
+				verse := factory(s.db, s.hub, cfg.ChainID,
+					cfg.RPC, common.HexToAddress(addr), verifyContracts[name])
+				if s.versepool.Add(verse, canSubmits[cfg.ChainID]) {
+					log.Info("Add verse to verse pool",
+						"chain-id", cfg.ChainID, "rpc", cfg.RPC)
+				}
+
+				delete(erased, verse.RollupContract())
+				chainIDs = append(chainIDs, cfg.ChainID)
 			}
 		}
 	}
 
-	log.Info("Discovered verses", "count", len(verses), "chain-ids", verseChainIDs)
-
-	for _, x := range verses {
-		// add verse to Verifier
-		if s.verifier != nil && !s.verifier.HasTask(x.verse.RollupContract(), x.cfg.RPC) {
-			l2Client, err := ethutil.NewClient(x.cfg.RPC)
-			if err != nil {
-				log.Error("Failed to construct verse-layer client", "err", err)
-			} else {
-				log.Info("Add verse to Verifier", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
-				s.verifier.AddTask(ctx, x.verse.WithVerifiable(l2Client), x.cfg.ChainID)
-			}
-		}
-
-		// add verse to Submitter
-		if s.submitter != nil {
-			for _, tg := range s.conf.Submitter.Targets {
-				if tg.ChainID != x.cfg.ChainID || s.submitter.HasTask(x.verse.RollupContract()) {
-					continue
-				}
-
-				signer, ok := s.signers[tg.Wallet]
-				if !ok {
-					log.Error("Wallet for the Submitter not found", "wallet", tg.Wallet)
-					continue
-				}
-
-				log.Info("Add verse to Submitter", "chain-id", x.cfg.ChainID, "contract", x.verse.RollupContract())
-				l1Signer := ethutil.NewSignableClient(new(big.Int).SetUint64(s.conf.HubLayer.ChainID), s.hub, signer)
-				s.submitter.AddTask(ctx, x.verse.WithTransactable(l1Signer, x.verify), x.cfg.ChainID)
-			}
+	// Delete erased verses from the pool.
+	for contract := range erased {
+		if verse, ok := s.versepool.Get(contract); ok {
+			log.Info("Delete verse from verse pool", "chain-id", verse.Verse().ChainID())
+			s.versepool.Delete(contract)
 		}
 	}
+
+	log.Info("Discovered verses", "count", len(chainIDs), "chain-ids", chainIDs)
 }
 
 func (s *server) mustSetupBeacon() {
@@ -482,6 +485,28 @@ func (s *server) startBeacon(ctx context.Context) {
 	}
 	go func() {
 		s.bw.Start(ctx)
+	}()
+}
+
+func (s *server) startVerifier(ctx context.Context) {
+	if s.verifier == nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		s.verifier.Start(ctx)
+		s.wg.Done()
+	}()
+}
+
+func (s *server) startSubmitter(ctx context.Context) {
+	if s.submitter == nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		s.submitter.Start(ctx)
+		s.wg.Done()
 	}()
 }
 
