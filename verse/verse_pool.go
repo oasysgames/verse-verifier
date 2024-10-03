@@ -17,6 +17,10 @@ const (
 	// Since the current usage doesn't result in a high
 	// cache hit rate, the cache size will be kept modest.
 	emittedBlockCacheSize = 16
+
+	// If the difference between the next index and the cached index is
+	// greater than or equal to this value, update the FilterStartBlockCache.
+	filterStartBlockCacheUpdateThreshold = 5
 )
 
 var (
@@ -67,15 +71,21 @@ type VersePool interface {
 }
 
 type VersePoolItem struct {
-	verse             Verse
-	canSubmit         bool
-	nextIndexCache    atomic.Pointer[nextIndexCache]
-	emittedBlockCache *lru.Cache[uint64, uint64]
+	verse                 Verse
+	canSubmit             bool
+	nextIndexCache        atomic.Pointer[nextIndexCache]
+	emittedBlockCache     *lru.Cache[uint64, uint64]
+	filterStartBlockCache atomic.Pointer[filterStartBlockCache]
 }
 
 type nextIndexCache struct {
 	fetchedBlock,
 	value uint64
+}
+
+type filterStartBlockCache struct {
+	rollupIndex,
+	startBlock uint64
 }
 
 func NewVersePool(l1Client ethutil.Client) VersePool {
@@ -147,6 +157,25 @@ func (pool *versePool) NextIndex(
 	}
 
 	item.nextIndexCache.Store(&nextIndexCache{fetchedBlock: confirmed, value: ni})
+
+	// To reduce the RPC load when retrieving the event emission block,
+	// also obtain the block number where the next index event was emitted.
+	fsbCache := item.filterStartBlockCache.Load()
+	if fsbCache != nil {
+		min, max := util.MinMax(ni, fsbCache.rollupIndex)
+		if max-min >= filterStartBlockCacheUpdateThreshold {
+			fsbCache = nil
+		}
+	}
+	if fsbCache == nil {
+		// Get one previous event since the event matching the next index may not have been emitted yet.
+		previ := ni - 1
+		emitted, err := pool.EventEmittedBlock(ctx, contract, previ, confirmation, true)
+		if err == nil {
+			item.filterStartBlockCache.Store(&filterStartBlockCache{rollupIndex: previ, startBlock: emitted})
+		}
+	}
+
 	return ni, nil
 }
 
@@ -171,6 +200,14 @@ func (pool *versePool) EventEmittedBlock(
 	}
 
 	opts := &bind.FilterOpts{Context: ctx, End: &confirmed}
+
+	// To reduce RPC load, if the target index is larger than the next index cache,
+	// use the block where the event was emitted as the starting point for the search.
+	fsbCache := item.filterStartBlockCache.Load()
+	if fsbCache != nil && rollupIndex >= fsbCache.rollupIndex {
+		opts.Start = fsbCache.startBlock
+	}
+
 	emittedBlock, err := item.verse.EventEmittedBlock(opts, rollupIndex)
 	if err != nil {
 		return 0, err
