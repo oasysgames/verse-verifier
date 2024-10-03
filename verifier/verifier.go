@@ -151,7 +151,7 @@ func (w *Verifier) Start(ctx context.Context) {
 					} else {
 						if l2Client, err := w.l2ClientFn(item.Verse().URL(), 0); err != nil {
 							log.Error("Failed to construct verse-layer client", "err", err)
-						} else if rangeMgr, err := w.getBlockRangeManager(log, ctx, item.Verse()); err != nil {
+						} else if rangeMgr, err := w.getBlockRangeManager(log, ctx, item.Verse(), 3); err != nil {
 							log.Error("Failed to construct block range manager", "err", err)
 						} else {
 							task = &taskT{
@@ -515,11 +515,11 @@ func (w *Verifier) retryBackoff() (incr func() (delay, remain time.Duration, att
 
 // Fetch the NextIndex that should be verified next, and create a BlockRangeManager
 // starting from the block number where the corresponding rollup event was emitted.
-// Note: This method retries infinitely until it succeeds or is canceled.
 func (w *Verifier) getBlockRangeManager(
 	log log.Logger,
 	ctx context.Context,
 	task verse.Verse,
+	maxRetry int,
 ) (*eventFetchingBlockRangeManager, error) {
 	nextIndex, err := w.versepool.NextIndex(ctx, task.RollupContract(), w.cfg.Confirmations, true)
 	if err != nil {
@@ -537,15 +537,21 @@ func (w *Verifier) getBlockRangeManager(
 	tick := time.NewTicker(w.cfg.Interval)
 	defer tick.Stop()
 
-	for {
+	for attempts := 1; ; attempts++ {
 		emittedBlock, err := w.versepool.EventEmittedBlock(
 			ctx, task.RollupContract(), nextIndex, w.cfg.Confirmations, true)
 		if err == nil {
-			log.Info("Initial block has been determined", "block", emittedBlock)
+			log.Info("Initial block has been determined", "block", emittedBlock, "attempts", attempts)
 			return newEventFetchingBlockRangeManager(w.cfg.MaxLogFetchBlockRange, emittedBlock), nil
 		}
+		if attempts == maxRetry {
+			break
+		}
 		if errors.Is(err, verse.ErrEventNotFound) {
-			log.Warn("Event not found, wait until it is rollup")
+			if nextIndex == 0 {
+				return nil, errors.New("first rollup event does not exist")
+			}
+			log.Warn("Event not found, wait until it is rollup", "max-retry", maxRetry, "attempts", attempts)
 		} else {
 			return nil, fmt.Errorf("failed to fetch the event(index=%d) emitted block: %w", nextIndex, err)
 		}
@@ -556,10 +562,10 @@ func (w *Verifier) getBlockRangeManager(
 		case <-tick.C:
 		}
 	}
+	return nil, fmt.Errorf("failed to fetch the event(index=%d) emitted block", nextIndex)
 }
 
 // Determine the upper limit of the end block.
-// Note: This method retries infinitely until it succeeds or is canceled.
 func (w *Verifier) determineMaxEnd(
 	ctx context.Context,
 	task verse.VerifiableVerse,
