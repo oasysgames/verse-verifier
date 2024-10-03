@@ -32,6 +32,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 	hub_layer:
 		chain_id: 12345
 		rpc: http://127.0.0.1:8545/
+		block_time: 1m
 
 	verse_layer:
 		discovery:
@@ -73,6 +74,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 	verifier:
 		enable: true
 		wallet: wallet1
+		max_workers: 50
 		interval: 5s
 		state_collect_limit: 5
 		state_collect_timeout: 1s
@@ -84,8 +86,8 @@ func (s *ConfigTestSuite) TestNewConfig() {
 
 	submitter:
 		enable: true
+		max_workers: 50
 		interval: 5s
-		concurrency: 10
 		confirmations: 4
 		gas_multiplier: 1.5
 		batch_size: 100
@@ -136,8 +138,9 @@ func (s *ConfigTestSuite) TestNewConfig() {
 			},
 		},
 		HubLayer: HubLayer{
-			ChainID: 12345,
-			RPC:     "http://127.0.0.1:8545/",
+			ChainID:   12345,
+			RPC:       "http://127.0.0.1:8545/",
+			BlockTime: time.Minute,
 		},
 		VerseLayer: VerseLayer{
 			Discovery: struct {
@@ -234,6 +237,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		Verifier: Verifier{
 			Enable:                true,
 			Wallet:                "wallet1",
+			MaxWorkers:            50,
 			Interval:              5 * time.Second,
 			StateCollectLimit:     5,
 			StateCollectTimeout:   time.Second,
@@ -245,7 +249,7 @@ func (s *ConfigTestSuite) TestNewConfig() {
 		},
 		Submitter: Submitter{
 			Enable:              true,
-			Concurrency:         10,
+			MaxWorkers:          50,
 			Interval:            5 * time.Second,
 			Confirmations:       4,
 			GasMultiplier:       1.5,
@@ -376,6 +380,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	got, err := NewConfig(s.toBytes(input), false)
 	s.NoError(err)
 
+	s.Equal(time.Second*6, got.HubLayer.BlockTime)
+
 	s.Equal(time.Hour, got.VerseLayer.Discovery.RefreshInterval)
 
 	s.Equal([]string{
@@ -405,6 +411,7 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 
 	s.Equal("oasvlfy", got.IPC.Sockname)
 
+	s.Equal(10, got.Verifier.MaxWorkers)
 	s.Equal(6*time.Second, got.Verifier.Interval)
 	s.Equal(1000, got.Verifier.StateCollectLimit)
 	s.Equal(15*time.Second, got.Verifier.StateCollectTimeout)
@@ -414,8 +421,8 @@ func (s *ConfigTestSuite) TestDefaultValues() {
 	s.Equal(time.Minute*5, got.Verifier.MaxRetryBackoff)
 	s.Equal(time.Hour, got.Verifier.RetryTimeout)
 
+	s.Equal(5, got.Submitter.MaxWorkers)
 	s.Equal(30*time.Second, got.Submitter.Interval)
-	s.Equal(50, got.Submitter.Concurrency)
 	s.Equal(3, got.Submitter.Confirmations)
 	s.Equal(1.1, got.Submitter.GasMultiplier)
 	s.Equal(20, got.Submitter.BatchSize)

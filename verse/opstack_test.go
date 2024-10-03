@@ -30,7 +30,7 @@ func TestOPStack(t *testing.T) {
 func (s *OPStackTestSuite) SetupTest() {
 	s.BackendSuite.SetupTest()
 
-	s.verse = NewOPStack(s.DB, s.Hub, s.L2OOAddr)
+	s.verse = NewOPStack(s.DB, s.Hub, 12345, s.Hub.URL(), s.L2OOAddr, s.L2OOVAddr)
 	s.verifiable = s.verse.WithVerifiable(s.Verse)
 	s.transactable = s.verse.WithTransactable(s.SignableHub, s.L2OOVAddr)
 }
@@ -44,24 +44,21 @@ func (s *OPStackTestSuite) TestEventDB() {
 
 func (s *OPStackTestSuite) TestNextIndex() {
 	ctx := context.Background()
-	confirmation := 0
-	waits := false
 
 	s.TL2OO.SetNextVerifyIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(10))
-	s.Mining()
+	header := s.Mining()
 
-	got0, _ := s.verse.NextIndex(ctx, confirmation, waits)
-	got1, _ := s.verifiable.NextIndex(ctx, confirmation, waits)
-	got2, _ := s.transactable.NextIndex(ctx, confirmation, waits)
+	opts := &bind.CallOpts{Context: ctx, BlockNumber: header.Number}
+	got0, _ := s.verse.NextIndex(opts)
+	got1, _ := s.verifiable.NextIndex(opts)
+	got2, _ := s.transactable.NextIndex(opts)
 	s.Equal(uint64(10), got0)
 	s.Equal(uint64(10), got1)
 	s.Equal(uint64(10), got2)
 }
 
-func (s *OPStackTestSuite) TestGetEventEmittedBlock() {
+func (s *OPStackTestSuite) TestEventEmittedBlock() {
 	ctx := context.Background()
-	confirmation := 0
-	waits := false
 	nextIndex := uint64(10)
 
 	s.EmitOutputProposed(int(nextIndex) - 1)
@@ -73,9 +70,10 @@ func (s *OPStackTestSuite) TestGetEventEmittedBlock() {
 
 	expect, _ := s.Hub.TransactionReceipt(ctx, tx.Hash())
 
-	got0, _ := s.verse.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
-	got1, _ := s.verifiable.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
-	got2, _ := s.transactable.GetEventEmittedBlock(ctx, nextIndex, confirmation, waits)
+	opts := &bind.FilterOpts{Context: ctx}
+	got0, _ := s.verse.EventEmittedBlock(opts, nextIndex)
+	got1, _ := s.verifiable.EventEmittedBlock(opts, nextIndex)
+	got2, _ := s.transactable.EventEmittedBlock(opts, nextIndex)
 
 	s.Equal(expect.BlockNumber.Uint64(), got0)
 	s.Equal(expect.BlockNumber.Uint64(), got1)

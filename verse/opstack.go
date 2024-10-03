@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -37,25 +38,17 @@ type transactableOPStack struct {
 }
 
 func (op *opstack) Logger(base log.Logger) log.Logger {
-	return base.New("l2oo", op.RollupContract())
+	return base.New("chain-id", fmt.Sprint(op.ChainID()), "op-version", "v1")
 }
 
 func (op *opstack) EventDB() database.IOPEventDB {
 	return database.NewOPEventDB[database.OpstackProposal](op.DB())
 }
 
-func (op *opstack) NextIndex(ctx context.Context, confirmation int, waits bool) (uint64, error) {
-	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
-	if err != nil {
-		return 0, err
-	}
+func (op *opstack) NextIndex(opts *bind.CallOpts) (uint64, error) {
 	lo, err := newL2ooContract(op)
 	if err != nil {
 		return 0, err
-	}
-	opts := &bind.CallOpts{
-		Context:     ctx,
-		BlockNumber: new(big.Int).SetUint64(confirmed),
 	}
 	b, err := lo.NextVerifyIndex(opts)
 	if err != nil {
@@ -64,17 +57,12 @@ func (op *opstack) NextIndex(ctx context.Context, confirmation int, waits bool) 
 	return b.Uint64(), nil
 }
 
-func (op *opstack) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {
-	confirmed, err := decideConfirmationBlockNumber(ctx, confirmation, op.L1Client(), waits)
-	if err != nil {
-		return 0, err
-	}
+func (op *opstack) EventEmittedBlock(opts *bind.FilterOpts, rollupIndex uint64) (uint64, error) {
 	lo, err := newL2ooContract(op)
 	if err != nil {
 		return 0, err
 	}
-	e, err := findOutputProposed(
-		lo, &bind.FilterOpts{Context: ctx, End: &confirmed}, rollupIndex)
+	e, err := findOutputProposed(lo, opts, rollupIndex)
 	if err != nil {
 		return 0, err
 	}

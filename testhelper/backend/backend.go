@@ -37,6 +37,10 @@ type Backend struct {
 	*simulated.Backend
 }
 
+func (c *Backend) Close() {
+	c.Backend.Close()
+}
+
 func (b *Backend) FilterLogsWithRateThottling(ctx context.Context, q ethereum.FilterQuery) (logs []types.Log, err error) {
 	return b.FilterLogs(ctx, q)
 }
@@ -65,6 +69,10 @@ func (b *Backend) HeaderByHash(
 	hash common.Hash,
 ) (*types.Header, error) {
 	return b.Client().HeaderByHash(ctx, hash)
+}
+
+func (c *Backend) HeaderWithCache(ctx context.Context) (header *types.Header, err error) {
+	return c.HeaderByNumber(ctx, nil)
 }
 
 func (b *Backend) TransactionByHash(

@@ -22,11 +22,13 @@ import (
 type VerifierTestSuite struct {
 	backend.BackendSuite
 
-	verifier *Verifier
-	cfg      *config.Verifier
-	task     verse.VerifiableVerse
+	verifier   *Verifier
+	cfg        *config.Verifier
+	verse      verse.Verse
+	verifiable verse.VerifiableVerse
 	newSigP2P,
 	unverifiedSigP2P *MockP2P
+	versepool verse.VersePool
 }
 
 func TestVerifier(t *testing.T) {
@@ -45,7 +47,15 @@ func (m *MockP2P) PublishSignatures(ctx context.Context, sigs []*database.Optimi
 func (s *VerifierTestSuite) SetupTest() {
 	s.BackendSuite.SetupTest()
 
+	// Setup verse pool
+	s.verse = verse.NewOPLegacy(s.DB, s.Hub, 12345, s.Verse.URL(), s.SCCAddr, s.SCCVAddr)
+	s.verifiable = s.verse.WithVerifiable(s.Verse)
+	s.versepool = verse.NewVersePool(s.Hub)
+	s.versepool.Add(s.verse, false)
+
+	// Setup verifier
 	s.cfg = &config.Verifier{
+		MaxWorkers:            1,
 		Interval:              time.Millisecond * 50,
 		StateCollectLimit:     3,
 		StateCollectTimeout:   time.Second,
@@ -53,9 +63,12 @@ func (s *VerifierTestSuite) SetupTest() {
 		MaxLogFetchBlockRange: 5760,
 		MaxIndexDiff:          3,
 	}
-	s.verifier = NewVerifier(s.cfg, s.DB, nil, s.SignableHub)
-	s.task = verse.NewOPLegacy(s.DB, s.Hub, s.SCCAddr).WithVerifiable(s.Verse)
+	s.verifier = NewVerifier(s.cfg, s.DB, nil, s.SignableHub, nil, s.versepool)
+	s.verifier.l2ClientFn = func(url string, blockTime time.Duration) (ethutil.Client, error) {
+		return s.Verse, nil
+	}
 
+	// Setup P2P mocks
 	s.newSigP2P = &MockP2P{sigsCh: make(chan []*database.OptimismSignature)}
 	s.unverifiedSigP2P = &MockP2P{sigsCh: make(chan []*database.OptimismSignature)}
 	s.verifier.newSigP2P = s.newSigP2P
@@ -133,7 +146,6 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	}
 
 	s.Hub.Minings(10)
-	s.waitForL1HeadUpdated()
 
 	// Run a task to check that the received unverified
 	// signatures are greater than or equal to NextIndex.
@@ -155,7 +167,7 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	}()
 
 	// start verifier by adding task
-	s.verifier.AddTask(ctx, s.task, 0)
+	go s.verifier.Start(ctx)
 
 	// wait for verification
 	sigs := <-s.newSigP2P.sigsCh
@@ -177,7 +189,6 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 		nextIndex++
 		s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
 		s.Hub.Minings(1 + s.cfg.Confirmations)
-		s.waitForL1HeadUpdated()
 
 		sigs = append(sigs, <-s.newSigP2P.sigsCh...)
 		unverifiedWait.Lock()
@@ -193,7 +204,6 @@ func (s *VerifierTestSuite) TestStartVerifier() {
 	nextIndex = rollups[len(rollups)-s.cfg.MaxIndexDiff]
 	s.TSCC.SetNextIndex(s.SignableHub.TransactOpts(ctx), big.NewInt(int64(nextIndex)))
 	s.Hub.Minings(1 + s.cfg.Confirmations)
-	s.waitForL1HeadUpdated()
 
 	sigs = append(sigs, <-s.newSigP2P.sigsCh...)
 	unverifiedWait.Lock()
@@ -313,31 +323,30 @@ func (s *VerifierTestSuite) TestDetermineMaxEnd() {
 		}
 	}
 	latest := s.Hub.Minings(10)[9]
-	s.waitForL1HeadUpdated()
 
-	got, _ := s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
+	got, _ := s.verifier.determineMaxEnd(ctx, s.verifiable, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 1.
 	nextIndex = 1
-	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.verifiable, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 3.
 	nextIndex = 3
-	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.verifiable, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 6.
 	// The Key point is that `6+MaxIndexDiff`` has not yet exceeded the maximum index.
 	nextIndex = 6
-	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.verifiable, uint64(nextIndex))
 	s.Equal(emittedBlocks[nextIndex+s.cfg.MaxIndexDiff], got)
 
 	// Increase NextIndex to 7.
 	// Since `7+MaxIndexDiff` exceeds the maximum index, `L1Head-Confirmations` should be returned.
 	nextIndex = 7
-	got, _ = s.verifier.determineMaxEnd(ctx, s.task, uint64(nextIndex))
+	got, _ = s.verifier.determineMaxEnd(ctx, s.verifiable, uint64(nextIndex))
 	s.Equal(latest.Number.Uint64()-uint64(s.cfg.Confirmations), got)
 }
 
@@ -366,14 +375,4 @@ func (s *VerifierTestSuite) sendVerseTransactions(count int) (headers []*types.H
 		headers = append(headers, h)
 	}
 	return headers
-}
-
-func (s *VerifierTestSuite) waitForL1HeadUpdated() (newPtr *types.Header) {
-	oldPtr := s.verifier.l1HeadCache.Load()
-	for {
-		time.Sleep(time.Millisecond * 10)
-		if newPtr = s.verifier.l1HeadCache.Load(); newPtr != oldPtr {
-			return
-		}
-	}
 }
