@@ -244,8 +244,9 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 		Keystore:  s.keystoreDir,
 		Wallets:   map[string]*config.Wallet{},
 		HubLayer: config.HubLayer{
-			ChainID: 1,
-			RPC:     "https://rpc.hub.example.com/",
+			ChainID:   1,
+			RPC:       "https://rpc.hub.example.com/",
+			BlockTime: time.Second * 6,
 		},
 		VerseLayer: config.VerseLayer{
 			Discovery: struct {
@@ -334,19 +335,20 @@ func (s *ConfigLoaderTestSuite) configWithMinCliArgs() *config.Config {
 		Verifier: config.Verifier{
 			Enable:                false,
 			Wallet:                "",
+			MaxWorkers:            defaults["verifier.max_workers"].(int),
 			Interval:              defaults["verifier.interval"].(time.Duration),
 			StateCollectLimit:     defaults["verifier.state_collect_limit"].(int),
 			StateCollectTimeout:   defaults["verifier.state_collect_timeout"].(time.Duration),
 			Confirmations:         defaults["verifier.confirmations"].(int),
-			StartBlockOffset:      defaults["verifier.start_block_offset"].(uint64),
-			MaxLogFetchBlockRange: defaults["verifier.max_log_fetch_block_range"].(uint64),
+			MaxLogFetchBlockRange: defaults["verifier.max_log_fetch_block_range"].(int),
+			MaxIndexDiff:          defaults["verifier.max_index_diff"].(int),
 			MaxRetryBackoff:       defaults["verifier.max_retry_backoff"].(time.Duration),
 			RetryTimeout:          defaults["verifier.retry_timeout"].(time.Duration),
 		},
 		Submitter: config.Submitter{
 			Enable:              false,
 			Confirmations:       defaults["submitter.confirmations"].(int),
-			Concurrency:         defaults["submitter.concurrency"].(int),
+			MaxWorkers:          defaults["submitter.max_workers"].(int),
 			Interval:            defaults["submitter.interval"].(time.Duration),
 			GasMultiplier:       defaults["submitter.gas_multiplier"].(float64),
 			BatchSize:           defaults["submitter.batch_size"].(int),

@@ -22,8 +22,11 @@ import (
 type SubmitterTestSuite struct {
 	backend.BackendSuite
 
-	submitter *Submitter
-	task      verse.TransactableVerse
+	submitter    *Submitter
+	cfg          *config.Submitter
+	verse        verse.Verse
+	transactable verse.TransactableVerse
+	versepool    verse.VersePool
 }
 
 func TestSubmitter(t *testing.T) {
@@ -42,21 +45,27 @@ func (s *SubmitterTestSuite) SetupTest() {
 		s.StakeManager.Candidates = append(s.StakeManager.Candidates, true)
 	}
 
+	// Setup verse pool
+	s.verse = verse.NewOPLegacy(s.DB, s.Hub, 12345, s.Verse.URL(), s.SCCAddr, s.SCCVAddr)
+	s.transactable = s.verse.WithTransactable(s.SignableHub, s.SCCVAddr)
+	s.versepool = verse.NewVersePool(s.Hub)
+	s.versepool.Add(s.verse, true)
+
 	// Setup submitter
-	s.submitter = NewSubmitter(&config.Submitter{
-		Interval:         100 * time.Millisecond,
-		Concurrency:      0,
+	s.cfg = &config.Submitter{
+		MaxWorkers:       1,
+		Interval:         time.Millisecond * 50,
 		Confirmations:    2,
 		GasMultiplier:    1.0,
 		BatchSize:        20,
 		MaxGas:           500_000_000,
-		UseMulticall:     true, // TODO
+		UseMulticall:     true, // TODO: No single tx testing
 		MulticallAddress: s.MulticallAddr.String(),
-	}, s.DB, stakemanager.NewCache(s.StakeManager))
-
-	s.task = verse.
-		NewOPLegacy(s.DB, s.Hub, s.SCCAddr).
-		WithTransactable(s.SignableHub, s.SCCVAddr)
+	}
+	s.submitter = NewSubmitter(s.cfg, s.DB, nil, stakemanager.NewCache(s.StakeManager), s.versepool)
+	s.submitter.l1SignerFn = func(chainID uint64) ethutil.SignableClient {
+		return s.SignableHub
+	}
 }
 
 func (s *SubmitterTestSuite) TestSubmit() {
@@ -106,15 +115,15 @@ func (s *SubmitterTestSuite) TestSubmit() {
 
 	// submitter do the work.
 	s.submitter.stakemanager.Refresh(ctx)
-	go s.submitter.work(ctx, s.task, nil)
-	time.Sleep(time.Second / 10)
+	go s.submitter.Start(ctx)
+	time.Sleep(s.cfg.Interval * 2)
 	s.Hub.Commit()
 
 	// assert multicall transaction
 	currBlock, _ := s.Hub.Client().BlockByNumber(ctx, nil)
 	mcallTx := currBlock.Transactions()[0]
 	sender, _ := s.Hub.TxSender(mcallTx)
-	s.Equal(s.task.L1Signer().Signer(), sender)
+	s.Equal(s.transactable.L1Signer().Signer(), sender)
 	s.Equal(s.MulticallAddr, *mcallTx.To())
 
 	mcallReceipt, _ := s.Hub.TransactionReceipt(context.Background(), mcallTx.Hash())
@@ -170,10 +179,10 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 
 	// Start submitter by adding task
 	s.submitter.stakemanager.Refresh(ctx)
-	s.submitter.AddTask(ctx, s.task, 0)
+	go s.submitter.Start(ctx)
 	// Dry run to cover no signature case
 	// Manually confirmed by checking the logs
-	time.Sleep(s.submitter.cfg.Interval)
+	time.Sleep(s.cfg.Interval)
 
 	// Confirm the `stake amount shortage` case is covered
 	// Manually confirmed by checking the logs
@@ -188,7 +197,7 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 		database.RandSignature(),
 	)
 	// wait for the submitter to work
-	time.Sleep(s.submitter.cfg.Interval * 2)
+	time.Sleep(s.cfg.Interval * 2)
 
 	// Confirm succcesfully tx submission case
 	// set the `SCC.nextIndex`
@@ -230,14 +239,14 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 	}
 
 	// submitter do the work.
-	time.Sleep(s.submitter.cfg.Interval * 3)
+	time.Sleep(s.cfg.Interval * 3)
 	s.Hub.Commit()
 
 	// assert multicall transaction
 	currBlock, _ := s.Hub.Client().BlockByNumber(ctx, nil)
 	mcallTx := currBlock.Transactions()[0]
 	sender, _ := s.Hub.TxSender(mcallTx)
-	s.Equal(s.task.L1Signer().Signer(), sender)
+	s.Equal(s.transactable.L1Signer().Signer(), sender)
 	s.Equal(s.MulticallAddr, *mcallTx.To())
 
 	mcallReceipt, err := s.Hub.TransactionReceipt(context.Background(), mcallTx.Hash())

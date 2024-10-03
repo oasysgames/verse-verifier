@@ -37,6 +37,10 @@ type Backend struct {
 	*simulated.Backend
 }
 
+func (c *Backend) Close() {
+	c.Backend.Close()
+}
+
 func (b *Backend) FilterLogsWithRateThottling(ctx context.Context, q ethereum.FilterQuery) (logs []types.Log, err error) {
 	return b.FilterLogs(ctx, q)
 }
@@ -65,6 +69,10 @@ func (b *Backend) HeaderByHash(
 	hash common.Hash,
 ) (*types.Header, error) {
 	return b.Client().HeaderByHash(ctx, hash)
+}
+
+func (c *Backend) HeaderWithCache(ctx context.Context) (header *types.Header, err error) {
+	return c.HeaderByNumber(ctx, nil)
 }
 
 func (b *Backend) TransactionByHash(
@@ -180,4 +188,18 @@ func (b *Backend) TxSender(tx *types.Transaction) (common.Address, error) {
 func (b *Backend) Mining() *types.Header {
 	b.Commit()
 	return b.Blockchain().CurrentHeader()
+}
+
+func (b *Backend) Minings(count int) []*types.Header {
+	headers := make([]*types.Header, count)
+	for i := 0; i < count; i++ {
+		b.Commit()
+		headers[i] = b.Blockchain().CurrentHeader()
+	}
+	return headers
+}
+
+func (b *Backend) MiningTo(target uint64) []*types.Header {
+	latest := b.Blockchain().CurrentHeader().Number.Uint64()
+	return b.Minings(int(target - latest))
 }

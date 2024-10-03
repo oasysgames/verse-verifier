@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -16,16 +16,25 @@ import (
 
 var (
 	ErrNotSufficientConfirmations = errors.New("not sufficient confirmations")
+	ErrEventNotFound              = errors.New("event not found")
 )
 
 type Verse interface {
 	Logger(base log.Logger) log.Logger
 	DB() *database.Database
 	L1Client() ethutil.Client
+	ChainID() uint64
+	URL() string
 	RollupContract() common.Address
+	VerifyContract() common.Address
 	EventDB() database.IOPEventDB
-	NextIndex(opts *bind.CallOpts) (*big.Int, error)
-	NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error)
+
+	// Returns the next rollup index to be verified.
+	NextIndex(opts *bind.CallOpts) (uint64, error)
+
+	// Returns the block number at which the event with the given rollup index was emitted on the L1.
+	EventEmittedBlock(opts *bind.FilterOpts, rollupIndex uint64) (uint64, error)
+
 	WithVerifiable(l2Client ethutil.Client) VerifiableVerse
 	WithTransactable(l1Signer ethutil.SignableClient, verifyContract common.Address) TransactableVerse
 }
@@ -46,7 +55,6 @@ type TransactableVerse interface {
 	Verse
 
 	L1Signer() ethutil.SignableClient
-	VerifyContract() common.Address
 	Transact(
 		opts *bind.TransactOpts,
 		rollupIndex uint64,
@@ -56,9 +64,12 @@ type TransactableVerse interface {
 }
 
 type verse struct {
-	db             *database.Database
-	l1Client       ethutil.Client
-	rollupContract common.Address
+	db       *database.Database
+	l1Client ethutil.Client
+	chainID  uint64
+	rpc      string
+	rollupContract,
+	verifyContract common.Address
 }
 
 type verifiableVerse struct {
@@ -74,13 +85,21 @@ type transactableVerse struct {
 	verifyContract common.Address
 }
 
-func (v *verse) Logger(base log.Logger) log.Logger          { return base }
-func (v *verse) DB() *database.Database                     { return v.db }
-func (v *verse) L1Client() ethutil.Client                   { return v.l1Client }
-func (v *verse) RollupContract() common.Address             { return v.rollupContract }
-func (v *verse) EventDB() database.IOPEventDB               { panic("not implemented") }
-func (v *verse) NextIndex(*bind.CallOpts) (*big.Int, error) { panic("not implemented") }
-func (v *verse) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
+func (v *verse) Logger(base log.Logger) log.Logger { return base }
+func (v *verse) DB() *database.Database            { return v.db }
+func (v *verse) L1Client() ethutil.Client          { return v.l1Client }
+func (v *verse) ChainID() uint64                   { return v.chainID }
+func (v *verse) URL() string                       { return v.rpc }
+func (v *verse) RollupContract() common.Address    { return v.rollupContract }
+func (v *verse) VerifyContract() common.Address    { return v.verifyContract }
+func (v *verse) EventDB() database.IOPEventDB      { panic("not implemented") }
+func (v *verse) NextIndex(opts *bind.CallOpts) (uint64, error) {
+	panic("not implemented")
+}
+func (v *verse) EventEmittedBlock(opts *bind.FilterOpts, rollupIndex uint64) (uint64, error) {
+	panic("not implemented")
+}
+func (v *verse) GetEventEmittedBlock(ctx context.Context, rollupIndex uint64, confirmation int, waits bool) (uint64, error) {
 	panic("not implemented")
 }
 func (v *verse) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
@@ -104,7 +123,6 @@ func (v *verifiableVerse) Verify(
 }
 
 func (v *transactableVerse) L1Signer() ethutil.SignableClient { return v.l1Signer }
-func (v *transactableVerse) VerifyContract() common.Address   { return v.verifyContract }
 func (v *transactableVerse) Transact(
 	*bind.TransactOpts,
 	uint64,
@@ -117,38 +135,55 @@ func (v *transactableVerse) Transact(
 type VerseFactory func(
 	db *database.Database,
 	l1Client ethutil.Client,
-	rollupContract common.Address,
+	chainID uint64,
+	rpc string,
+	rollupContract,
+	verifyContract common.Address,
 ) Verse
 
 func newVerseFactory(conv func(Verse) Verse) VerseFactory {
 	return func(
 		db *database.Database,
 		l1Client ethutil.Client,
-		rollupContract common.Address,
+		chainID uint64,
+		rpc string,
+		rollupContract,
+		verifyContract common.Address,
 	) Verse {
 		return conv(&verse{
 			db:             db,
 			l1Client:       l1Client,
+			chainID:        chainID,
+			rpc:            rpc,
 			rollupContract: rollupContract,
+			verifyContract: verifyContract,
 		})
 	}
 }
 
-func decideConfirmationBlockNumber(opts *bind.CallOpts, confirmation uint64, client ethutil.Client) (*big.Int, error) {
-	if opts.BlockNumber != nil {
-		return nil, errors.New("block number is overridden. should be nil")
+func decideConfirmationBlockNumber(ctx context.Context, confirmation int, client ethutil.Client, waits bool) (uint64, error) {
+	if confirmation < 0 || confirmation > 16 {
+		return 0, errors.New("confirmation must be between 0 and 16")
 	}
-	if 16 < confirmation {
-		return nil, errors.New("confirmation is too large")
+	confirmationU64 := uint64(confirmation)
+
+	// The block heights of the Mainnet/Testnet have grown sufficiently,
+	// so this loop is intended for the local chain.
+	var latest uint64
+	for {
+		header, err := client.HeaderWithCache(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("failed to fetch latest block height: %w", err)
+		}
+		latest = header.Number.Uint64()
+		if latest >= confirmationU64 {
+			break
+		}
+		if !waits {
+			return 0, fmt.Errorf("not enough blocks to confirm: %d < %d, %w", latest, confirmation, ErrNotSufficientConfirmations)
+		}
+		// wait for the next block, then retry
+		time.Sleep(10 * time.Second)
 	}
-	// get the latest block number
-	latest, err := client.BlockNumber(opts.Context)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest block height: %w", err)
-	}
-	if latest < confirmation {
-		return nil, fmt.Errorf("not enough blocks to confirm: %d < %d, %w", latest, confirmation, ErrNotSufficientConfirmations)
-	}
-	confirmedNumber := latest - confirmation
-	return new(big.Int).SetUint64(confirmedNumber), nil
+	return latest - confirmationU64, nil
 }

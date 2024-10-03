@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -40,37 +41,35 @@ type transactableOPLegacy struct {
 }
 
 func (op *oplegacy) Logger(base log.Logger) log.Logger {
-	return base.New("scc", op.RollupContract())
+	return base.New("chain-id", fmt.Sprint(op.ChainID()), "op-version", "v0")
 }
 
 func (op *oplegacy) EventDB() database.IOPEventDB {
 	return database.NewOPEventDB[database.OptimismState](op.DB())
 }
 
-func (op *oplegacy) NextIndex(opts *bind.CallOpts) (*big.Int, error) {
-	sc, err := scc.NewScc(op.RollupContract(), op.L1Client())
+func (op *oplegacy) NextIndex(opts *bind.CallOpts) (uint64, error) {
+	sc, err := newSccContract(op)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return sc.NextIndex(opts)
+	b, err := sc.NextIndex(opts)
+	if err != nil {
+		return 0, err
+	}
+	return b.Uint64(), nil
 }
 
-func (op *oplegacy) NextIndexWithConfirm(opts *bind.CallOpts, confirmation uint64, waits bool) (*big.Int, error) {
-	var err error
-	if opts.BlockNumber, err = decideConfirmationBlockNumber(opts, confirmation, op.L1Client()); err != nil {
-		if errors.Is(err, ErrNotSufficientConfirmations) && waits {
-			// wait for the next block, then retry
-			time.Sleep(10 * time.Second)
-			return op.NextIndexWithConfirm(opts, confirmation, waits)
-		}
-		return nil, err
-	}
-
-	sc, err := scc.NewScc(op.RollupContract(), op.L1Client())
+func (op *oplegacy) EventEmittedBlock(opts *bind.FilterOpts, rollupIndex uint64) (uint64, error) {
+	sc, err := newSccContract(op)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return sc.NextIndex(opts)
+	e, err := findStateBatchAppendedEvent(sc, opts, rollupIndex)
+	if err != nil {
+		return 0, err
+	}
+	return e.Raw.BlockNumber, nil
 }
 
 func (op *oplegacy) WithVerifiable(l2Client ethutil.Client) VerifiableVerse {
@@ -150,7 +149,7 @@ func (op *transactableOPLegacy) Transact(
 	approved bool,
 	signatures [][]byte,
 ) (*types.Transaction, error) {
-	sc, err := scc.NewScc(op.RollupContract(), op.L1Client())
+	sc, err := newSccContract(op)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +159,7 @@ func (op *transactableOPLegacy) Transact(
 		return nil, err
 	}
 
-	e, err := findStateBatchAppendedEvent(opts.Context, sc, rollupIndex)
+	e, err := findStateBatchAppendedEvent(sc, &bind.FilterOpts{Context: opts.Context}, rollupIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -257,13 +256,15 @@ func CalcMerkleRoot(elements [][32]byte) ([32]byte, error) {
 	return elements[0], nil
 }
 
+func newSccContract(op Verse) (*scc.Scc, error) {
+	return scc.NewScc(op.RollupContract(), op.L1Client())
+}
+
 func findStateBatchAppendedEvent(
-	ctx context.Context,
 	scc *scc.Scc,
+	opts *bind.FilterOpts,
 	batchIndex uint64,
 ) (event *scc.SccStateBatchAppended, err error) {
-	opts := &bind.FilterOpts{Context: ctx}
-
 	iter, err := scc.FilterStateBatchAppended(
 		opts, []*big.Int{new(big.Int).SetUint64(batchIndex)})
 	if err != nil {
@@ -282,7 +283,7 @@ func findStateBatchAppendedEvent(
 	}
 
 	if event == nil {
-		err = errors.New("not found")
+		err = ErrEventNotFound
 	}
 	return event, err
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -31,8 +32,10 @@ type Client interface {
 	bind.ContractBackend
 	bind.DeployBackend
 
+	Close()
 	URL() string
 	BlockNumber(ctx context.Context) (uint64, error)
+	HeaderWithCache(ctx context.Context) (*types.Header, error)
 	TransactionByHash(
 		ctx context.Context,
 		hash common.Hash,
@@ -55,13 +58,16 @@ type SignableClient interface {
 type client struct {
 	*ethclient.Client
 
-	url string
-	rpc *rpc.Client
+	url       string
+	blockTime time.Duration
+	rpc       *rpc.Client
 	// used for api rate thottling.
 	sem *semaphore.Weighted
+
+	headerCache atomic.Pointer[types.Header]
 }
 
-func NewClient(url string) (Client, error) {
+func NewClient(url string, blockTime time.Duration) (Client, error) {
 	c, err := rpc.Dial(url)
 	if err != nil {
 		return nil, err
@@ -71,11 +77,16 @@ func NewClient(url string) (Client, error) {
 	// semaphore is used for log filtering rate thottling for now.
 	const concurrency = 2
 	return &client{
-		Client: ethclient.NewClient(c),
-		url:    url,
-		rpc:    c,
-		sem:    semaphore.NewWeighted(concurrency),
+		Client:    ethclient.NewClient(c),
+		url:       url,
+		blockTime: blockTime,
+		rpc:       c,
+		sem:       semaphore.NewWeighted(concurrency),
 	}, nil
+}
+
+func (c *client) Close() {
+	c.rpc.Close()
 }
 
 func (c *client) URL() string {
@@ -123,6 +134,24 @@ func (c *client) NewBatchHeaderClient() (BatchHeaderClient, error) {
 
 func (c *client) GetProof(ctx context.Context, account common.Address, keys []string, blockNumber *big.Int) (*gethclient.AccountResult, error) {
 	return gethclient.New(c.rpc).GetProof(ctx, account, keys, blockNumber)
+}
+
+func (c *client) HeaderWithCache(ctx context.Context) (*types.Header, error) {
+	if c.blockTime == 0 {
+		return c.HeaderByNumber(ctx, nil)
+	}
+
+	cache := c.headerCache.Load()
+	if cache != nil && time.Unix(int64(cache.Time), 0).Add(c.blockTime).After(time.Now()) {
+		return cache, nil
+	}
+
+	if latest, err := c.HeaderByNumber(ctx, nil); err != nil {
+		return nil, err
+	} else {
+		c.headerCache.Store(latest)
+		return latest, nil
+	}
 }
 
 type signableClient struct {
