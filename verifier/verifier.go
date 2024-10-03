@@ -97,6 +97,10 @@ func (w *Verifier) Start(ctx context.Context) {
 		wp.Start()
 		defer wp.Stop()
 
+		// Every hour, remove Verse that were deleted from the pool from the local cache as well.
+		cacheCleanupTick := time.NewTicker(time.Hour)
+		defer cacheCleanupTick.Stop()
+
 		tick := time.NewTicker(verificationInterval)
 		defer tick.Stop()
 
@@ -108,6 +112,20 @@ func (w *Verifier) Start(ctx context.Context) {
 			case <-ctx.Done():
 				log.Info("Verification workers stopped")
 				return
+			case <-cacheCleanupTick.C:
+				w.tasks.Range(func(cacheKey common.Address, task *taskT) bool {
+					_, exists := w.versepool.Get(cacheKey)
+
+					// Not delete if the last task has not completed.
+					_, isRunning := running.Load(cacheKey)
+
+					if !exists && !isRunning {
+						task.verse.Logger(w.log).Info("Close connection and delete task cache")
+						task.verse.L2Client().Close()
+						w.tasks.Delete(cacheKey)
+					}
+					return true
+				})
 			case <-tick.C:
 				w.versepool.Range(func(item *verse.VersePoolItem) bool {
 					log := item.Verse().Logger(w.log)

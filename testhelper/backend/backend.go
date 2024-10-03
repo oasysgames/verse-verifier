@@ -37,6 +37,10 @@ type Backend struct {
 	*simulated.Backend
 }
 
+func (c *Backend) Close() {
+	c.Backend.Close()
+}
+
 func (b *Backend) FilterLogsWithRateThottling(ctx context.Context, q ethereum.FilterQuery) (logs []types.Log, err error) {
 	return b.FilterLogs(ctx, q)
 }

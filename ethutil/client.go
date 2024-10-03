@@ -32,6 +32,7 @@ type Client interface {
 	bind.ContractBackend
 	bind.DeployBackend
 
+	Close()
 	URL() string
 	BlockNumber(ctx context.Context) (uint64, error)
 	HeaderWithCache(ctx context.Context) (*types.Header, error)
@@ -74,7 +75,6 @@ func NewClient(url string, blockTime time.Duration) (Client, error) {
 
 	// This is magic number, it should be updated based on the network.
 	// semaphore is used for log filtering rate thottling for now.
-	// ethclient.NewClient(c).SendTransaction
 	const concurrency = 2
 	return &client{
 		Client:    ethclient.NewClient(c),
@@ -83,6 +83,10 @@ func NewClient(url string, blockTime time.Duration) (Client, error) {
 		rpc:       c,
 		sem:       semaphore.NewWeighted(concurrency),
 	}, nil
+}
+
+func (c *client) Close() {
+	c.rpc.Close()
 }
 
 func (c *client) URL() string {

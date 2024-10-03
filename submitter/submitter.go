@@ -85,15 +85,28 @@ func (w *Submitter) Start(ctx context.Context) {
 	// Manage running tasks to prevent dups.
 	var running util.SyncMap[common.Address, time.Time]
 
-	tick := time.NewTicker(w.cfg.Interval)
-	defer tick.Stop()
+	// Every hour, remove Verse that were deleted from the pool from the local cache as well.
+	cacheCleanupTick := time.NewTicker(time.Hour)
+	defer cacheCleanupTick.Stop()
+
+	workTick := time.NewTicker(w.cfg.Interval)
+	defer workTick.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info("Submitter stopped")
 			return
-		case <-tick.C:
+		case <-cacheCleanupTick.C:
+			w.tasks.Range(func(cacheKey common.Address, task *taskT) bool {
+				_, exists := w.versepool.Get(cacheKey)
+				if !exists {
+					task.verse.Logger(w.log).Info("Delete task cache")
+					w.tasks.Delete(cacheKey)
+				}
+				return true
+			})
+		case <-workTick.C:
 			w.versepool.Range(func(item *verse.VersePoolItem) bool {
 				if !item.CanSubmit() {
 					return true
