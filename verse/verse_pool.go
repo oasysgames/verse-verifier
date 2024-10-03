@@ -167,7 +167,7 @@ func (pool *versePool) NextIndex(
 			fsbCache = nil
 		}
 	}
-	if fsbCache == nil {
+	if fsbCache == nil && ni > 0 {
 		// Get one previous event since the event matching the next index may not have been emitted yet.
 		previ := ni - 1
 		emitted, err := pool.EventEmittedBlock(ctx, contract, previ, confirmation, true)
