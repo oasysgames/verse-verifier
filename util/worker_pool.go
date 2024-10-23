@@ -184,8 +184,8 @@ func (wp *WorkerPool[T]) clean(scratch *[]*workerChan[T]) {
 // `workerReleaseCheckInterval` is set to zero, it will immediately return false.
 // Otherwise, the call will be blocked until it is canceled.  Jobs are executed
 // asynchronously, so if you want to do something when the job finishes, pass `cleanup`.
-// Note: The worker will not be released until the cleanup completes, so please
-// avoid performing long take tasks.
+// Note: `cleanup` will still be called even if there are no idle workers.
+// Also, since workers are not released until `cleanup` is complete, long-running tasks are not recommended.
 func (wp *WorkerPool[T]) Work(ctx context.Context, data T, cleanup workerPoolJobCleanupFn[T]) bool {
 	waitTick, waitTimeout := wp.getWorkerReleaseTimers()
 	if waitTick != nil {
@@ -193,8 +193,9 @@ func (wp *WorkerPool[T]) Work(ctx context.Context, data T, cleanup workerPoolJob
 	}
 
 	var ch *workerChan[T]
+LOOP:
 	for {
-		ch = wp.getCh(ctx)
+		ch = wp.getCh()
 		if ch != nil || waitTick == nil {
 			break
 		}
@@ -206,12 +207,13 @@ func (wp *WorkerPool[T]) Work(ctx context.Context, data T, cleanup workerPoolJob
 
 		select {
 		case <-ctx.Done():
-			return false
+			break LOOP
 		case <-waitTick.C:
 		}
 	}
 
 	if ch == nil {
+		cleanup(ctx, data)
 		return false
 	}
 	ch.ch <- &workerPoolJob[T]{ctx: ctx, data: data, cleanup: cleanup}
@@ -232,7 +234,7 @@ var workerChanCap = func() int {
 	return 1
 }()
 
-func (wp *WorkerPool[T]) getCh(ctx context.Context) *workerChan[T] {
+func (wp *WorkerPool[T]) getCh() *workerChan[T] {
 	var ch *workerChan[T]
 	createWorker := false
 

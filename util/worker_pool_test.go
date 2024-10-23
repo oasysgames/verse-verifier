@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -185,12 +186,13 @@ func TestWorkerPool_Cleanup(t *testing.T) {
 	workerReleaseCheckInterval := time.Millisecond
 	workerReleaseCheckTimeout := workerReleaseCheckInterval * 2
 
-	var handlerCalled, cleanupCalled int
-	handler := func(ctx context.Context, job int) {
-		handlerCalled = job
+	var handlerCalled, cleanupCalled atomic.Int32
+	handler := func(ctx context.Context, job int32) {
+		handlerCalled.Add(job)
 	}
-	cleanup := func(ctx context.Context, job int) {
-		cleanupCalled = job
+	cleanup := func(ctx context.Context, job int32) {
+		cleanupCalled.Add(job)
+		time.Sleep(time.Second)
 	}
 
 	wp := NewWorkerPool(log.Root(), handler, maxWorkers, maxIdle,
@@ -199,8 +201,11 @@ func TestWorkerPool_Cleanup(t *testing.T) {
 	defer wp.Stop()
 
 	assert.True(wp.Work(context.Background(), 1, cleanup))
-	time.Sleep(time.Microsecond * 100)
+	time.Sleep(time.Millisecond)
 
-	assert.Equal(1, handlerCalled)
-	assert.Equal(1, cleanupCalled)
+	// should be cleaned up even if there are no idle workers.
+	assert.False(wp.Work(context.Background(), 2, cleanup))
+
+	assert.Equal(int32(1), handlerCalled.Load())
+	assert.Equal(int32(3), cleanupCalled.Load())
 }
