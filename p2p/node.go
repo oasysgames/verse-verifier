@@ -27,6 +27,7 @@ import (
 	meter "github.com/oasysgames/oasys-optimism-verifier/metrics"
 	pb "github.com/oasysgames/oasys-optimism-verifier/proto/p2p/v1/gen"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
+	"github.com/oasysgames/oasys-optimism-verifier/verse"
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
@@ -56,6 +57,7 @@ type Node struct {
 	hubLayerChainID *big.Int
 	ignoreSigners   map[common.Address]int
 	stakemanager    *stakemanager.Cache
+	versepool       verse.VersePool
 
 	topic *ps.Topic
 	sub   *ps.Subscription
@@ -97,6 +99,7 @@ func NewNode(
 	hubLayerChainID uint64,
 	ignoreSigners []common.Address,
 	stakemanager *stakemanager.Cache,
+	versepool verse.VersePool,
 ) (*Node, error) {
 	_, topic, sub, err := setupPubSub(context.Background(), host, pubsubTopic)
 	if err != nil {
@@ -113,6 +116,7 @@ func NewNode(
 		hubLayerChainID: new(big.Int).SetUint64(hubLayerChainID),
 		ignoreSigners:   map[common.Address]int{},
 		stakemanager:    stakemanager,
+		versepool:       versepool,
 		topic:           topic,
 		sub:             sub,
 		log:             log.New("worker", "p2p"),
@@ -226,13 +230,6 @@ func (w *Node) subscribeLoop(ctx context.Context) {
 		}
 
 		for _, remote := range t.Latests {
-			signer := common.BytesToAddress(remote.Signer)
-			if _, ok := w.ignoreSigners[signer]; ok {
-				continue
-			} else if w.stakemanager.StakeBySigner(signer).Cmp(ethutil.TenMillionOAS) == -1 {
-				continue
-			}
-
 			w.handleOptimismSignatureExchangeFromPubSub(ctx, peer, remote)
 		}
 	}
@@ -285,6 +282,19 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	remote *pb.OptimismSignature,
 ) bool {
 	signer := common.BytesToAddress(remote.Signer)
+	contract := common.BytesToAddress(remote.Contract)
+	if _, ok := w.ignoreSigners[signer]; ok {
+		return false
+	}
+	// Receive only signatures targeted by the Submitter.
+	if verse, ok := w.versepool.Get(contract); !ok || !verse.CanSubmit() {
+		return false
+	}
+	// Receive signatures only from signers with stake >= validator candidate minimum.
+	if w.stakemanager.StakeBySigner(signer).Cmp(ethutil.TenMillionOAS) == -1 {
+		return false
+	}
+
 	logctx := []interface{}{
 		"peer", sender,
 		"signer", signer,
@@ -313,7 +323,7 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 	if _, err := w.db.OPSignature.Save(
 		&remote.Id, &remote.PreviousId,
 		signer,
-		common.BytesToAddress(remote.Contract),
+		contract,
 		remote.RollupIndex,
 		common.BytesToHash(remote.RollupHash),
 		remote.Approved,
