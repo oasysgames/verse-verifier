@@ -213,7 +213,9 @@ LOOP:
 	}
 
 	if ch == nil {
-		cleanup(ctx, data)
+		if cleanup != nil {
+			cleanup(ctx, data)
+		}
 		return false
 	}
 	ch.ch <- &workerPoolJob[T]{ctx: ctx, data: data, cleanup: cleanup}
