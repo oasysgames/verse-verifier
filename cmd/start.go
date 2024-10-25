@@ -288,7 +288,7 @@ func (s *server) mustStartP2P(ctx context.Context, ipc *ipc.IPCServer) {
 	}
 
 	s.p2p, err = p2p.NewNode(&s.conf.P2P, s.db, host, dht, bwm,
-		hpHelper, s.conf.HubLayer.ChainID, ignoreSigners, s.smcache)
+		hpHelper, s.conf.HubLayer.ChainID, ignoreSigners, s.smcache, s.versepool)
 	if err != nil {
 		log.Crit("Failed to construct p2p node", "err", err)
 	}

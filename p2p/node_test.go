@@ -20,6 +20,7 @@ import (
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper/backend"
 	"github.com/oasysgames/oasys-optimism-verifier/util"
+	"github.com/oasysgames/oasys-optimism-verifier/verse"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -30,8 +31,10 @@ func TestNode(t *testing.T) {
 type NodeTestSuite struct {
 	testhelper.Suite
 
+	db           *database.Database
 	baseTime     time.Time
 	stakemanager *stakemanager.Cache
+	versepool    verse.VersePool
 	b0, b1, b2   *backend.SignableBackend
 
 	signer0,
@@ -73,6 +76,10 @@ func (s *NodeTestSuite) SetupTest() {
 		sm.Candidates = append(sm.Candidates, true)
 	}
 	s.stakemanager.Refresh(context.Background())
+
+	// setup verse pool
+	s.versepool = verse.NewVersePool(s.b0)
+	s.versepool.Add(verse.NewOPLegacy(s.db, s.b0, 0, "http://rpc.example.com", s.contract0, s.RandAddress()), true)
 
 	// setup libp2p
 	s.bootnode = s.newWorker([]string{})
@@ -417,7 +424,7 @@ func (s *NodeTestSuite) TestPublishLatestSignatures() {
 
 func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 	// Setup database.
-	db, _ := database.NewDatabase(&config.Database{Path: ":memory:"})
+	s.db, _ = database.NewDatabase(&config.Database{Path: ":memory:"})
 
 	// Setup libp2p.
 	priv, _, _, _ := GenerateKeyPair()
@@ -437,8 +444,8 @@ func (s *NodeTestSuite) newWorker(bootnodes []string) *Node {
 	cfg.InboundLimits.MaxSendTime = time.Second * 5
 	host, dht, bwm, hpHelper, _ := NewHost(context.Background(), cfg, priv)
 
-	worker, _ := NewNode(cfg, db, host, dht, bwm, hpHelper,
-		s.b0.ChainID().Uint64(), []common.Address{}, s.stakemanager)
+	worker, _ := NewNode(cfg, s.db, host, dht, bwm, hpHelper,
+		s.b0.ChainID().Uint64(), []common.Address{}, s.stakemanager, s.versepool)
 	host.SetStreamHandler(streamProtocol,
 		worker.newStreamHandler(context.Background()))
 
