@@ -29,11 +29,12 @@ func (b *StakeManagerMock) GetValidators(
 	callOpts *bind.CallOpts,
 	epoch, cursol, howMany *big.Int,
 ) (struct {
-	Owners     []common.Address
-	Operators  []common.Address
-	Stakes     []*big.Int
-	Candidates []bool
-	NewCursor  *big.Int
+	Owners        []common.Address
+	Operators     []common.Address
+	Stakes        []*big.Int
+	BlsPublicKeys [][]byte
+	Candidates    []bool
+	NewCursor     *big.Int
 }, error) {
 	length := big.NewInt(int64(len(b.Owners)))
 	if new(big.Int).Add(cursol, howMany).Cmp(length) >= 0 {
@@ -44,11 +45,12 @@ func (b *StakeManagerMock) GetValidators(
 	end := start + howMany.Uint64()
 
 	ret := struct {
-		Owners     []common.Address
-		Operators  []common.Address
-		Stakes     []*big.Int
-		Candidates []bool
-		NewCursor  *big.Int
+		Owners        []common.Address
+		Operators     []common.Address
+		Stakes        []*big.Int
+		BlsPublicKeys [][]byte
+		Candidates    []bool
+		NewCursor     *big.Int
 	}{
 		Owners:     b.Owners[start:end],
 		Operators:  b.Operators[start:end],
