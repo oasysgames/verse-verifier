@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/big"
 	"sort"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/contract/stakemanager"
@@ -13,6 +14,8 @@ import (
 )
 
 func (s *SubmitterTestSuite) TestSignatureIterator() {
+	ctx := context.Background()
+
 	var signers [20]common.Address
 	for i := range signers {
 		signers[i] = s.RandAddress()
@@ -60,7 +63,7 @@ func (s *SubmitterTestSuite) TestSignatureIterator() {
 
 	// setup stakemanager
 	sm := &testhelper.StakeManagerMock{}
-	smcache := stakemanager.NewCache(sm)
+	smcache := stakemanager.NewCache(sm, time.Millisecond)
 	for _, group := range signerGroups {
 		for i, signer := range group.signers {
 			sm.Owners = append(sm.Owners, s.RandAddress())
@@ -70,7 +73,6 @@ func (s *SubmitterTestSuite) TestSignatureIterator() {
 			sm.Candidates = append(sm.Candidates, true)
 		}
 	}
-	smcache.Refresh(context.Background())
 
 	// save signatures
 	for rollupIndex, c := range sigGroups {
@@ -119,8 +121,8 @@ func (s *SubmitterTestSuite) TestSignatureIterator() {
 	}
 
 	// assert
-	gots0, err0 := iter.next()
-	gots1, err1 := iter.next()
+	gots0, err0 := iter.next(ctx)
+	gots1, err1 := iter.next(ctx)
 
 	s.Nil(err0)
 	s.Nil(err1)
@@ -141,7 +143,8 @@ func (s *SubmitterTestSuite) TestSignatureIterator() {
 	for i := range sm.Operators {
 		sm.Stakes[i] = ethutil.TenMillionOAS
 	}
-	smcache.Refresh(context.Background())
-	_, err := iter.next()
+	time.Sleep(time.Millisecond) // wait for cache to expire
+
+	_, err := iter.next(ctx)
 	s.ErrorContains(err, "stake amount shortage")
 }

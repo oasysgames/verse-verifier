@@ -11,130 +11,78 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+var (
+	totalStakeKey = common.HexToAddress("0xffffffffffffffffffffffffffffffffffffffff")
+)
+
 type IStakeManager interface {
 	GetTotalStake(callOpts *bind.CallOpts, epoch *big.Int) (*big.Int, error)
 
-	GetValidators(callOpts *bind.CallOpts, epoch, cursol, howMany *big.Int) (struct {
-		Owners        []common.Address
-		Operators     []common.Address
-		Stakes        []*big.Int
-		BlsPublicKeys [][]byte
-		Candidates    []bool
-		NewCursor     *big.Int
-	}, error)
+	GetOperatorStakes(callOpts *bind.CallOpts, operator common.Address, epoch *big.Int) (*big.Int, error)
 }
 
 type Cache struct {
-	sm           IStakeManager
-	mu           sync.Mutex
-	total        *big.Int
-	signerStakes map[common.Address]*big.Int
-	candidates   map[common.Address]bool
+	sm      IStakeManager
+	ttl     time.Duration
+	mu      sync.Mutex
+	entries map[common.Address]*cacheEntry
 }
 
-func NewCache(sm IStakeManager) *Cache {
+type cacheEntry struct {
+	amount   *big.Int
+	expireAt time.Time
+}
+
+func NewCache(sm IStakeManager, ttl time.Duration) *Cache {
 	return &Cache{
-		sm:           sm,
-		total:        big.NewInt(0),
-		signerStakes: make(map[common.Address]*big.Int),
+		sm:      sm,
+		ttl:     ttl,
+		entries: make(map[common.Address]*cacheEntry),
 	}
 }
 
-func (c *Cache) RefreshLoop(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+func (c *Cache) TotalStake(ctx context.Context) *big.Int {
+	amount, _ := c.get(totalStakeKey, func() (*big.Int, error) {
+		return c.sm.GetTotalStake(&bind.CallOpts{Context: ctx}, common.Big0)
+	})
+	return amount
+}
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("Stake cache refresh loop stopped")
-			return
-		case <-ticker.C:
-			if err := c.Refresh(ctx); err != nil {
-				log.Error("Failed to refresh", "err", err)
-			}
+func (c *Cache) TotalStakeWithError(ctx context.Context) (*big.Int, error) {
+	return c.get(totalStakeKey, func() (*big.Int, error) {
+		return c.sm.GetTotalStake(&bind.CallOpts{Context: ctx}, common.Big0)
+	})
+}
+
+func (c *Cache) StakeBySigner(ctx context.Context, signer common.Address) *big.Int {
+	amount, _ := c.get(signer, func() (*big.Int, error) {
+		return c.sm.GetOperatorStakes(&bind.CallOpts{Context: ctx}, signer, common.Big0)
+	})
+	return amount
+}
+
+func (c *Cache) get(key common.Address, getAmount func() (*big.Int, error)) (*big.Int, error) {
+	c.mu.Lock()
+	if _, ok := c.entries[key]; !ok {
+		c.entries[key] = &cacheEntry{amount: big.NewInt(0)}
+	}
+	c.mu.Unlock()
+
+	var (
+		cache = c.entries[key]
+		err   error
+	)
+	if time.Now().After(cache.expireAt) {
+		ttl := c.ttl
+		if value, innerErr := getAmount(); innerErr == nil {
+			cache.amount = value
+		} else {
+			log.Error("Failed to refresh", "err", innerErr)
+			err = innerErr
+			ttl /= 10 // prevent requests when RPC is down
 		}
-	}
-}
-
-func (c *Cache) Refresh(parent context.Context) error {
-	ctx, cancel := context.WithTimeout(parent, time.Second*15)
-	defer cancel()
-
-	total, err := c.sm.GetTotalStake(&bind.CallOpts{Context: ctx}, common.Big0)
-	if err != nil {
-		return err
+		cache.expireAt = time.Now().Add(ttl)
 	}
 
-	cursor, howMany := big.NewInt(0), big.NewInt(50)
-	signerStakes := make(map[common.Address]*big.Int)
-	candidates := make(map[common.Address]bool)
-	for {
-		result, err := c.sm.GetValidators(&bind.CallOpts{Context: ctx}, common.Big0, cursor, howMany)
-		if err != nil {
-			return err
-		} else if len(result.Owners) == 0 {
-			break
-		}
-
-		for i, operator := range result.Operators {
-			signerStakes[operator] = result.Stakes[i]
-			candidates[operator] = result.Candidates[i]
-		}
-		cursor = result.NewCursor
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.total = total
-	c.signerStakes = signerStakes
-	c.candidates = candidates
-	return nil
-}
-
-func (c *Cache) TotalStake() *big.Int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return new(big.Int).Set(c.total)
-}
-
-func (c *Cache) SignerStakes() map[common.Address]*big.Int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	cpy := make(map[common.Address]*big.Int)
-	for k, v := range c.signerStakes {
-		cpy[k] = new(big.Int).Set(v)
-	}
-	return cpy
-}
-
-func (c *Cache) StakeBySigner(signer common.Address) *big.Int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if b := c.signerStakes[signer]; b != nil {
-		return new(big.Int).Set(b)
-	}
-	return big.NewInt(0)
-}
-
-func (c *Cache) Candidates() map[common.Address]bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	cpy := make(map[common.Address]bool)
-	for k, v := range c.candidates {
-		cpy[k] = v
-	}
-	return cpy
-}
-
-func (c *Cache) Candidate(signer common.Address) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return c.candidates[signer]
+	return new(big.Int).Set(cache.amount), err
 }

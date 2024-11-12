@@ -4,7 +4,9 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/oasysgames/oasys-optimism-verifier/testhelper"
 	"github.com/stretchr/testify/suite"
 )
@@ -22,7 +24,7 @@ func TestNewCache(t *testing.T) {
 
 func (s *CacheTestSuite) SetupTest() {
 	s.sm = &testhelper.StakeManagerMock{}
-	s.vs = NewCache(s.sm)
+	s.vs = NewCache(s.sm, time.Millisecond*5)
 
 	for i := range s.Range(0, 1000) {
 		s.sm.Owners = append(s.sm.Owners, s.RandAddress())
@@ -32,33 +34,29 @@ func (s *CacheTestSuite) SetupTest() {
 	}
 }
 
-func (s *CacheTestSuite) TestRefresh() {
-	s.Nil(s.vs.Refresh(context.Background()))
+func (s *CacheTestSuite) TestTotalStake() {
+	ctx := context.Background()
 
-	// assert `TotalStake()`
-	s.Equal(big.NewInt(499500), s.vs.TotalStake())
+	s.Equal(big.NewInt(499500), s.vs.TotalStake(ctx))
 
-	// assert `SignerStakes()`
-	signerStakes := s.vs.SignerStakes()
-	s.Len(signerStakes, len(s.sm.Operators))
+	s.sm.Stakes[0] = new(big.Int).Add(s.sm.Stakes[0], common.Big1)
+	s.Equal(big.NewInt(499500), s.vs.TotalStake(ctx))
+
+	time.Sleep(time.Millisecond * 10)
+	s.Equal(big.NewInt(499501), s.vs.TotalStake(ctx))
+}
+
+func (s *CacheTestSuite) TestStakeBySigner() {
+	ctx := context.Background()
+
 	for i, signer := range s.sm.Operators {
-		s.Equal(s.sm.Stakes[i], signerStakes[signer])
+		s.Equal(s.sm.Stakes[i], s.vs.StakeBySigner(ctx, signer))
 	}
 
-	// assert `StakeBySigner(common.Address)`
-	for i, signer := range s.sm.Operators {
-		s.Equal(s.sm.Stakes[i], s.vs.StakeBySigner(signer))
-	}
+	old := new(big.Int).Set(s.sm.Stakes[0])
+	s.sm.Stakes[0] = new(big.Int).Add(s.sm.Stakes[0], common.Big1)
+	s.Equal(old, s.vs.StakeBySigner(ctx, s.sm.Operators[0]))
 
-	// assert `Candidates()`
-	candidates := s.vs.Candidates()
-	s.Len(candidates, len(s.sm.Operators))
-	for i, signer := range s.sm.Operators {
-		s.Equal(s.sm.Candidates[i], candidates[signer])
-	}
-
-	// assert `Candidate(common.Address)`
-	for i, signer := range s.sm.Operators {
-		s.Equal(s.sm.Candidates[i], s.vs.Candidate(signer))
-	}
+	time.Sleep(time.Millisecond * 10)
+	s.Equal(s.sm.Stakes[0], s.vs.StakeBySigner(ctx, s.sm.Operators[0]))
 }
