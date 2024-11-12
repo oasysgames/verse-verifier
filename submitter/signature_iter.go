@@ -1,6 +1,7 @@
 package submitter
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sort"
@@ -18,14 +19,14 @@ type signatureIterator struct {
 	rollupIndex  uint64
 }
 
-func (si *signatureIterator) next() ([]*database.OptimismSignature, error) {
+func (si *signatureIterator) next(ctx context.Context) ([]*database.OptimismSignature, error) {
 	rows, err := si.db.OPSignature.Find(nil, nil, &si.contract, &si.rollupIndex, 1000, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err = filterSignatures(rows, ethutil.TenMillionOAS,
-		si.stakemanager.TotalStake(), si.stakemanager.SignerStakes())
+	rows, err = filterSignatures(rows, ethutil.TenMillionOAS, si.stakemanager.TotalStake(ctx),
+		func(signer common.Address) *big.Int { return si.stakemanager.StakeBySigner(ctx, signer) })
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +38,7 @@ func (si *signatureIterator) next() ([]*database.OptimismSignature, error) {
 func filterSignatures(
 	rows []*database.OptimismSignature,
 	minStake, totalStake *big.Int,
-	signerStakes map[common.Address]*big.Int,
+	stakeBySigner func(signer common.Address) *big.Int,
 ) (filterd []*database.OptimismSignature, err error) {
 	// group by RollupHash and Approved
 	type group struct {
@@ -45,12 +46,14 @@ func filterSignatures(
 		rows  []*database.OptimismSignature
 	}
 	groups := map[string]*group{}
+	signerStakes := map[common.Address]*big.Int{}
 
 	for _, row := range rows {
-		stake, ok := signerStakes[row.Signer.Address]
-		if !ok || stake.Cmp(minStake) == -1 {
+		stake := stakeBySigner(row.Signer.Address)
+		if stake.Cmp(minStake) == -1 {
 			continue
 		}
+		signerStakes[row.Signer.Address] = stake
 
 		key := fmt.Sprintf("%s:%v", row.RollupHash, row.Approved)
 		if _, ok := groups[key]; !ok {

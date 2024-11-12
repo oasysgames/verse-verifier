@@ -262,7 +262,7 @@ func (w *Submitter) sendNormalTx(
 	task verse.TransactableVerse,
 	iter *signatureIterator,
 ) (*types.Transaction, error) {
-	rows, err := iter.next()
+	rows, err := iter.next(ctx)
 	if err != nil {
 		log.Error("Failed to find signatures", "err", err)
 		return nil, err
@@ -330,7 +330,7 @@ func (w *Submitter) sendMulticallTx(
 		errShortage error
 	)
 	for i := 0; i < w.cfg.BatchSize; i++ {
-		rows, err := iter.next()
+		rows, err := iter.next(ctx)
 		if _, ok := err.(*StakeAmountShortage); ok {
 			errShortage = err
 			break

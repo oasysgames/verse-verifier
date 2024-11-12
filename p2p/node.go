@@ -291,7 +291,7 @@ func (w *Node) handleOptimismSignatureExchangeFromPubSub(
 		return false
 	}
 	// Receive signatures only from signers with stake >= validator candidate minimum.
-	if w.stakemanager.StakeBySigner(signer).Cmp(ethutil.TenMillionOAS) == -1 {
+	if w.stakemanager.StakeBySigner(ctx, signer).Cmp(ethutil.TenMillionOAS) == -1 {
 		return false
 	}
 
@@ -370,7 +370,7 @@ func (w *Node) handleOptimismSignatureExchangeRequest(
 
 	for _, req := range requests {
 		signer := common.BytesToAddress(req.Signer)
-		if w.stakemanager.StakeBySigner(signer).Cmp(ethutil.TenMillionOAS) == -1 {
+		if w.stakemanager.StakeBySigner(ctx, signer).Cmp(ethutil.TenMillionOAS) == -1 {
 			continue
 		}
 
@@ -652,7 +652,7 @@ func (w *Node) publishLatestSignatures(ctx context.Context) {
 	}
 	filterd := []*database.OptimismSignature{}
 	for _, sig := range latests {
-		if w.stakemanager.StakeBySigner(sig.Signer.Address).Cmp(ethutil.TenMillionOAS) >= 0 {
+		if w.stakemanager.StakeBySigner(ctx, sig.Signer.Address).Cmp(ethutil.TenMillionOAS) >= 0 {
 			filterd = append(filterd, sig)
 		}
 	}

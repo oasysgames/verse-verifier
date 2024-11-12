@@ -25,39 +25,15 @@ func (b *StakeManagerMock) GetTotalStake(
 	return tot, nil
 }
 
-func (b *StakeManagerMock) GetValidators(
+func (b *StakeManagerMock) GetOperatorStakes(
 	callOpts *bind.CallOpts,
-	epoch, cursol, howMany *big.Int,
-) (struct {
-	Owners        []common.Address
-	Operators     []common.Address
-	Stakes        []*big.Int
-	BlsPublicKeys [][]byte
-	Candidates    []bool
-	NewCursor     *big.Int
-}, error) {
-	length := big.NewInt(int64(len(b.Owners)))
-	if new(big.Int).Add(cursol, howMany).Cmp(length) >= 0 {
-		howMany = new(big.Int).Sub(length, cursol)
+	operator common.Address,
+	epoch *big.Int,
+) (*big.Int, error) {
+	for i, addr := range b.Operators {
+		if addr == operator {
+			return b.Stakes[i], nil
+		}
 	}
-
-	start := cursol.Uint64()
-	end := start + howMany.Uint64()
-
-	ret := struct {
-		Owners        []common.Address
-		Operators     []common.Address
-		Stakes        []*big.Int
-		BlsPublicKeys [][]byte
-		Candidates    []bool
-		NewCursor     *big.Int
-	}{
-		Owners:     b.Owners[start:end],
-		Operators:  b.Operators[start:end],
-		Stakes:     b.Stakes[start:end],
-		Candidates: b.Candidates[start:end],
-		NewCursor:  new(big.Int).Add(cursol, howMany),
-	}
-
-	return ret, nil
+	return big.NewInt(0), nil
 }

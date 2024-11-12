@@ -62,7 +62,7 @@ func (s *SubmitterTestSuite) SetupTest() {
 		UseMulticall:     true, // TODO: No single tx testing
 		MulticallAddress: s.MulticallAddr.String(),
 	}
-	s.submitter = NewSubmitter(s.cfg, s.DB, nil, stakemanager.NewCache(s.StakeManager), s.versepool)
+	s.submitter = NewSubmitter(s.cfg, s.DB, nil, stakemanager.NewCache(s.StakeManager, time.Hour), s.versepool)
 	s.submitter.l1SignerFn = func(chainID uint64) ethutil.SignableClient {
 		return s.SignableHub
 	}
@@ -96,8 +96,8 @@ func (s *SubmitterTestSuite) TestSubmit() {
 		// no more signatures than the minimum stake should be sent
 		sort.Slice(signatures[i], func(j, h int) bool {
 			// sort by stake amount
-			a := s.submitter.stakemanager.StakeBySigner(signatures[i][j].Signer.Address)
-			b := s.submitter.stakemanager.StakeBySigner(signatures[i][h].Signer.Address)
+			a := s.submitter.stakemanager.StakeBySigner(ctx, signatures[i][j].Signer.Address)
+			b := s.submitter.stakemanager.StakeBySigner(ctx, signatures[i][h].Signer.Address)
 			return a.Cmp(b) == 1 // order by desc
 		})
 		signatures[i] = signatures[i][:6]
@@ -114,7 +114,6 @@ func (s *SubmitterTestSuite) TestSubmit() {
 	}
 
 	// submitter do the work.
-	s.submitter.stakemanager.Refresh(ctx)
 	go s.submitter.Start(ctx)
 	time.Sleep(s.cfg.Interval * 2)
 	s.Hub.Commit()
@@ -178,7 +177,6 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 	signers := s.StakeManager.Operators
 
 	// Start submitter by adding task
-	s.submitter.stakemanager.Refresh(ctx)
 	go s.submitter.Start(ctx)
 	// Dry run to cover no signature case
 	// Manually confirmed by checking the logs
@@ -230,8 +228,8 @@ func (s *SubmitterTestSuite) TestStartSubmitter() {
 		// no more signatures than the minimum stake should be sent
 		sort.Slice(signatures[i], func(j, h int) bool {
 			// sort by stake amount
-			a := s.submitter.stakemanager.StakeBySigner(signatures[i][j].Signer.Address)
-			b := s.submitter.stakemanager.StakeBySigner(signatures[i][h].Signer.Address)
+			a := s.submitter.stakemanager.StakeBySigner(ctx, signatures[i][j].Signer.Address)
+			b := s.submitter.stakemanager.StakeBySigner(ctx, signatures[i][h].Signer.Address)
 			return a.Cmp(b) == 1 // order by desc
 		})
 		signatures[i] = signatures[i][:6]

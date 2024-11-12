@@ -86,15 +86,10 @@ func runStartCmd(cmd *cobra.Command, args []string) {
 	s.mustSetupBeacon()
 
 	// Fetch the total stake and the stakes synchronously
-	if err := s.smcache.Refresh(ctx); err != nil {
+	if _, err := s.smcache.TotalStakeWithError(ctx); err != nil {
 		// Exit if the first refresh faild, because the following refresh higly likely fail
 		log.Crit("Failed to refresh stake cache", "err", err)
 	}
-	// start cache updater
-	go func() {
-		// NOTE: Don't add wait group, as no need to guarantee the completion
-		s.smcache.RefreshLoop(ctx, time.Hour)
-	}()
 
 	s.startVerseDiscovery(ctx)
 	s.startBeacon(ctx)
@@ -202,7 +197,7 @@ func mustNewServer(ctx context.Context) *server {
 	if err != nil {
 		log.Crit("Failed to construct StakeManager", "err", err)
 	}
-	s.smcache = stakemanager.NewCache(sm)
+	s.smcache = stakemanager.NewCache(sm, time.Hour)
 
 	return s
 }

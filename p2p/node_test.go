@@ -68,14 +68,13 @@ func (s *NodeTestSuite) SetupTest() {
 
 	// setup stakemanager mock
 	sm := &testhelper.StakeManagerMock{}
-	s.stakemanager = stakemanager.NewCache(sm)
+	s.stakemanager = stakemanager.NewCache(sm, time.Hour)
 	for _, signer := range signers {
 		sm.Owners = append(sm.Owners, s.RandAddress())
 		sm.Operators = append(sm.Operators, signer)
 		sm.Stakes = append(sm.Stakes, ethutil.TenMillionOAS)
 		sm.Candidates = append(sm.Candidates, true)
 	}
-	s.stakemanager.Refresh(context.Background())
 
 	// setup verse pool
 	s.versepool = verse.NewVersePool(s.b0)
