@@ -97,7 +97,12 @@ func (op *verifiableOPStack) Verify(
 		return false, err
 	}
 
-	return bytes.Equal(row.OutputRoot[:], output.OutputRoot().Bytes()), nil
+	approval := bytes.Equal(row.OutputRoot[:], output.OutputRoot().Bytes())
+	if !approval {
+		base.Warn("Output root mismatch", "row-OutputRoot", row.OutputRoot.Hex(), "output-OutputRoot", output.OutputRoot().Hex(), "contract", row.Contract.Address.Hex(), "l2blocknumber", row.L2BlockNumber, "l1timestamp", row.L1Timestamp)
+	}
+
+	return approval, nil
 }
 
 func (op *transactableOPStack) Transact(
