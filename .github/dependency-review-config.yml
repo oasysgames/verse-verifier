@@ -1,9 +1,5 @@
-allow-dependencies:
-  # dependencies from go-ethereum v1.15.3
-  # Source: https://github.com/ethereum/go-ethereum/blob/v1.15.3/go.mod#L32
-  - name: "github.com/golang-jwt/jwt/v4"
-    version: "4.5.1"
-  - name: "golang.org/x/crypto"
-    version: "0.32.0"
-  - name: "golang.org/x/net"
-    version: "0.34.0"
+allow-advisories:
+  - GHSA-mh63-6h87-95cp   # github.com/golang-jwt/jwt/v4@4.5.1 の脆弱性
+  - GHSA-hcg3-q754-cr77   # golang.org/x/crypto の DoS 脆弱性
+  - GHSA-qxp5-gwg8-xv66   # golang.org/x/net の HTTP Proxy Bypass
+  - GHSA-vvgc-356p-c3xw   # golang.org/x/net の XSS 脆弱性
