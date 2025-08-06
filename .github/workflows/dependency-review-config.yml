@@ -1,0 +1,9 @@
+allow-dependencies:
+  # dependencies from go-ethereum v1.15.3
+  # Source: https://github.com/ethereum/go-ethereum/blob/v1.15.3/go.mod#L32
+  - name: "github.com/golang-jwt/jwt/v4"
+    version: "4.5.1"
+  - name: "golang.org/x/crypto"
+    version: "0.32.0"
+  - name: "golang.org/x/net"
+    version: "0.34.0"
