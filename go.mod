@@ -215,4 +215,4 @@ require (
 
 replace github.com/libp2p/go-libp2p v0.35.0 => github.com/oasysgames/go-libp2p v0.35.0-patch0
 
-replace github.com/ethereum/go-ethereum v1.15.3 => github.com/tak1827/go-ethereum v1.15.3-patch0
+replace github.com/ethereum/go-ethereum v1.15.3 => github.com/oasysgames/go-ethereum v1.15.3-patch0
