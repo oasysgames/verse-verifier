@@ -34,7 +34,7 @@ jobs:
           restore-keys: ${{ runner.os }}-buildx-
 
       - name: Build and Push
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@v5
         env:
           REGISTRY: ghcr.io
           REPOSITORY: ${{ github.repository }}
@@ -52,7 +52,7 @@ jobs:
 
       - name: Compress Binaries
         run: |
-          (cd binaries/linux_amd64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-amd64.zip 
+          (cd binaries/linux_amd64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-amd64.zip
           (cd binaries/linux_arm64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-arm64.zip
 
       - name: Upload Artifacts
