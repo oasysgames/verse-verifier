@@ -1,5 +1,5 @@
 # Build stage
-FROM  golang:1.22.3-bookworm as builder
+FROM  golang:1.24.6-bookworm as builder
 
 RUN apt update && apt install -y git ca-certificates
 
