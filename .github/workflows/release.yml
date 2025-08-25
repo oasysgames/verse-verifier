@@ -26,15 +26,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cache Docker Layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx
-          restore-keys: ${{ runner.os }}-buildx-
-
       - name: Build and Push
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@v5
         env:
           REGISTRY: ghcr.io
           REPOSITORY: ${{ github.repository }}
@@ -46,13 +39,13 @@ jobs:
           push: true
           set: |
             *.platform=linux/amd64,linux/arm64
-            *.cache-from=type=local,src=/tmp/.buildx-cache
-            *.cache-to=type=local,dest=/tmp/.buildx-cache,mode=max
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
             binaries.output=type=local,dest=./binaries
 
       - name: Compress Binaries
         run: |
-          (cd binaries/linux_amd64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-amd64.zip 
+          (cd binaries/linux_amd64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-amd64.zip
           (cd binaries/linux_arm64  && zip -q - oasvlfy) > oasvlfy-${{ github.ref_name }}-linux-arm64.zip
 
       - name: Upload Artifacts
