@@ -41,14 +41,13 @@ jobs:
           GIT_COMMIT: ${{ github.sha }}
           GIT_VERSION: ${{ github.ref_name }}
           IMAGE_TAGS: ${{ github.ref_name }}
-          BUILDX_CACHE_DIR: /tmp/.buildx-cache-${{ github.run_id }}
         with:
           files: docker-bake.hcl
           push: true
           set: |
             *.platform=linux/amd64,linux/arm64
-            *.cache-from=type=local,src=${{ env.BUILDX_CACHE_DIR }}
-            *.cache-to=type=local,dest=${{ env.BUILDX_CACHE_DIR }},mode=max
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
             binaries.output=type=local,dest=./binaries
 
       - name: Compress Binaries
